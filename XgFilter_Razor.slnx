@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="../XgFilter_Lib/XgFilter_Lib/XgFilter_Lib.csproj" />
+  <Project Path="XgFilter_Razor.Tests/XgFilter_Razor.Tests.csproj" />
+  <Project Path="XgFilter_Razor/XgFilter_Razor.csproj" />
+</Solution>
