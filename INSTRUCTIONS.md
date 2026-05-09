@@ -154,11 +154,6 @@ state").
 
 ## Subproject-internal next steps
 
-- **Land the encapsulation-leak fix.** Single-session cleanup: replace
-  the `@pt` bare-identifier label with `@pt.ToLabel()` and delete the
-  `DecisionTypeLabel` switch (use `@opt.ToLabel()` at the call site).
-  Tracked separately on the umbrella Deferred list — this entry is the
-  subproject-side reminder.
 - **Add a `FilterPanel.razor.cs` code-behind partial.** The `@code`
   block has grown to ~140 lines and would be more navigable as a
   separate `.cs` file mirroring `BgDiag_Razor`'s
