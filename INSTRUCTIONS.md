@@ -144,6 +144,27 @@ state").
   is the canonical adapter, the dual-callback shape was a redundant
   encapsulation leak. Consumers that need a `DecisionFilterSet` call
   `cfg.Build()` themselves — don't reintroduce a parallel callback.
+- **Migration trap (post-design-arc).** The pre-arc API surface
+  (`OnFiltersChanged EventCallback<DecisionFilterSet>`) is gone. A
+  consumer migrating from the pre-arc shape MUST remove the old binding
+  from its Razor markup, not merely add the new one alongside it. Razor
+  does not error or warn on unrecognized component attributes — it
+  silently splats them as additional HTML attributes — so a consumer
+  that retains the stale `OnFiltersChanged="..."` binding compiles
+  clean and renders, but the dead binding still references its handler
+  in C#. The result: stale handler stays alive, downstream wiring
+  (e.g. a Run button gated on the post-arc callback) silently breaks,
+  and the migration appears successful in the UI until the user clicks
+  through. `[EditorRequired]` on `OnFilterConfigChanged` (yields
+  `RZ2012`) catches the *adjacent* bug class — consumer forgot to bind
+  the callback at all — but not this one. **Recommended consumer-side
+  defense:** bUnit integration tests that exercise the wire end-to-end
+  (fire Apply on a hosted `<FilterPanel />`, assert the consumer's
+  downstream state actually flips), not pure compile-time verification.
+  This trap is not hypothetical — the prior consumer-adaptation session
+  in `ExtractFromXgToCsv` hit it exactly, leaving a permanently-disabled
+  Run button on the host's primary export action. Treat the precedent
+  as load-bearing.
 - **`ProcessRequest` and `OutputFormat` were intentionally left
   behind.** The original `Shared/FilterConfig.cs` in
   `ExtractFromXgToCsv.Client` also contained `ProcessRequest` (which
