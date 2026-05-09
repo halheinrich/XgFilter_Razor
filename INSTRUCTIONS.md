@@ -19,12 +19,11 @@ https://github.com/halheinrich/XgFilter_Razor — branch `main`.
 
 ## Depends on
 
-- **XgFilter_Lib** — `DecisionFilterSet`, the seven concrete filters
-  (`PlayerFilter`, `DecisionTypeFilter`, `MatchScoreFilter`,
-  `ErrorRangeFilter`, `MoveNumberFilter`, `PositionTypeFilter`,
-  `PlayTypeFilter`), the enums (`DecisionTypeOption`, `PositionType`,
-  `PlayType`), and the `EnumLabel.ToLabel<TEnum>()` extension. Project
-  reference, not a package.
+- **XgFilter_Lib** — `FilterConfig` (the wire/UI-state DTO with `Build()`
+  factory yielding a `DecisionFilterSet`), `DecisionFilterSet` itself,
+  the enums (`DecisionTypeOption`, `PositionType`, `PlayType`), and the
+  `EnumLabel.ToLabel<TEnum>()` extension. Project reference, not a
+  package.
 - **BgDataTypes_Lib** — referenced explicitly even though
   `FilterPanel.razor` does not use any `BgDataTypes_Lib` type directly
   (XgFilter_Lib brings it in transitively). Explicit because consumers of
@@ -41,8 +40,6 @@ XgFilter_Razor/
   _Imports.razor
   Components/
     FilterPanel.razor                — markup + @code state
-  Shared/
-    FilterConfig.cs                  — JSON DTO mirroring DecisionFilterSet
   wwwroot/
 XgFilter_Razor.Tests/
   XgFilter_Razor.Tests.csproj
@@ -55,9 +52,10 @@ XgFilter_Razor.Tests/
 
 Parallel to `BgDiag_Razor`'s relationship with `BackgammonDiagram_Lib`:
 this subproject lets `XgFilter_Lib` stay free of any Blazor / Razor
-dependency. All filter logic, classification, and enum labels live in the
-core lib; this project only binds those primitives into a Blazor component
-and surfaces the resulting `DecisionFilterSet` via an `EventCallback`.
+dependency. All filter logic, classification, the `FilterConfig` DTO,
+and enum labels live in the core lib; this project only binds those
+primitives into a Blazor component and surfaces the resulting
+`FilterConfig` via an `EventCallback`.
 
 ### Single component: `FilterPanel`
 
@@ -72,21 +70,22 @@ parent can disable a Run button until Apply is clicked. On Apply, the
 component:
 
 1. Persists each control value to `localStorage` via `IJSRuntime`.
-2. Builds a `DecisionFilterSet` and raises `OnFiltersChanged` (consumed
-   by in-memory / WASM filtering paths).
-3. Builds a `FilterConfig` DTO and raises `OnFilterConfigChanged`
-   (consumed by HTTP-POST paths that need a JSON-serializable payload).
+2. Builds a `XgFilter_Lib.Filtering.FilterConfig` and raises
+   `OnFilterConfigChanged`. Consumers that want a `DecisionFilterSet`
+   for in-memory filtering call `cfg.Build()` themselves; consumers that
+   want to POST the configuration to a server send `cfg` as JSON. The
+   single-callback design replaced an earlier dual-callback shape — see
+   the encapsulation note in Pitfalls.
 
 `OnAfterRenderAsync(firstRender: true)` rehydrates state from
 `localStorage` once on first render and calls `StateHasChanged`.
 
-### `FilterConfig` shape
+### `FilterConfig` provenance
 
-`FilterConfig` is a flat DTO with property-per-filter-input, mirroring
-`DecisionFilterSet` for HTTP transport. It is *not* a Razor type —
-hosting it here is provisional. See umbrella Deferred for a possible
-move to `XgFilter_Lib` (or `BgDataTypes_Lib`) once the consumer is
-updated.
+`FilterConfig` lives in `XgFilter_Lib.Filtering`, not here. It is a
+typed-enum, JSON-round-trippable DTO whose `Build()` materialises a
+`DecisionFilterSet`. The Razor `FilterPanel` is purely a producer of
+`FilterConfig` instances — it doesn't define the type.
 
 ### Enum labels
 
@@ -107,38 +106,16 @@ state").
 
 **Parameters (all `EventCallback`):**
 
-- `EventCallback<DecisionFilterSet> OnFiltersChanged` — raised on Apply
-  / Reset with the constructed filter set for in-memory filtering.
-- `EventCallback<FilterConfig> OnFilterConfigChanged` — raised on
-  Apply / Reset with the JSON-serializable mirror DTO.
+- `EventCallback<FilterConfig> OnFilterConfigChanged` — raised on Apply
+  / Reset with the configured `XgFilter_Lib.Filtering.FilterConfig`.
+  Consumers that want a `DecisionFilterSet` call `cfg.Build()`; consumers
+  that want to ship the configuration over the wire serialize `cfg`
+  with `System.Text.Json`.
 - `EventCallback OnFilterDirty` — raised on every input change so the
   parent can disable downstream actions until Apply is clicked.
 
-`FilterConfig` DTO, namespace `XgFilter_Razor.Shared`. Public mutable
-properties: `Players`, `DecisionType` (string), `MatchScores`,
-`ErrorMin`/`ErrorMax`, `MoveNumberMin`/`MoveNumberMax`, `PositionTypes`,
-`PlayTypes`. Designed for `System.Text.Json` round-trip.
-
 ## Pitfalls
 
-- **Two preserved encapsulation leaks — tracked-as-bugs.** This component
-  is a verbatim relocation from
-  `ExtractFromXgToCsv.Client/Components/FilterPanel.razor`; the umbrella
-  Deferred list tracks two known issues that were *intentionally not
-  fixed* in the relocation commit:
-  - `Components/FilterPanel.razor:116` — `<label … for="pt_@pt">@pt</label>`
-    renders the bare `PositionType` identifier instead of
-    `@pt.ToLabel()`. Consistent with the play-type label one section
-    below would use `@pt.ToLabel()`.
-  - `Components/FilterPanel.razor:288-294` — local `DecisionTypeLabel`
-    switch duplicates what `EnumLabel.ToLabel<DecisionTypeOption>()`
-    returns from each member's `[Description]` attribute. The switch
-    should be deleted and replaced with `@opt.ToLabel()` at the call
-    site (`Components/FilterPanel.razor:45`).
-  Both leaks are the same shape: the component reaching past the enum
-  label contract that already lives in `XgFilter_Lib.Enums.EnumLabel`.
-  Fix lands in a follow-up single-session cleanup; preserve until then
-  to keep the relocation diff reviewable as pure relocation.
 - **`IJSRuntime` / localStorage coupling.** `FilterPanel` depends on
   `Microsoft.JSInterop.IJSRuntime` and assumes the host provides a
   browser-style `localStorage` global (Blazor WebAssembly, Blazor
@@ -148,18 +125,28 @@ properties: `Players`, `DecisionType` (string), `MatchScores`,
   subproject paper over this with `JSInterop.Mode = JSRuntimeMode.Loose`
   on `BunitContext`. Real-host consumers must register `IJSRuntime` in
   DI (Blazor's defaults do).
-- **`FilterConfig` is *not* a Razor type.** It's a JSON-serializable
-  DTO that happens to live in this Razor library because that's where
-  the only producer (`FilterPanel`) lives today. Don't add Razor- or
-  Blazor-specific concerns to it; it must remain server-and-client
-  neutral so it can deserialize on the server side too.
+- **JSON round-trip needs `JsonStringEnumConverter`.** Consumers that
+  serialize `FilterConfig` for HTTP transport must register
+  `JsonStringEnumConverter` (e.g. on `JsonSerializerOptions.Converters`
+  or via `[JsonConverter]` attributes) so `DecisionType`, `PositionTypes`,
+  and `PlayTypes` serialize as their string member names rather than
+  underlying integer values. This is the lib's stated contract — see
+  `FilterConfig`'s type-level remarks. The Razor side itself never
+  serializes; it hands typed C# objects via `EventCallback`. The
+  converter requirement applies to the consumer's HTTP plumbing.
 - **Apply, not on-change.** The component does not raise filter-change
   events as the user types — only `OnFilterDirty`. The contract is
   "user thinks, then commits via Apply." Don't wire a downstream
-  consumer to assume `OnFiltersChanged` fires per keystroke.
+  consumer to assume `OnFilterConfigChanged` fires per keystroke.
+- **Single-callback API by design.** The component used to expose two
+  callbacks (`OnFiltersChanged` raising a `DecisionFilterSet` plus
+  `OnFilterConfigChanged` raising the DTO). Now that `FilterConfig.Build()`
+  is the canonical adapter, the dual-callback shape was a redundant
+  encapsulation leak. Consumers that need a `DecisionFilterSet` call
+  `cfg.Build()` themselves — don't reintroduce a parallel callback.
 - **`ProcessRequest` and `OutputFormat` were intentionally left
-  behind.** The source `Shared/FilterConfig.cs` in
-  `ExtractFromXgToCsv.Client` also contains `ProcessRequest` (which
+  behind.** The original `Shared/FilterConfig.cs` in
+  `ExtractFromXgToCsv.Client` also contained `ProcessRequest` (which
   references `OutputFormat`). Both are host-app-specific (CSV / PPTX
   output plumbing) and stay with the host. If a future consumer needs
   to wrap a `FilterConfig` plus output options, define that wrapper in

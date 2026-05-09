@@ -1,7 +1,7 @@
 using Bunit;
+using XgFilter_Lib.Enums;
 using XgFilter_Lib.Filtering;
 using XgFilter_Razor.Components;
-using XgFilter_Razor.Shared;
 
 namespace XgFilter_Razor.Tests;
 
@@ -29,7 +29,6 @@ public class FilterPanelTests : BunitContext
     public void EventCallbacks_AreAccepted()
     {
         var cut = Render<FilterPanel>(parameters => parameters
-            .Add(p => p.OnFiltersChanged, (DecisionFilterSet _) => { })
             .Add(p => p.OnFilterConfigChanged, (FilterConfig _) => { })
             .Add(p => p.OnFilterDirty, () => { }));
 
@@ -37,20 +36,16 @@ public class FilterPanelTests : BunitContext
     }
 
     [Fact]
-    public async Task ApplyButton_RaisesBothCallbacks()
+    public async Task ApplyButton_RaisesFilterConfigCallback()
     {
-        DecisionFilterSet? capturedSet = null;
         FilterConfig? capturedConfig = null;
         var cut = Render<FilterPanel>(parameters => parameters
-            .Add(p => p.OnFiltersChanged, (DecisionFilterSet s) => { capturedSet = s; })
             .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
 
         var applyButton = cut.Find("button.btn-primary");
         await applyButton.ClickAsync(new Microsoft.AspNetCore.Components.Web.MouseEventArgs());
 
-        Assert.NotNull(capturedSet);
         Assert.NotNull(capturedConfig);
-        // Default decision-type radio is "Both"; the DTO mirrors it as a string.
-        Assert.Equal("Both", capturedConfig!.DecisionType);
+        Assert.Equal(DecisionTypeOption.Both, capturedConfig!.DecisionType);
     }
 }

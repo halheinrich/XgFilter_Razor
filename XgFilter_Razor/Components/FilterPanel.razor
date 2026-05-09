@@ -1,12 +1,12 @@
 @using XgFilter_Lib.Filtering
 @using XgFilter_Lib.Enums
-@using XgFilter_Razor.Shared
 @inject IJSRuntime JS
 
 @* ── FilterPanel.razor ───────────────────────────────────────────────────────
-   Owns all filter state. Raises OnFiltersChanged and OnFilterConfigChanged
-   only when "Apply Filter" is clicked (or Reset). Raises OnFilterDirty
-   whenever any control changes, so the parent can disable Run until Apply.
+   Owns all filter state. Raises OnFilterConfigChanged only when "Apply Filter"
+   is clicked (or Reset). Raises OnFilterDirty whenever any control changes, so
+   the parent can disable Run until Apply. Consumers that need a
+   DecisionFilterSet call FilterConfig.Build() on the received config.
    State persisted to localStorage.
    Location: XgFilter_Razor/Components/FilterPanel.razor
 ──────────────────────────────────────────────────────────────────────────── *@
@@ -153,7 +153,6 @@
 </div>
 
 @code {
-    [Parameter] public EventCallback<DecisionFilterSet> OnFiltersChanged { get; set; }
     [Parameter] public EventCallback<FilterConfig> OnFilterConfigChanged { get; set; }
     [Parameter] public EventCallback OnFilterDirty { get; set; }
 
@@ -229,35 +228,17 @@
 
     private async Task RaiseAsync()
     {
-        // Raise DecisionFilterSet for web mode (in-memory filtering)
-        var set = new DecisionFilterSet();
-        var players = SplitTokens(_playerText);
-        if (players.Count > 0) set.Add(new PlayerFilter(players));
-        set.Add(new DecisionTypeFilter(_decisionType));
-        var scores = SplitTokens(_matchScoreText);
-        if (scores.Count > 0) set.Add(new MatchScoreFilter(scores));
-        var min = ParseDouble(_errorMinText);
-        var max = ParseDouble(_errorMaxText);
-        if (min.HasValue || max.HasValue) set.Add(new ErrorRangeFilter(min, max));
-        var moveMin = ParseInt(_moveNumberMinText);
-        var moveMax = ParseInt(_moveNumberMaxText);
-        if (moveMin.HasValue || moveMax.HasValue) set.Add(new MoveNumberFilter(moveMin, moveMax));
-        if (_positionTypes.Count > 0) set.Add(new PositionTypeFilter(_positionTypes));
-        if (_playTypes.Count > 0) set.Add(new PlayTypeFilter(_playTypes));
-        await OnFiltersChanged.InvokeAsync(set);
-
-        // Raise FilterConfig for local mode (HTTP POST)
         var cfg = new FilterConfig
         {
             Players = SplitTokens(_playerText),
-            DecisionType = _decisionType.ToString(),
+            DecisionType = _decisionType,
             MatchScores = SplitTokens(_matchScoreText),
             ErrorMin = ParseDouble(_errorMinText),
             ErrorMax = ParseDouble(_errorMaxText),
             MoveNumberMin = ParseInt(_moveNumberMinText),
             MoveNumberMax = ParseInt(_moveNumberMaxText),
-            PositionTypes = _positionTypes.Select(p => p.ToString()).ToList(),
-            PlayTypes = _playTypes.Select(p => p.ToString()).ToList(),
+            PositionTypes = _positionTypes.ToList(),
+            PlayTypes = _playTypes.ToList(),
         };
         await OnFilterConfigChanged.InvokeAsync(cfg);
     }
