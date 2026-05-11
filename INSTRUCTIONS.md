@@ -65,9 +65,9 @@ number range, position type, and play type. State is held in private
 fields on the component instance.
 
 The component emits filter results only on **Apply** (or **Reset**) — not
-on every keystroke. While the user types, `OnFilterDirty` fires so the
-parent can disable a Run button until Apply is clicked. On Apply, the
-component:
+on every keystroke. On any input change (typing, radio selection,
+checkbox toggle), `OnFilterDirty` fires so the parent can disable a Run
+button until Apply is clicked. On Apply, the component:
 
 1. Persists each control value to `localStorage` via `IJSRuntime`.
 2. Builds a `XgFilter_Lib.Filtering.FilterConfig` and raises
@@ -176,10 +176,9 @@ state").
 ## Subproject-internal next steps
 
 - **Add a `FilterPanel.razor.cs` code-behind partial.** The `@code`
-  block has grown to ~140 lines and would be more navigable as a
-  separate `.cs` file mirroring `BgDiag_Razor`'s
-  `BackgammonDiagram.razor.cs` pattern. Pure refactor; no behaviour
-  change.
+  block runs over 100 lines and would be more navigable as a separate
+  `.cs` file mirroring `BgDiag_Razor`'s `BackgammonDiagram.razor.cs`
+  pattern. Pure refactor; no behaviour change.
 - **Migrate `localStorage` calls behind a `Persistence` abstraction.**
   Once a non-WASM consumer (or a unit-test harness wanting real
   state-rehydration coverage) appears, factor the `localStorage.getItem`
