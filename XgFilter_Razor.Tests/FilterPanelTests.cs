@@ -67,4 +67,53 @@ public class FilterPanelTests : BunitContext
         var cut = Render<FilterPanel>();
         Assert.Contains(expectedLabel, cut.Markup);
     }
+
+    // The single localStorage key the panel persists its whole FilterConfig under.
+    private const string ConfigKey = "xg_filter_config";
+
+    // Round-trips through the single-key persistence path: set a spread of
+    // controls, Apply (which writes one xg_filter_config blob via
+    // FilterConfig.ToJson), then re-mount with the captured blob fed back through
+    // the getItem mock and assert the restored controls reflect what was applied.
+    [Fact]
+    public async Task PersistedConfig_RoundTripsAcrossRemount()
+    {
+        var cut = Render<FilterPanel>();
+
+        cut.Find("input[placeholder='e.g. Hal, Magriel']").Input("Hal, Magriel");
+        cut.Find("input[type='number'][placeholder='Min']").Input("0.05");
+        cut.Find("#dt_CheckerPlaysOnly").Change(true);
+        cut.Find("#pt_Race").Change(true);
+
+        await cut.Find("button.btn-primary").ClickAsync(new());
+
+        // Pull the exact JSON the panel persisted — one blob under one key.
+        var stored = JSInterop.Invocations["localStorage.setItem"]
+            .Last(i => (string?)i.Arguments[0] == ConfigKey)
+            .Arguments[1] as string;
+        Assert.NotNull(stored);
+
+        // Feed it back through the getItem mock and mount a fresh panel.
+        JSInterop.Setup<string?>("localStorage.getItem", ConfigKey).SetResult(stored);
+        var restored = Render<FilterPanel>();
+
+        Assert.Equal("Hal, Magriel", restored.Find("input[placeholder='e.g. Hal, Magriel']").GetAttribute("value"));
+        Assert.Equal("0.05", restored.Find("input[type='number'][placeholder='Min']").GetAttribute("value"));
+        Assert.True(restored.Find("#dt_CheckerPlaysOnly").HasAttribute("checked"));
+        Assert.True(restored.Find("#pt_Race").HasAttribute("checked"));
+    }
+
+    // Proves the FilterConfig.TryFromJson tolerant path is wired: a corrupt blob
+    // in storage must restore to defaults rather than throw.
+    [Fact]
+    public void CorruptStoredConfig_MountsWithDefaults()
+    {
+        JSInterop.Setup<string?>("localStorage.getItem", ConfigKey).SetResult("}{ not valid json");
+
+        var cut = Render<FilterPanel>();
+
+        Assert.Equal(string.Empty, cut.Find("input[placeholder='e.g. Hal, Magriel']").GetAttribute("value"));
+        Assert.True(cut.Find("#dt_Both").HasAttribute("checked"));
+        Assert.DoesNotContain("checked", cut.Find("#pt_Race").OuterHtml);
+    }
 }

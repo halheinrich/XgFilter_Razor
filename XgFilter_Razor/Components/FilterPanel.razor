@@ -7,7 +7,8 @@
    is clicked (or Reset). Raises OnFilterDirty whenever any control changes, so
    the parent can disable Run until Apply. Consumers that need a
    DecisionFilterSet call FilterConfig.Build() on the received config.
-   State persisted to localStorage.
+   State persists to localStorage as a single serialized FilterConfig blob
+   (one key) via the lib's FilterConfig.ToJson / TryFromJson.
    Location: XgFilter_Razor/Components/FilterPanel.razor
 ──────────────────────────────────────────────────────────────────────────── *@
 
@@ -156,13 +157,24 @@
     [Parameter, EditorRequired] public EventCallback<FilterConfig> OnFilterConfigChanged { get; set; }
     [Parameter] public EventCallback OnFilterDirty { get; set; }
 
+    // Single localStorage key holding the whole filter state as one serialized
+    // FilterConfig blob. The lib owns the JSON shape (ToJson / TryFromJson);
+    // this component never touches a JSON serializer directly.
+    private const string ConfigKey = "xg_filter_config";
+
+    // Free-text / numeric buffers. These exist only because in-progress typing
+    // needs a string distinct from the parsed value; they are transient
+    // view-state — hydrated from the config on restore, flushed back into a
+    // config on Apply, and never persisted on their own.
     private string _playerText = string.Empty;
-    private DecisionTypeOption _decisionType = DecisionTypeOption.Both;
     private string _matchScoreText = string.Empty;
     private string _errorMinText = string.Empty;
     private string _errorMaxText = string.Empty;
     private string _moveNumberMinText = string.Empty;
     private string _moveNumberMaxText = string.Empty;
+
+    // Enum state needs no string buffer — the controls bind directly.
+    private DecisionTypeOption _decisionType = DecisionTypeOption.Both;
     private HashSet<PositionType> _positionTypes = new();
     private HashSet<PlayType> _playTypes = new();
 
@@ -170,77 +182,58 @@
     {
         if (!firstRender) return;
 
-        _playerText = await JS.InvokeAsync<string?>("localStorage.getItem", "xg_filter_player") ?? string.Empty;
-        _matchScoreText = await JS.InvokeAsync<string?>("localStorage.getItem", "xg_filter_matchscore") ?? string.Empty;
-        _errorMinText = await JS.InvokeAsync<string?>("localStorage.getItem", "xg_filter_errormin") ?? string.Empty;
-        _errorMaxText = await JS.InvokeAsync<string?>("localStorage.getItem", "xg_filter_errormax") ?? string.Empty;
-        _moveNumberMinText = await JS.InvokeAsync<string?>("localStorage.getItem", "xg_filter_movenumbermin") ?? string.Empty;
-        _moveNumberMaxText = await JS.InvokeAsync<string?>("localStorage.getItem", "xg_filter_movenumbermax") ?? string.Empty;
-
-        var dtRaw = await JS.InvokeAsync<string?>("localStorage.getItem", "xg_filter_decisiontype");
-        if (Enum.TryParse<DecisionTypeOption>(dtRaw, out var dt))
-            _decisionType = dt;
-
-        var ptRaw = await JS.InvokeAsync<string?>("localStorage.getItem", "xg_filter_positiontypes") ?? string.Empty;
-        _positionTypes = DeserializeEnumSet<PositionType>(ptRaw);
-
-        var pltRaw = await JS.InvokeAsync<string?>("localStorage.getItem", "xg_filter_playtypes") ?? string.Empty;
-        _playTypes = DeserializeEnumSet<PlayType>(pltRaw);
+        var stored = await JS.InvokeAsync<string?>("localStorage.getItem", ConfigKey);
+        // Tolerant restore: a missing key, the literal null token, or corrupt
+        // JSON all yield a fresh default config — no try/catch here.
+        FilterConfig.TryFromJson(stored, out var cfg);
+        HydrateFrom(cfg);
 
         StateHasChanged();
     }
 
     private void MarkDirty() => OnFilterDirty.InvokeAsync();
 
-    private async Task ApplyAsync()
+    private Task ApplyAsync() => PersistAndRaiseAsync(BuildConfig());
+
+    private Task ResetAsync()
     {
-        await PersistAsync();
-        await RaiseAsync();
+        var cfg = new FilterConfig();
+        HydrateFrom(cfg);              // clear every edit-field back to defaults
+        return PersistAndRaiseAsync(cfg);
     }
 
-    private async Task ResetAsync()
+    private async Task PersistAndRaiseAsync(FilterConfig cfg)
     {
-        _playerText = string.Empty;
-        _decisionType = DecisionTypeOption.Both;
-        _matchScoreText = string.Empty;
-        _errorMinText = string.Empty;
-        _errorMaxText = string.Empty;
-        _moveNumberMinText = string.Empty;
-        _moveNumberMaxText = string.Empty;
-        _positionTypes = new();
-        _playTypes = new();
-        await PersistAsync();
-        await RaiseAsync();
-    }
-
-    private async Task PersistAsync()
-    {
-        await JS.InvokeVoidAsync("localStorage.setItem", "xg_filter_player", _playerText);
-        await JS.InvokeVoidAsync("localStorage.setItem", "xg_filter_matchscore", _matchScoreText);
-        await JS.InvokeVoidAsync("localStorage.setItem", "xg_filter_errormin", _errorMinText);
-        await JS.InvokeVoidAsync("localStorage.setItem", "xg_filter_errormax", _errorMaxText);
-        await JS.InvokeVoidAsync("localStorage.setItem", "xg_filter_movenumbermin", _moveNumberMinText);
-        await JS.InvokeVoidAsync("localStorage.setItem", "xg_filter_movenumbermax", _moveNumberMaxText);
-        await JS.InvokeVoidAsync("localStorage.setItem", "xg_filter_decisiontype", _decisionType.ToString());
-        await JS.InvokeVoidAsync("localStorage.setItem", "xg_filter_positiontypes", SerializeEnumSet(_positionTypes));
-        await JS.InvokeVoidAsync("localStorage.setItem", "xg_filter_playtypes", SerializeEnumSet(_playTypes));
-    }
-
-    private async Task RaiseAsync()
-    {
-        var cfg = new FilterConfig
-        {
-            Players = SplitTokens(_playerText),
-            DecisionType = _decisionType,
-            MatchScores = SplitTokens(_matchScoreText),
-            ErrorMin = ParseDouble(_errorMinText),
-            ErrorMax = ParseDouble(_errorMaxText),
-            MoveNumberMin = ParseInt(_moveNumberMinText),
-            MoveNumberMax = ParseInt(_moveNumberMaxText),
-            PositionTypes = _positionTypes.ToList(),
-            PlayTypes = _playTypes.ToList(),
-        };
+        await JS.InvokeVoidAsync("localStorage.setItem", ConfigKey, cfg.ToJson());
         await OnFilterConfigChanged.InvokeAsync(cfg);
+    }
+
+    // Flush the current buffers / enum state into a single FilterConfig.
+    private FilterConfig BuildConfig() => new()
+    {
+        Players = SplitTokens(_playerText),
+        DecisionType = _decisionType,
+        MatchScores = SplitTokens(_matchScoreText),
+        ErrorMin = ParseDouble(_errorMinText),
+        ErrorMax = ParseDouble(_errorMaxText),
+        MoveNumberMin = ParseInt(_moveNumberMinText),
+        MoveNumberMax = ParseInt(_moveNumberMaxText),
+        PositionTypes = _positionTypes.ToList(),
+        PlayTypes = _playTypes.ToList(),
+    };
+
+    // Inverse of BuildConfig: project a config onto the buffers / enum state.
+    private void HydrateFrom(FilterConfig cfg)
+    {
+        _playerText = string.Join(", ", cfg.Players);
+        _decisionType = cfg.DecisionType;
+        _matchScoreText = string.Join(", ", cfg.MatchScores);
+        _errorMinText = FormatNumber(cfg.ErrorMin);
+        _errorMaxText = FormatNumber(cfg.ErrorMax);
+        _moveNumberMinText = FormatNumber(cfg.MoveNumberMin);
+        _moveNumberMaxText = FormatNumber(cfg.MoveNumberMax);
+        _positionTypes = new HashSet<PositionType>(cfg.PositionTypes);
+        _playTypes = new HashSet<PlayType>(cfg.PlayTypes);
     }
 
     private static List<string> SplitTokens(string raw) =>
@@ -255,14 +248,6 @@
         int.TryParse(raw, System.Globalization.NumberStyles.Integer,
                      System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : null;
 
-    private static string SerializeEnumSet<T>(HashSet<T> set) where T : struct, Enum =>
-        string.Join(",", set.Select(v => v.ToString()));
-
-    private static HashSet<T> DeserializeEnumSet<T>(string raw) where T : struct, Enum
-    {
-        var result = new HashSet<T>();
-        foreach (var token in raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            if (Enum.TryParse<T>(token, out var v)) result.Add(v);
-        return result;
-    }
+    private static string FormatNumber<T>(T? value) where T : struct, IFormattable =>
+        value?.ToString(null, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
 }
