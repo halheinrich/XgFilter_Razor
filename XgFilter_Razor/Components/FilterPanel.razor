@@ -100,6 +100,28 @@
             </div>
         </div>
 
+        @* ── Contact type ─────────────────────────────────────────────────────── *@
+        @* Contact-vs-race is a more fundamental partition than the structural
+           PositionType patterns below, so it reads naturally one facet up. *@
+        <div class="mb-3">
+            <label class="form-label">
+                Contact type
+                <small class="text-muted">(none checked = all types)</small>
+            </label>
+            <div>
+                @foreach (var ct in Enum.GetValues<ContactType>())
+                {
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="checkbox"
+                               id="ct_@ct"
+                               checked="@_contactTypes.Contains(ct)"
+                               @onchange="(e) => { if (e.Value is bool b && b) _contactTypes.Add(ct); else _contactTypes.Remove(ct); MarkDirty(); }" />
+                        <label class="form-check-label" for="ct_@ct">@ct.ToLabel()</label>
+                    </div>
+                }
+            </div>
+        </div>
+
         @* ── Position type ────────────────────────────────────────────────────── *@
         <div class="mb-3">
             <label class="form-label">
@@ -175,6 +197,7 @@
 
     // Enum state needs no string buffer — the controls bind directly.
     private DecisionTypeOption _decisionType = DecisionTypeOption.Both;
+    private HashSet<ContactType> _contactTypes = new();
     private HashSet<PositionType> _positionTypes = new();
     private HashSet<PlayType> _playTypes = new();
 
@@ -218,6 +241,7 @@
         ErrorMax = ParseDouble(_errorMaxText),
         MoveNumberMin = ParseInt(_moveNumberMinText),
         MoveNumberMax = ParseInt(_moveNumberMaxText),
+        ContactTypes = _contactTypes.ToList(),
         PositionTypes = _positionTypes.ToList(),
         PlayTypes = _playTypes.ToList(),
     };
@@ -232,6 +256,7 @@
         _errorMaxText = FormatNumber(cfg.ErrorMax);
         _moveNumberMinText = FormatNumber(cfg.MoveNumberMin);
         _moveNumberMaxText = FormatNumber(cfg.MoveNumberMax);
+        _contactTypes = new HashSet<ContactType>(cfg.ContactTypes);
         _positionTypes = new HashSet<PositionType>(cfg.PositionTypes);
         _playTypes = new HashSet<PlayType>(cfg.PlayTypes);
     }

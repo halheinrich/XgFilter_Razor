@@ -83,7 +83,7 @@ public class FilterPanelTests : BunitContext
         cut.Find("input[placeholder='e.g. Hal, Magriel']").Input("Hal, Magriel");
         cut.Find("input[type='number'][placeholder='Min']").Input("0.05");
         cut.Find("#dt_CheckerPlaysOnly").Change(true);
-        cut.Find("#pt_Race").Change(true);
+        cut.Find("#ct_Race").Change(true);
 
         await cut.Find("button.btn-primary").ClickAsync(new());
 
@@ -100,7 +100,25 @@ public class FilterPanelTests : BunitContext
         Assert.Equal("Hal, Magriel", restored.Find("input[placeholder='e.g. Hal, Magriel']").GetAttribute("value"));
         Assert.Equal("0.05", restored.Find("input[type='number'][placeholder='Min']").GetAttribute("value"));
         Assert.True(restored.Find("#dt_CheckerPlaysOnly").HasAttribute("checked"));
-        Assert.True(restored.Find("#pt_Race").HasAttribute("checked"));
+        Assert.True(restored.Find("#ct_Race").HasAttribute("checked"));
+    }
+
+    // Silent-splat guard for the Contact-type section: an unbound Razor checkbox
+    // attribute compiles fine but never mutates state, so check a box, Apply, and
+    // assert the emitted config actually carries the selection. Pins that the new
+    // #ct_* checkboxes bind to FilterConfig.ContactTypes.
+    [Fact]
+    public async Task ContactTypeCheckbox_FlowsIntoEmittedConfig()
+    {
+        FilterConfig? capturedConfig = null;
+        var cut = Render<FilterPanel>(parameters => parameters
+            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
+
+        cut.Find("#ct_Contact").Change(true);
+        await cut.Find("button.btn-primary").ClickAsync(new());
+
+        Assert.NotNull(capturedConfig);
+        Assert.Contains(ContactType.Contact, capturedConfig!.ContactTypes);
     }
 
     // Proves the FilterConfig.TryFromJson tolerant path is wired: a corrupt blob
@@ -114,6 +132,6 @@ public class FilterPanelTests : BunitContext
 
         Assert.Equal(string.Empty, cut.Find("input[placeholder='e.g. Hal, Magriel']").GetAttribute("value"));
         Assert.True(cut.Find("#dt_Both").HasAttribute("checked"));
-        Assert.DoesNotContain("checked", cut.Find("#pt_Race").OuterHtml);
+        Assert.DoesNotContain("checked", cut.Find("#ct_Race").OuterHtml);
     }
 }
