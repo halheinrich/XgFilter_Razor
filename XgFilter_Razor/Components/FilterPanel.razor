@@ -1,5 +1,6 @@
 @using XgFilter_Lib.Filtering
 @using XgFilter_Lib.Enums
+@using XgFilter_Lib.Patterns
 @inject IJSRuntime JS
 
 @* ── FilterPanel.razor ───────────────────────────────────────────────────────
@@ -142,6 +143,32 @@
             </div>
         </div>
 
+        @* ── Position pattern ──────────────────────────────────────────────────── *@
+        @* Per-point checker-range constraint, entered as the lib's raw bracket
+           list until the board-grid widget replaces this field in a later arc.
+           Parsed through BoardPattern.TryParse so half-typed input never throws
+           out of the panel; while the text is non-blank and unparseable the
+           field is marked invalid and Apply is disabled, so an invalid pattern
+           can never silently drop the filter the user meant to set. *@
+        <div class="mb-3">
+            <label class="form-label" for="positionPattern">
+                Position pattern
+                <small class="text-muted">(per-point checker ranges; blank = no pattern filter)</small>
+            </label>
+            <input id="positionPattern"
+                   class="form-control @(IsPositionPatternValid ? string.Empty : "is-invalid")"
+                   placeholder="e.g. [6,2,] [5,,-2] [13,2,]"
+                   value="@_positionPatternText"
+                   @oninput="e => { _positionPatternText = e.Value?.ToString() ?? string.Empty; MarkDirty(); }" />
+            <div class="form-text">
+                [pt,min,max] per point; blank bound = unbounded; negative = opponent.
+                E.g. [6,2,] [5,,-2] [13,2,].
+            </div>
+            <div class="invalid-feedback">
+                Not a valid bracket list — fix it to apply, or clear it for no pattern filter.
+            </div>
+        </div>
+
         @* ── Play type ────────────────────────────────────────────────────────── *@
         <div class="mb-3">
             <label class="form-label">
@@ -164,7 +191,9 @@
 
         @* ── Buttons ──────────────────────────────────────────────────────────── *@
         <div class="d-flex gap-2">
-            <button class="btn btn-primary btn-sm" @onclick="ApplyAsync">
+            <button class="btn btn-primary btn-sm"
+                    disabled="@(!IsPositionPatternValid)"
+                    @onclick="ApplyAsync">
                 Apply Filter
             </button>
             <button class="btn btn-outline-secondary btn-sm" @onclick="ResetAsync">
@@ -194,6 +223,7 @@
     private string _errorMaxText = string.Empty;
     private string _moveNumberMinText = string.Empty;
     private string _moveNumberMaxText = string.Empty;
+    private string _positionPatternText = string.Empty;
 
     // Enum state needs no string buffer — the controls bind directly.
     private DecisionTypeOption _decisionType = DecisionTypeOption.Both;
@@ -244,6 +274,7 @@
         ContactTypes = _contactTypes.ToList(),
         PositionTypes = _positionTypes.ToList(),
         PlayTypes = _playTypes.ToList(),
+        PositionPattern = ParsePositionPattern(_positionPatternText),
     };
 
     // Inverse of BuildConfig: project a config onto the buffers / enum state.
@@ -259,7 +290,25 @@
         _contactTypes = new HashSet<ContactType>(cfg.ContactTypes);
         _positionTypes = new HashSet<PositionType>(cfg.PositionTypes);
         _playTypes = new HashSet<PlayType>(cfg.PlayTypes);
+        _positionPatternText = cfg.PositionPattern?.ToBracketList() ?? string.Empty;
     }
+
+    // True when the position-pattern buffer is committable: a blank buffer is
+    // "no pattern filter," and any non-blank buffer must parse as a bracket
+    // list. Drives both the field's is-invalid styling and the Apply gate, so
+    // half-typed input is flagged rather than silently dropped at Apply.
+    private bool IsPositionPatternValid =>
+        string.IsNullOrWhiteSpace(_positionPatternText)
+        || BoardPattern.TryParse(_positionPatternText, out _);
+
+    // Buffer → PositionPattern. A blank buffer is no filter (null); otherwise
+    // the parsed pattern. TryParse can only fail here for invalid text, which
+    // the Apply gate (IsPositionPatternValid) already prevents from reaching
+    // BuildConfig — the null fallback is a defensive belt, not a silent drop.
+    private static BoardPattern? ParsePositionPattern(string raw) =>
+        string.IsNullOrWhiteSpace(raw)
+            ? null
+            : BoardPattern.TryParse(raw, out var pattern) ? pattern : null;
 
     private static List<string> SplitTokens(string raw) =>
         raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)

@@ -121,6 +121,84 @@ public class FilterPanelTests : BunitContext
         Assert.Contains(ContactType.Contact, capturedConfig!.ContactTypes);
     }
 
+    // Silent-splat guard for the Position-pattern field: an unbound text input
+    // would compile but never feed BuildConfig, so type a valid bracket list,
+    // Apply, and assert the emitted config carries the parsed BoardPattern.
+    // BoardPattern has no value-equality, so compare via its round-tripping
+    // ToBracketList rendering.
+    [Fact]
+    public async Task PositionPattern_FlowsIntoEmittedConfig()
+    {
+        FilterConfig? capturedConfig = null;
+        var cut = Render<FilterPanel>(parameters => parameters
+            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
+
+        cut.Find("#positionPattern").Input("[6,2,] [5,,-2]");
+        await cut.Find("button.btn-primary").ClickAsync(new());
+
+        Assert.NotNull(capturedConfig);
+        Assert.NotNull(capturedConfig!.PositionPattern);
+        Assert.Equal("[6,2,] [5,,-2]", capturedConfig.PositionPattern!.ToBracketList());
+    }
+
+    // Round-trips the Position-pattern field through the single-key persistence
+    // path: set a pattern, Apply (writes the FilterConfig blob, PositionPattern
+    // serialized as its bracket list by BoardPatternJsonConverter), then re-mount
+    // with the captured blob and assert the field shows the restored bracket list.
+    [Fact]
+    public async Task PositionPattern_RoundTripsAcrossRemount()
+    {
+        var cut = Render<FilterPanel>();
+
+        cut.Find("#positionPattern").Input("[6,2,] [5,,-2]");
+        await cut.Find("button.btn-primary").ClickAsync(new());
+
+        var stored = JSInterop.Invocations["localStorage.setItem"]
+            .Last(i => (string?)i.Arguments[0] == ConfigKey)
+            .Arguments[1] as string;
+        Assert.NotNull(stored);
+
+        JSInterop.Setup<string?>("localStorage.getItem", ConfigKey).SetResult(stored);
+        var restored = Render<FilterPanel>();
+
+        Assert.Equal("[6,2,] [5,,-2]", restored.Find("#positionPattern").GetAttribute("value"));
+    }
+
+    // Blank Position-pattern field means "no pattern filter," which must surface
+    // as a null PositionPattern (not an empty pattern), per FilterConfig's
+    // null-or-empty contract.
+    [Fact]
+    public async Task EmptyPositionPattern_EmitsNullPattern()
+    {
+        FilterConfig? capturedConfig = null;
+        var cut = Render<FilterPanel>(parameters => parameters
+            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
+
+        await cut.Find("button.btn-primary").ClickAsync(new());
+
+        Assert.NotNull(capturedConfig);
+        Assert.Null(capturedConfig!.PositionPattern);
+    }
+
+    // Invalid bracket-list text must not silently drop the filter: the chosen
+    // UX marks the field invalid and gates Apply (disabled) until it parses or
+    // is cleared. Clearing the bad text re-enables Apply.
+    [Fact]
+    public void InvalidPositionPattern_MarksFieldAndGatesApply()
+    {
+        var cut = Render<FilterPanel>();
+
+        cut.Find("#positionPattern").Input("[6,2");
+
+        Assert.Contains("is-invalid", cut.Find("#positionPattern").GetAttribute("class"));
+        Assert.True(cut.Find("button.btn-primary").HasAttribute("disabled"));
+
+        cut.Find("#positionPattern").Input(string.Empty);
+
+        Assert.DoesNotContain("is-invalid", cut.Find("#positionPattern").GetAttribute("class"));
+        Assert.False(cut.Find("button.btn-primary").HasAttribute("disabled"));
+    }
+
     // Proves the FilterConfig.TryFromJson tolerant path is wired: a corrupt blob
     // in storage must restore to defaults rather than throw.
     [Fact]
