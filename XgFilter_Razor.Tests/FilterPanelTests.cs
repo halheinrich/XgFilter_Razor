@@ -58,14 +58,28 @@ public class FilterPanelTests : BunitContext
     [InlineData(typeof(DecisionTypeOption), "Both checker and cube")]
     [InlineData(typeof(DecisionTypeOption), "Checker plays only")]
     [InlineData(typeof(DecisionTypeOption), "Cube decisions only")]
-    [InlineData(typeof(PositionType),       "Inner-board 6-3-1")]
-    [InlineData(typeof(PositionType),       "Inner-board 5-4-3-2-1")]
-    [InlineData(typeof(PositionType),       "Vs 2+ on bar")]
     public void Render_LabelsUseLibDescriptions(Type enumType, string expectedLabel)
     {
         _ = enumType;  // present so failures cite the enum that caused them
         var cut = Render<FilterPanel>();
         Assert.Contains(expectedLabel, cut.Markup);
+    }
+
+    // Position type and Play type are shelved for later reintroduction in a
+    // modified form: the XgFilter_Lib machinery (FilterConfig.PositionTypes /
+    // PlayTypes, the filters, the enums) stays intact, but the UI groups are
+    // hidden. Assert both control groups are absent so an accidental re-add — or
+    // a future deliberate reintroduction — trips this test rather than shipping
+    // silently.
+    [Fact]
+    public void ShelvedGroups_PositionTypeAndPlayType_AreAbsentFromPanel()
+    {
+        var cut = Render<FilterPanel>();
+
+        Assert.DoesNotContain("Position type", cut.Markup);
+        Assert.DoesNotContain("Play type", cut.Markup);
+        Assert.Empty(cut.FindAll("input[id^='pt_']"));
+        Assert.Empty(cut.FindAll("input[id^='plt_']"));
     }
 
     // The single localStorage key the panel persists its whole FilterConfig under.
