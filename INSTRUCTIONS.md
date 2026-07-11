@@ -36,6 +36,7 @@ https://github.com/halheinrich/XgFilter_Razor — branch `main`.
 
 ```
 XgFilter_Razor.slnx
+Directory.Packages.props
 XgFilter_Razor/
   XgFilter_Razor.csproj
   _Imports.razor
