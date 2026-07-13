@@ -1,6 +1,7 @@
 @using XgFilter_Lib.Filtering
 @using XgFilter_Lib.Enums
 @using XgFilter_Lib.Patterns
+@using BgDataTypes_Lib
 @inject IJSRuntime JS
 
 @* ── FilterPanel.razor ───────────────────────────────────────────────────────
@@ -121,6 +122,34 @@
             </div>
         </div>
 
+        @* ── Analysis depth ────────────────────────────────────────────────────── *@
+        @* Include-list over BgDataTypes_Lib.AnalysisDepthClass (OR semantics;
+           none checked = no depth filter). Same facet idiom as Contact type —
+           the only differences are the wider member set and that Unknown is a
+           first-class, selectable member: checking it is the deliberate opt-in
+           to admit unclassified/legacy rows (AnalysisDepthFilter drops them
+           otherwise). Rendered in Enum.GetValues declaration order, which is the
+           lib's ascending-rigor order, so no UI-side sort rule is imposed. The
+           inline form-check wraps the twenty members across rows on its own. *@
+        <div class="mb-3">
+            <label class="form-label">
+                Analysis depth
+                <small class="text-muted">(none checked = all depths)</small>
+            </label>
+            <div>
+                @foreach (var ad in Enum.GetValues<AnalysisDepthClass>())
+                {
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="checkbox"
+                               id="ad_@ad"
+                               checked="@_analysisDepthClasses.Contains(ad)"
+                               @onchange="(e) => { if (e.Value is bool b && b) _analysisDepthClasses.Add(ad); else _analysisDepthClasses.Remove(ad); MarkDirty(); }" />
+                        <label class="form-check-label" for="ad_@ad">@ad.ToLabel()</label>
+                    </div>
+                }
+            </div>
+        </div>
+
         @* ── Position pattern ──────────────────────────────────────────────────── *@
         @* Per-point checker-range constraint, entered as the lib's raw bracket
            list until the board-grid widget replaces this field in a later arc.
@@ -186,6 +215,7 @@
     // Enum state needs no string buffer — the controls bind directly.
     private DecisionTypeOption _decisionType = DecisionTypeOption.Both;
     private HashSet<ContactType> _contactTypes = new();
+    private HashSet<AnalysisDepthClass> _analysisDepthClasses = new();
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -228,6 +258,7 @@
         MoveNumberMin = ParseInt(_moveNumberMinText),
         MoveNumberMax = ParseInt(_moveNumberMaxText),
         ContactTypes = _contactTypes.ToList(),
+        AnalysisDepthClasses = _analysisDepthClasses.ToList(),
         PositionPattern = ParsePositionPattern(_positionPatternText),
     };
 
@@ -242,6 +273,7 @@
         _moveNumberMinText = FormatNumber(cfg.MoveNumberMin);
         _moveNumberMaxText = FormatNumber(cfg.MoveNumberMax);
         _contactTypes = new HashSet<ContactType>(cfg.ContactTypes);
+        _analysisDepthClasses = new HashSet<AnalysisDepthClass>(cfg.AnalysisDepthClasses);
         _positionPatternText = cfg.PositionPattern?.ToBracketList() ?? string.Empty;
     }
 

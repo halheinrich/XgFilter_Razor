@@ -1,4 +1,5 @@
 using Bunit;
+using BgDataTypes_Lib;
 using XgFilter_Lib.Enums;
 using XgFilter_Lib.Filtering;
 using XgFilter_Razor.Components;
@@ -133,6 +134,107 @@ public class FilterPanelTests : BunitContext
 
         Assert.NotNull(capturedConfig);
         Assert.Contains(ContactType.Contact, capturedConfig!.ContactTypes);
+    }
+
+    // Exhaustive render check for the Analysis-depth section: every
+    // AnalysisDepthClass member must surface as an #ad_<member> checkbox
+    // carrying its lib-owned [Description] label (via EnumLabel.ToLabel).
+    // Iterating Enum.GetValues means a new member added upstream is covered
+    // automatically, and pins that Unknown renders like any other member —
+    // its presence in the UI is the deliberate opt-in to admit legacy rows.
+    [Fact]
+    public void AnalysisDepthSection_RendersEveryMemberWithLibLabel()
+    {
+        var cut = Render<FilterPanel>();
+
+        foreach (var depth in Enum.GetValues<AnalysisDepthClass>())
+        {
+            Assert.NotNull(cut.Find($"#ad_{depth}"));
+            Assert.Contains(depth.ToLabel(), cut.Markup);
+        }
+    }
+
+    // Silent-splat guard for the Analysis-depth section (cf. the Contact-type
+    // guard): an unbound Razor checkbox compiles but never mutates state, so
+    // check a spread of members — including Unknown, the deliberate opt-in — and
+    // assert the emitted config's include-list carries exactly them.
+    [Fact]
+    public async Task AnalysisDepthCheckbox_FlowsIntoEmittedConfig()
+    {
+        FilterConfig? capturedConfig = null;
+        var cut = Render<FilterPanel>(parameters => parameters
+            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
+
+        cut.Find("#ad_Unknown").Change(true);
+        cut.Find("#ad_XgRollerPlus").Change(true);
+        await cut.Find("button.btn-primary").ClickAsync(new());
+
+        Assert.NotNull(capturedConfig);
+        Assert.Contains(AnalysisDepthClass.Unknown, capturedConfig!.AnalysisDepthClasses);
+        Assert.Contains(AnalysisDepthClass.XgRollerPlus, capturedConfig.AnalysisDepthClasses);
+        Assert.Equal(2, capturedConfig.AnalysisDepthClasses.Count);
+    }
+
+    // Deselecting back to empty must emit an empty include-list — "no depth
+    // filter" (inactive), not "reject everything." The Build()-skip on an empty
+    // list is upstream's job; the panel's contract is only that the emitted
+    // config round-trips the empty state faithfully.
+    [Fact]
+    public async Task AnalysisDepth_DeselectedToEmpty_EmitsEmptyList()
+    {
+        FilterConfig? capturedConfig = null;
+        var cut = Render<FilterPanel>(parameters => parameters
+            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
+
+        cut.Find("#ad_Ply3").Change(true);
+        cut.Find("#ad_Ply3").Change(false);
+        await cut.Find("button.btn-primary").ClickAsync(new());
+
+        Assert.NotNull(capturedConfig);
+        Assert.Empty(capturedConfig!.AnalysisDepthClasses);
+    }
+
+    // Round-trips the Analysis-depth section through the single-key persistence
+    // path: check a couple of members, Apply (writes the FilterConfig blob,
+    // AnalysisDepthClasses serialized as member-name strings), then re-mount with
+    // the captured blob and assert exactly those boxes restore checked.
+    [Fact]
+    public async Task AnalysisDepth_RoundTripsAcrossRemount()
+    {
+        var cut = Render<FilterPanel>();
+
+        cut.Find("#ad_Ply3").Change(true);
+        cut.Find("#ad_RolloutPly7").Change(true);
+        await cut.Find("button.btn-primary").ClickAsync(new());
+
+        var stored = JSInterop.Invocations["localStorage.setItem"]
+            .Last(i => (string?)i.Arguments[0] == ConfigKey)
+            .Arguments[1] as string;
+        Assert.NotNull(stored);
+
+        JSInterop.Setup<string?>("localStorage.getItem", ConfigKey).SetResult(stored);
+        var restored = Render<FilterPanel>();
+
+        Assert.True(restored.Find("#ad_Ply3").HasAttribute("checked"));
+        Assert.True(restored.Find("#ad_RolloutPly7").HasAttribute("checked"));
+        Assert.DoesNotContain("checked", restored.Find("#ad_Book").OuterHtml);
+    }
+
+    // Persistence back-compat: a blob saved before the analysis-depth axis
+    // existed carries no AnalysisDepthClasses field. TryFromJson must restore it
+    // to an empty (inactive) include-list — no depth checkbox checked — which
+    // falls out of System.Text.Json leaving the initialized-empty list untouched
+    // for an absent member. Verified here rather than assumed.
+    [Fact]
+    public void LegacyConfigWithoutDepthField_RestoresToNoneSelected()
+    {
+        JSInterop.Setup<string?>("localStorage.getItem", ConfigKey)
+            .SetResult("{\"DecisionType\":\"Both\"}");
+
+        var cut = Render<FilterPanel>();
+
+        foreach (var depth in Enum.GetValues<AnalysisDepthClass>())
+            Assert.DoesNotContain("checked", cut.Find($"#ad_{depth}").OuterHtml);
     }
 
     // Silent-splat guard for the Position-pattern field: an unbound text input

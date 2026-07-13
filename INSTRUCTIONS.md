@@ -24,13 +24,13 @@ https://github.com/halheinrich/XgFilter_Razor — branch `main`.
   (`DecisionTypeOption`, `PositionType`, `PlayType`), and the
   `EnumLabel.ToLabel<TEnum>()` extension. Project reference, not a
   package.
-- **BgDataTypes_Lib** — referenced explicitly even though
-  `FilterPanel.razor` does not use any `BgDataTypes_Lib` type directly
-  (XgFilter_Lib brings it in transitively). Consumers of
-  `DecisionFilterSet` typically work against `IDecisionFilterData`, so
-  the dependency is conceptually direct. The precedent in
-  `ExtractFromXgToCsv.Client.csproj` is to list every such dependency
-  explicitly.
+- **BgDataTypes_Lib** — `AnalysisDepthClass`, whose members drive the
+  Analysis-depth facet (labels via `EnumLabel.ToLabel`). Owned here, not in
+  `XgFilter_Lib.Enums`, because the producer (`ConvertXgToJson_Lib`) stamps it.
+  Beyond that, consumers of `DecisionFilterSet` typically work against
+  `IDecisionFilterData`, so the dependency is conceptually direct as well. The
+  precedent in `ExtractFromXgToCsv.Client.csproj` is to list every such
+  dependency explicitly.
 
 ## Directory tree
 
@@ -63,8 +63,8 @@ primitives into a Blazor component and surfaces the resulting
 
 `FilterPanel` owns the entire filter-form UI as a Bootstrap card with
 controls for player names, decision type, match scores, error range, move
-number range, position type, and play type. State is held in private
-fields on the component instance.
+number range, position type, play type, and analysis depth. State is held
+in private fields on the component instance.
 
 The component emits filter results only on **Apply** (or **Reset**) — not
 on every keystroke. On any input change (typing, radio selection,
