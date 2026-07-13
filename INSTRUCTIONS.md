@@ -63,8 +63,11 @@ primitives into a Blazor component and surfaces the resulting
 
 `FilterPanel` owns the entire filter-form UI as a Bootstrap card with
 controls for player names, decision type, match scores, error range, move
-number range, position type, play type, and analysis depth. State is held
-in private fields on the component instance.
+number range, contact type, analysis depth, and a position pattern. Position
+type and play type are shelved for later reintroduction — their UI groups have
+been hidden since `ddb9c98`, while the `XgFilter_Lib` machinery behind them
+(`FilterConfig.PositionTypes` / `PlayTypes`, the filters, the enums) stays
+intact. State is held in private fields on the component instance.
 
 The component emits filter results only on **Apply** (or **Reset**) — not
 on every keystroke. On any input change (typing, radio selection,
