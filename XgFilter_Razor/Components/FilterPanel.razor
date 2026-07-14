@@ -59,9 +59,14 @@
                 <small class="text-muted">(comma-separated; blank = all scores)</small>
             </label>
             <input class="form-control"
-                   placeholder="e.g. 5a5a, DMP, money"
+                   placeholder="e.g. 4a5a, 1a1a, 1a2aC, money"
                    value="@_matchScoreText"
                    @oninput="e => { _matchScoreText = e.Value?.ToString() ?? string.Empty; MarkDirty(); }" />
+            <div class="form-text">
+                MaNa is on-roll-anchored — M = points the player on roll needs, N = the
+                opponent — so 4a5a and 5a4a are distinct (list both to catch either
+                orientation). C suffix = Crawford game; money = money sessions; DMP = 1a1a.
+            </div>
         </div>
 
         @* ── Error range ──────────────────────────────────────────────────────── *@

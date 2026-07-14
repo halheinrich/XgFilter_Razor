@@ -328,4 +328,60 @@ public class FilterPanelTests : BunitContext
         Assert.True(cut.Find("#dt_Both").HasAttribute("checked"));
         Assert.DoesNotContain("checked", cut.Find("#ct_Race").OuterHtml);
     }
+
+    // The match-score field must state the MaNa convention in a sibling hint line
+    // (same form-text idiom as the position-pattern section), so a user reading
+    // the panel knows scores are on-roll-anchored — 4a5a and 5a4a are distinct —
+    // rather than assuming the old unordered semantics and re-filing the bug the
+    // lib now enforces against.
+    [Fact]
+    public void MatchScoreSection_RendersOnRollAnchoredHint()
+    {
+        var cut = Render<FilterPanel>();
+
+        // Anchor to the match-score section's own hint, not just page markup,
+        // so an unrelated mention of the convention elsewhere can't satisfy this.
+        var section = cut.Find("input[placeholder^='e.g. 4a5a']").ParentElement!;
+        var hint = section.QuerySelector(".form-text")!;
+
+        Assert.Contains("on-roll-anchored", hint.TextContent);
+        // Both orientations are named — the whole point is that they differ.
+        Assert.Contains("4a5a", hint.TextContent);
+        Assert.Contains("5a4a", hint.TextContent);
+    }
+
+    // The old placeholder taught "DMP", which neither the old nor the new
+    // tokenizer accepts — typing it throws on Apply. Pin that the placeholder
+    // advertises only the natural vocabulary (DMP's equivalent, 1a1a, belongs in
+    // the hint line, not as an un-parseable example).
+    [Fact]
+    public void MatchScorePlaceholder_DoesNotAdvertiseInvalidDmpToken()
+    {
+        var cut = Render<FilterPanel>();
+
+        var placeholder = cut.Find("input[placeholder^='e.g. 4a5a']").GetAttribute("placeholder")!;
+
+        Assert.DoesNotContain("DMP", placeholder);
+    }
+
+    // Cross-lib invariant (XgFilter_Lib is a dependency): every example token the
+    // placeholder advertises must construct a MatchScoreFilter without throwing.
+    // The lib's constructor fails loud on any token it rejects, so this pins "the
+    // UI never advertises an example the lib rejects" as a standing invariant
+    // rather than a one-time fix — a future placeholder edit that reintroduces a
+    // DMP-style un-parseable example trips here.
+    [Fact]
+    public void MatchScorePlaceholder_ExampleTokensAllParse()
+    {
+        var cut = Render<FilterPanel>();
+
+        var placeholder = cut.Find("input[placeholder^='e.g. 4a5a']").GetAttribute("placeholder")!;
+        var examples = placeholder
+            .Replace("e.g. ", string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        Assert.NotEmpty(examples);
+        // Constructing the filter is the lib's Apply-time validation path.
+        Assert.Null(Record.Exception(() => new MatchScoreFilter(examples)));
+    }
 }
