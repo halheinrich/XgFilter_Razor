@@ -365,11 +365,13 @@ public class FilterPanelTests : BunitContext
     }
 
     // Cross-lib invariant (XgFilter_Lib is a dependency): every example token the
-    // placeholder advertises must construct a MatchScoreFilter without throwing.
-    // The lib's constructor fails loud on any token it rejects, so this pins "the
-    // UI never advertises an example the lib rejects" as a standing invariant
-    // rather than a one-time fix — a future placeholder edit that reintroduces a
-    // DMP-style un-parseable example trips here.
+    // placeholder advertises must survive FilterConfig.Build() — the same score
+    // parsing the panel's Apply path runs, reached through the lib's intent
+    // surface rather than its internal filter types. Build() fails loud on any
+    // token the parser rejects, so this pins "the UI never advertises an example
+    // the lib rejects" as a standing invariant rather than a one-time fix — a
+    // future placeholder edit that reintroduces a DMP-style un-parseable example
+    // trips here.
     [Fact]
     public void MatchScorePlaceholder_ExampleTokensAllParse()
     {
@@ -381,7 +383,8 @@ public class FilterPanelTests : BunitContext
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
         Assert.NotEmpty(examples);
-        // Constructing the filter is the lib's Apply-time validation path.
-        Assert.Null(Record.Exception(() => new MatchScoreFilter(examples)));
+        // Build() is the lib's Apply-time validation path.
+        var cfg = new FilterConfig { MatchScores = [.. examples] };
+        Assert.Null(Record.Exception(() => cfg.Build()));
     }
 }
