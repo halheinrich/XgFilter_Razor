@@ -1,10 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk.Razor">
 
-  <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-  </PropertyGroup>
+  <!-- Framework, nullable, implicit usings, warnings-as-errors, and doc-file
+       generation are repo-wide policy — see ..\Directory.Build.props. Only
+       per-project decisions live here: the Razor SDK (project attribute above)
+       and the browser SupportedPlatform. -->
 
   <ItemGroup>
     <SupportedPlatform Include="browser" />

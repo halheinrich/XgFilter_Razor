@@ -1,13 +1,19 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <!-- Framework, nullable, implicit usings, and warnings-as-errors are repo-wide
+       policy — see ..\Directory.Build.props. Only per-project decisions live here. -->
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <!-- Opt out of the repo-wide GenerateDocumentationFile: a test assembly ships
+         no public API, so a doc file would only invite CS1591 noise on xUnit
+         fixtures. Warnings-as-errors still applies (inherited from props). -->
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Direct reference so the security pin in Directory.Packages.props overrides
+         bunit's vulnerable transitive AngleSharp 1.4.0 (GHSA-pgww-w46g-26qg). -->
+    <PackageReference Include="AngleSharp" />
     <PackageReference Include="bunit" />
     <PackageReference Include="coverlet.collector" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />

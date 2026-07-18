@@ -197,7 +197,27 @@
 </div>
 
 @code {
+    /// <summary>
+    /// Raised on <b>Apply</b> and on <b>Reset</b> — never per keystroke — carrying
+    /// the committed <see cref="FilterConfig"/>. The same instance is first
+    /// persisted to <c>localStorage</c> (see <see cref="ConfigKey"/>) so the panel
+    /// rehydrates it on the next first render. A consumer that wants a
+    /// <c>DecisionFilterSet</c> for in-memory filtering calls <c>cfg.Build()</c> on
+    /// the received config; a consumer that ships the selection to a server
+    /// serializes <c>cfg</c> as JSON. Required: the panel exists to produce this,
+    /// so <see cref="EditorRequiredAttribute"/> makes a missing binding an
+    /// <c>RZ2012</c> compile error rather than a silent Razor splat.
+    /// </summary>
     [Parameter, EditorRequired] public EventCallback<FilterConfig> OnFilterConfigChanged { get; set; }
+
+    /// <summary>
+    /// Raised on every input change (typing, radio, checkbox) so the parent can
+    /// disable a Run button until the user commits via Apply — it signals only
+    /// that the selection is dirty and carries no payload. Optional by design: a
+    /// consumer that doesn't gate downstream actions on dirtiness simply leaves it
+    /// unbound, and the panel still emits on Apply. It is deliberately <em>not</em>
+    /// <c>[EditorRequired]</c> for that reason.
+    /// </summary>
     [Parameter] public EventCallback OnFilterDirty { get; set; }
 
     // Single localStorage key holding the whole filter state as one serialized
