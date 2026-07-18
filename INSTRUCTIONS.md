@@ -33,7 +33,11 @@ https://github.com/halheinrich/XgFilter_Razor — branch `main`.
   that, consumers of `DecisionFilterSet` typically work against
   `IDecisionFilterData`, so the dependency is conceptually direct as well. The
   precedent in `ExtractFromXgToCsv.Client.csproj` is to list every such
-  dependency explicitly.
+  dependency explicitly. Also supplies `DiceRoll` (canonical-unordered roll
+  value type) and its `DiceRoll.All` — the 21 distinct rolls in ascending
+  canonical order — which drive the dice-roll facet's checkbox grid; the type
+  owns both the set and its order, so the panel enumerates `All` and never
+  builds a local roll list.
 
 ## Directory tree
 
@@ -66,7 +70,16 @@ primitives into a Blazor component and surfaces the resulting
 
 `FilterPanel` owns the entire filter-form UI as a Bootstrap card with
 controls for player names, decision type, match scores, error range, move
-number range, contact type, analysis depth, and a position pattern. The
+number range, contact type, analysis depth, dice rolls, and a position
+pattern. The dice-roll control is a checkbox grid enumerated from
+`BgDataTypes_Lib.DiceRoll.All` — the lib owns both the 21-roll set and its
+ascending canonical order, so the panel imposes no local roll list or sort.
+Each checkbox's label is the roll's own canonical token (`DiceRoll.ToString`
+→ `"31"`), rendered verbatim rather than hyphenated, keeping display text owned
+by the type as the enum facets defer to `ToLabel`. Selections are stored raw in
+`FilterConfig.DiceRolls` (empty = facet off); the panel derives nothing —
+`Build()` owns materialization into a `DiceRollFilter`, the same SSOT posture as
+the depth facet (see Pitfalls). The
 analysis-depth control is a **two-axis** facet: one checkbox per
 `AnalysisLevel` (rendered in `Enum.GetValues` declaration order) for the level
 axis, plus two rule-separated toggle checkboxes for the mode axis, bound to

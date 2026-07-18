@@ -178,6 +178,38 @@
             </div>
         </div>
 
+        @* ── Dice rolls ────────────────────────────────────────────────────────── *@
+        @* One checkbox per distinct roll, enumerated from DiceRoll.All — the lib
+           owns both the 21-roll set and its ascending canonical order (11, 21, 22,
+           31, … 66, the six doubles included), so the panel imposes no local roll
+           list or sort rule. Labels are the roll's own canonical token
+           (DiceRoll.ToString → "31"), rendered verbatim: display text stays owned
+           by the type, exactly as the enum facets defer to ToLabel. (A hyphenated
+           "3-1" presentation was considered; "31" keeps the panel free of any
+           label-munging and matches the lib's token one-for-one.) Selections are
+           stored raw in _diceRolls and handed to FilterConfig.Build() verbatim —
+           the panel derives nothing. None checked = facet off (Build() skips the
+           filter); the roll set is canonical/unordered, so checking "31" admits
+           both dice orders, and cube rows (no roll) never pass an active filter. *@
+        <div class="mb-3">
+            <label class="form-label">
+                Dice rolls
+                <small class="text-muted">(none checked = all rolls; cube decisions never match)</small>
+            </label>
+            <div>
+                @foreach (var roll in DiceRoll.All)
+                {
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="checkbox"
+                               id="dr_@roll"
+                               checked="@_diceRolls.Contains(roll)"
+                               @onchange="(e) => { if (e.Value is bool b && b) _diceRolls.Add(roll); else _diceRolls.Remove(roll); MarkDirty(); }" />
+                        <label class="form-check-label" for="dr_@roll">@roll</label>
+                    </div>
+                }
+            </div>
+        </div>
+
         @* ── Position pattern ──────────────────────────────────────────────────── *@
         @* Per-point checker-range constraint, entered as the lib's raw bracket
            list until the board-grid widget replaces this field in a later arc.
@@ -272,6 +304,11 @@
     private bool _includeRollouts;
     private bool _includeBookRollouts;
 
+    // Dice facet — the raw set of admitted rolls, stored verbatim and handed to
+    // FilterConfig.Build(); empty = facet off. The roll set and its order are the
+    // lib's (DiceRoll.All), never re-derived here.
+    private HashSet<DiceRoll> _diceRolls = new();
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
@@ -316,6 +353,7 @@
         AnalysisLevels = _analysisLevels.ToList(),
         IncludeRollouts = _includeRollouts,
         IncludeBookRollouts = _includeBookRollouts,
+        DiceRolls = _diceRolls.ToList(),
         PositionPattern = ParsePositionPattern(_positionPatternText),
     };
 
@@ -333,6 +371,7 @@
         _analysisLevels = new HashSet<AnalysisLevel>(cfg.AnalysisLevels);
         _includeRollouts = cfg.IncludeRollouts;
         _includeBookRollouts = cfg.IncludeBookRollouts;
+        _diceRolls = new HashSet<DiceRoll>(cfg.DiceRolls);
         _positionPatternText = cfg.PositionPattern?.ToBracketList() ?? string.Empty;
     }
 

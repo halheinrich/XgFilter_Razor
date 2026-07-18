@@ -389,6 +389,92 @@ public class FilterPanelTests : BunitContext
         Assert.False(cut.Find("#am_BookRollout").HasAttribute("checked"));
     }
 
+    // Canonical-order render pin for the dice facet: every roll must surface as a
+    // #dr_<token> checkbox, and the checkboxes must appear in DiceRoll.All order
+    // (the lib's ascending canonical order) — no UI-side roll list or sort rule.
+    // Reads the rendered #dr_* inputs in DOM order, parses each id back to a
+    // DiceRoll, and compares the sequence to DiceRoll.All (which is the 21 rolls).
+    [Fact]
+    public void DiceSection_RendersAll21RollsInCanonicalOrder()
+    {
+        var cut = Render<FilterPanel>();
+
+        var renderedOrder = cut.FindAll("input[id^='dr_']")
+            .Select(el => DiceRoll.Parse(el.Id!["dr_".Length..]))
+            .ToArray();
+
+        Assert.Equal(DiceRoll.All, renderedOrder);
+        Assert.Equal(21, renderedOrder.Length);
+    }
+
+    // Silent-splat guard for the dice facet (cf. the Contact-type guard): an
+    // unbound Razor checkbox compiles but never mutates state, so check a spread
+    // of rolls — a double and a non-double — Apply, and assert the emitted
+    // DiceRolls list carries exactly them. The list is raw intent; whether it
+    // becomes an active DiceRollFilter is FilterConfig.Build()'s call.
+    [Fact]
+    public async Task DiceRollCheckbox_FlowsIntoEmittedConfig()
+    {
+        FilterConfig? capturedConfig = null;
+        var cut = Render<FilterPanel>(parameters => parameters
+            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
+
+        cut.Find("#dr_31").Change(true);
+        cut.Find("#dr_55").Change(true);
+        await cut.Find("button.btn-primary").ClickAsync(new());
+
+        Assert.NotNull(capturedConfig);
+        Assert.Contains(new DiceRoll(3, 1), capturedConfig!.DiceRolls);
+        Assert.Contains(new DiceRoll(5, 5), capturedConfig.DiceRolls);
+        Assert.Equal(2, capturedConfig.DiceRolls.Count);
+    }
+
+    // Round-trips the dice facet through the single-key persistence path: check a
+    // couple of rolls, Apply (writes the FilterConfig blob — DiceRolls as
+    // two-digit token strings via DiceRoll's own converter), then re-mount with
+    // the captured blob and assert exactly those checkboxes restore checked. Also
+    // the "pre-populated config renders checked" coverage.
+    [Fact]
+    public async Task DiceRolls_RoundTripsAcrossRemount()
+    {
+        var cut = Render<FilterPanel>();
+
+        cut.Find("#dr_31").Change(true);
+        cut.Find("#dr_66").Change(true);
+        await cut.Find("button.btn-primary").ClickAsync(new());
+
+        var stored = JSInterop.Invocations["localStorage.setItem"]
+            .Last(i => (string?)i.Arguments[0] == ConfigKey)
+            .Arguments[1] as string;
+        Assert.NotNull(stored);
+
+        JSInterop.Setup<string?>("localStorage.getItem", ConfigKey).SetResult(stored);
+        var restored = Render<FilterPanel>();
+
+        Assert.True(restored.Find("#dr_31").HasAttribute("checked"));
+        Assert.True(restored.Find("#dr_66").HasAttribute("checked"));
+        Assert.DoesNotContain("checked", restored.Find("#dr_21").OuterHtml);
+    }
+
+    // Deselecting every checked roll back to none must emit the inactive state —
+    // an empty DiceRolls list, "facet off," not "reject everything." The
+    // Build()-skip on the empty list is upstream's job; the panel's contract is
+    // only that it round-trips the emptied intent faithfully.
+    [Fact]
+    public async Task DiceRolls_DeselectedToEmpty_EmitsInactiveState()
+    {
+        FilterConfig? capturedConfig = null;
+        var cut = Render<FilterPanel>(parameters => parameters
+            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
+
+        cut.Find("#dr_31").Change(true);
+        cut.Find("#dr_31").Change(false);
+        await cut.Find("button.btn-primary").ClickAsync(new());
+
+        Assert.NotNull(capturedConfig);
+        Assert.Empty(capturedConfig!.DiceRolls);
+    }
+
     // Silent-splat guard for the Position-pattern field: an unbound text input
     // would compile but never feed BuildConfig, so type a valid bracket list,
     // Apply, and assert the emitted config carries the parsed BoardPattern.
