@@ -128,30 +128,53 @@
         </div>
 
         @* ── Analysis depth ────────────────────────────────────────────────────── *@
-        @* Include-list over BgDataTypes_Lib.AnalysisDepthClass (OR semantics;
-           none checked = no depth filter). Same facet idiom as Contact type —
-           the only differences are the wider member set and that Unknown is a
-           first-class, selectable member: checking it is the deliberate opt-in
-           to admit unclassified/legacy rows (AnalysisDepthFilter drops them
-           otherwise). Rendered in Enum.GetValues declaration order, which is the
-           lib's ascending-rigor order, so no UI-side sort rule is imposed. The
-           inline form-check wraps the twenty members across rows on its own. *@
+        @* Two-axis facet over BgDataTypes_Lib's AnalysisMode × AnalysisLevel.
+           The panel binds three raw-intent inputs — a checked-level set plus the
+           two mode toggles — and never derives modes itself: FilterConfig.Build()
+           is the single owner of the mode-set semantics (Rollouts → Rollout,
+           Book rollouts → BookRollout, neither toggle → Evaluation, nothing
+           selected at all → facet off). Re-encoding that here would duplicate the
+           SSOT and silently drift — see this panel's Pitfalls and XgFilter_Lib's
+           Depth-facet block. Levels render in Enum.GetValues declaration order
+           (the lib's ascending-rigor order), so no UI-side sort rule is imposed;
+           Unknown is a first-class, selectable level (checking it opts legacy /
+           unenriched rows back in on whichever mode is selected). The two mode
+           toggles are a distinct axis, not more members of the level list, so
+           they sit in a rule-separated group below the checkboxes. Their labels
+           come from AnalysisMode's [Description]s via EnumLabel.ToLabel — display
+           text stays owned by the enum, never hardcoded here. *@
         <div class="mb-3">
             <label class="form-label">
                 Analysis depth
-                <small class="text-muted">(none checked = all depths)</small>
+                <small class="text-muted">(toggles off = plain evaluations; levels filter the selected mode; nothing selected = facet off)</small>
             </label>
             <div>
-                @foreach (var ad in Enum.GetValues<AnalysisDepthClass>())
+                @foreach (var level in Enum.GetValues<AnalysisLevel>())
                 {
                     <div class="form-check form-check-inline">
                         <input class="form-check-input" type="checkbox"
-                               id="ad_@ad"
-                               checked="@_analysisDepthClasses.Contains(ad)"
-                               @onchange="(e) => { if (e.Value is bool b && b) _analysisDepthClasses.Add(ad); else _analysisDepthClasses.Remove(ad); MarkDirty(); }" />
-                        <label class="form-check-label" for="ad_@ad">@ad.ToLabel()</label>
+                               id="al_@level"
+                               checked="@_analysisLevels.Contains(level)"
+                               @onchange="(e) => { if (e.Value is bool b && b) _analysisLevels.Add(level); else _analysisLevels.Remove(level); MarkDirty(); }" />
+                        <label class="form-check-label" for="al_@level">@level.ToLabel()</label>
                     </div>
                 }
+            </div>
+            <div class="mt-2 pt-2 border-top">
+                <div class="form-check form-check-inline">
+                    <input class="form-check-input" type="checkbox"
+                           id="am_Rollout"
+                           checked="@_includeRollouts"
+                           @onchange="(e) => { _includeRollouts = e.Value is bool b && b; MarkDirty(); }" />
+                    <label class="form-check-label" for="am_Rollout">@AnalysisMode.Rollout.ToLabel()</label>
+                </div>
+                <div class="form-check form-check-inline">
+                    <input class="form-check-input" type="checkbox"
+                           id="am_BookRollout"
+                           checked="@_includeBookRollouts"
+                           @onchange="(e) => { _includeBookRollouts = e.Value is bool b && b; MarkDirty(); }" />
+                    <label class="form-check-label" for="am_BookRollout">@AnalysisMode.BookRollout.ToLabel()</label>
+                </div>
             </div>
         </div>
 
@@ -240,7 +263,14 @@
     // Enum state needs no string buffer — the controls bind directly.
     private DecisionTypeOption _decisionType = DecisionTypeOption.Both;
     private HashSet<ContactType> _contactTypes = new();
-    private HashSet<AnalysisDepthClass> _analysisDepthClasses = new();
+
+    // Depth facet — raw user intent along two axes, stored verbatim and handed
+    // to FilterConfig.Build() which owns the mode-set derivation. The panel
+    // never maps these to an AnalysisMode set itself (that SSOT lives in the
+    // lib; see the Analysis-depth markup comment).
+    private HashSet<AnalysisLevel> _analysisLevels = new();
+    private bool _includeRollouts;
+    private bool _includeBookRollouts;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -283,7 +313,9 @@
         MoveNumberMin = ParseInt(_moveNumberMinText),
         MoveNumberMax = ParseInt(_moveNumberMaxText),
         ContactTypes = _contactTypes.ToList(),
-        AnalysisDepthClasses = _analysisDepthClasses.ToList(),
+        AnalysisLevels = _analysisLevels.ToList(),
+        IncludeRollouts = _includeRollouts,
+        IncludeBookRollouts = _includeBookRollouts,
         PositionPattern = ParsePositionPattern(_positionPatternText),
     };
 
@@ -298,7 +330,9 @@
         _moveNumberMinText = FormatNumber(cfg.MoveNumberMin);
         _moveNumberMaxText = FormatNumber(cfg.MoveNumberMax);
         _contactTypes = new HashSet<ContactType>(cfg.ContactTypes);
-        _analysisDepthClasses = new HashSet<AnalysisDepthClass>(cfg.AnalysisDepthClasses);
+        _analysisLevels = new HashSet<AnalysisLevel>(cfg.AnalysisLevels);
+        _includeRollouts = cfg.IncludeRollouts;
+        _includeBookRollouts = cfg.IncludeBookRollouts;
         _positionPatternText = cfg.PositionPattern?.ToBracketList() ?? string.Empty;
     }
 

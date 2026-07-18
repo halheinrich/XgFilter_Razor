@@ -136,75 +136,204 @@ public class FilterPanelTests : BunitContext
         Assert.Contains(ContactType.Contact, capturedConfig!.ContactTypes);
     }
 
-    // Exhaustive render check for the Analysis-depth section: every
-    // AnalysisDepthClass member must surface as an #ad_<member> checkbox
-    // carrying its lib-owned [Description] label (via EnumLabel.ToLabel).
-    // Iterating Enum.GetValues means a new member added upstream is covered
-    // automatically, and pins that Unknown renders like any other member —
-    // its presence in the UI is the deliberate opt-in to admit legacy rows.
+    // Exhaustive render check for the Analysis-depth level axis: every
+    // AnalysisLevel member must surface as an #al_<member> checkbox carrying its
+    // lib-owned [Description] label (via EnumLabel.ToLabel). Iterating
+    // Enum.GetValues means a new member added upstream is covered automatically,
+    // and pins that Unknown renders like any other level — its presence in the UI
+    // is the deliberate opt-in to admit legacy / unenriched rows on the selected
+    // mode.
     [Fact]
-    public void AnalysisDepthSection_RendersEveryMemberWithLibLabel()
+    public void AnalysisDepthSection_RendersEveryLevelWithLibLabel()
     {
         var cut = Render<FilterPanel>();
 
-        foreach (var depth in Enum.GetValues<AnalysisDepthClass>())
+        foreach (var level in Enum.GetValues<AnalysisLevel>())
         {
-            Assert.NotNull(cut.Find($"#ad_{depth}"));
-            Assert.Contains(depth.ToLabel(), cut.Markup);
+            Assert.NotNull(cut.Find($"#al_{level}"));
+            Assert.Contains(level.ToLabel(), cut.Markup);
         }
     }
 
-    // Silent-splat guard for the Analysis-depth section (cf. the Contact-type
-    // guard): an unbound Razor checkbox compiles but never mutates state, so
-    // check a spread of members — including Unknown, the deliberate opt-in — and
-    // assert the emitted config's include-list carries exactly them.
+    // The two mode toggles are the depth facet's second axis. Pin that each
+    // renders as a checkbox and that its label text is the enum's lib-owned
+    // [Description] (EnumLabel.ToLabel) — anchored to the label's `for` target so
+    // a hardcoded panel string can't satisfy it. Guards the brief's requirement
+    // that display text stays owned by AnalysisMode, not the UI.
     [Fact]
-    public async Task AnalysisDepthCheckbox_FlowsIntoEmittedConfig()
+    public void AnalysisDepthSection_RendersModeTogglesWithLibLabels()
+    {
+        var cut = Render<FilterPanel>();
+
+        Assert.Equal("checkbox", cut.Find("#am_Rollout").GetAttribute("type"));
+        Assert.Equal("checkbox", cut.Find("#am_BookRollout").GetAttribute("type"));
+
+        Assert.Equal(AnalysisMode.Rollout.ToLabel(),
+            cut.Find("label[for='am_Rollout']").TextContent.Trim());
+        Assert.Equal(AnalysisMode.BookRollout.ToLabel(),
+            cut.Find("label[for='am_BookRollout']").TextContent.Trim());
+    }
+
+    // Declaration-order rendering pin: the level checkboxes must appear in
+    // Enum.GetValues order (the lib's ascending-rigor order), so no UI-side sort
+    // rule silently reorders them. Reads the rendered #al_* inputs in DOM order
+    // and compares to the enum's declared order.
+    [Fact]
+    public void AnalysisLevelCheckboxes_RenderInEnumDeclarationOrder()
+    {
+        var cut = Render<FilterPanel>();
+
+        var renderedOrder = cut.FindAll("input[id^='al_']")
+            .Select(el => Enum.Parse<AnalysisLevel>(el.Id!["al_".Length..]))
+            .ToArray();
+
+        Assert.Equal(Enum.GetValues<AnalysisLevel>(), renderedOrder);
+    }
+
+    // Canonical selection from the brief: 4-ply checked + Rollouts toggled must
+    // emit AnalysisLevels=[Ply4], IncludeRollouts=true, IncludeBookRollouts=false
+    // — raw intent, verbatim. The mode-set derivation (that this means "4-ply
+    // rollouts only") is FilterConfig.Build()'s job, not the panel's, so this
+    // asserts the three config members and nothing about derived modes.
+    [Fact]
+    public async Task AnalysisDepth_CanonicalSelection_4PlyPlusRollouts_EmitsRawIntent()
     {
         FilterConfig? capturedConfig = null;
         var cut = Render<FilterPanel>(parameters => parameters
             .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
 
-        cut.Find("#ad_Unknown").Change(true);
-        cut.Find("#ad_XgRollerPlus").Change(true);
+        cut.Find("#al_Ply4").Change(true);
+        cut.Find("#am_Rollout").Change(true);
         await cut.Find("button.btn-primary").ClickAsync(new());
 
         Assert.NotNull(capturedConfig);
-        Assert.Contains(AnalysisDepthClass.Unknown, capturedConfig!.AnalysisDepthClasses);
-        Assert.Contains(AnalysisDepthClass.XgRollerPlus, capturedConfig.AnalysisDepthClasses);
-        Assert.Equal(2, capturedConfig.AnalysisDepthClasses.Count);
+        Assert.Equal(new[] { AnalysisLevel.Ply4 }, capturedConfig!.AnalysisLevels);
+        Assert.True(capturedConfig.IncludeRollouts);
+        Assert.False(capturedConfig.IncludeBookRollouts);
     }
 
-    // Deselecting back to empty must emit an empty include-list — "no depth
-    // filter" (inactive), not "reject everything." The Build()-skip on an empty
-    // list is upstream's job; the panel's contract is only that the emitted
-    // config round-trips the empty state faithfully.
+    // Silent-splat guard for the level axis (cf. the Contact-type guard): an
+    // unbound Razor checkbox compiles but never mutates state, so check a spread
+    // of levels — including Unknown, the deliberate opt-in — and assert the
+    // emitted AnalysisLevels list carries exactly them.
     [Fact]
-    public async Task AnalysisDepth_DeselectedToEmpty_EmitsEmptyList()
+    public async Task AnalysisLevelCheckbox_FlowsIntoEmittedConfig()
     {
         FilterConfig? capturedConfig = null;
         var cut = Render<FilterPanel>(parameters => parameters
             .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
 
-        cut.Find("#ad_Ply3").Change(true);
-        cut.Find("#ad_Ply3").Change(false);
+        cut.Find("#al_Unknown").Change(true);
+        cut.Find("#al_XgRollerPlus").Change(true);
         await cut.Find("button.btn-primary").ClickAsync(new());
 
         Assert.NotNull(capturedConfig);
-        Assert.Empty(capturedConfig!.AnalysisDepthClasses);
+        Assert.Contains(AnalysisLevel.Unknown, capturedConfig!.AnalysisLevels);
+        Assert.Contains(AnalysisLevel.XgRollerPlus, capturedConfig.AnalysisLevels);
+        Assert.Equal(2, capturedConfig.AnalysisLevels.Count);
     }
 
-    // Round-trips the Analysis-depth section through the single-key persistence
-    // path: check a couple of members, Apply (writes the FilterConfig blob,
-    // AnalysisDepthClasses serialized as member-name strings), then re-mount with
-    // the captured blob and assert exactly those boxes restore checked.
+    // Silent-splat guard for the mode-toggle axis: each toggle binds to its own
+    // bool, so flip both and assert the emitted config carries both flags — with
+    // no level checked, so this also pins the "toggles alone, any level" intent
+    // the empty AnalysisLevels list expresses.
+    [Fact]
+    public async Task RolloutToggles_FlowIntoEmittedConfig()
+    {
+        FilterConfig? capturedConfig = null;
+        var cut = Render<FilterPanel>(parameters => parameters
+            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
+
+        cut.Find("#am_Rollout").Change(true);
+        cut.Find("#am_BookRollout").Change(true);
+        await cut.Find("button.btn-primary").ClickAsync(new());
+
+        Assert.NotNull(capturedConfig);
+        Assert.True(capturedConfig!.IncludeRollouts);
+        Assert.True(capturedConfig.IncludeBookRollouts);
+        Assert.Empty(capturedConfig.AnalysisLevels);
+    }
+
+    // Every depth control must raise OnFilterDirty so the parent can disable Run
+    // until Apply. Toggle a level checkbox and each mode toggle and count the
+    // firings — one per interaction, none on initial render.
+    [Fact]
+    public void AnalysisDepthControls_EachFireOnFilterDirty()
+    {
+        var dirtyCount = 0;
+        var cut = Render<FilterPanel>(parameters => parameters
+            .Add(p => p.OnFilterDirty, () => { dirtyCount++; }));
+
+        cut.Find("#al_Ply4").Change(true);
+        Assert.Equal(1, dirtyCount);
+
+        cut.Find("#am_Rollout").Change(true);
+        Assert.Equal(2, dirtyCount);
+
+        cut.Find("#am_BookRollout").Change(true);
+        Assert.Equal(3, dirtyCount);
+    }
+
+    // Deselecting every axis back to nothing must emit the inactive state —
+    // empty level list and both toggles off — "facet off," not "reject
+    // everything." The Build()-skip on that combination is upstream's job; the
+    // panel's contract is only that it round-trips the emptied intent faithfully.
+    [Fact]
+    public async Task AnalysisDepth_DeselectedToEmpty_EmitsInactiveState()
+    {
+        FilterConfig? capturedConfig = null;
+        var cut = Render<FilterPanel>(parameters => parameters
+            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
+
+        cut.Find("#al_Ply3").Change(true);
+        cut.Find("#am_Rollout").Change(true);
+        cut.Find("#al_Ply3").Change(false);
+        cut.Find("#am_Rollout").Change(false);
+        await cut.Find("button.btn-primary").ClickAsync(new());
+
+        Assert.NotNull(capturedConfig);
+        Assert.Empty(capturedConfig!.AnalysisLevels);
+        Assert.False(capturedConfig.IncludeRollouts);
+        Assert.False(capturedConfig.IncludeBookRollouts);
+    }
+
+    // Reset must clear the whole depth facet — every level unchecked and both
+    // toggles off — in the UI and in the emitted reset config.
+    [Fact]
+    public async Task Reset_ClearsAnalysisDepthSelections()
+    {
+        FilterConfig? capturedConfig = null;
+        var cut = Render<FilterPanel>(parameters => parameters
+            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
+
+        cut.Find("#al_Ply4").Change(true);
+        cut.Find("#am_Rollout").Change(true);
+        cut.Find("#am_BookRollout").Change(true);
+
+        await cut.Find("button.btn-outline-secondary").ClickAsync(new());
+
+        Assert.False(cut.Find("#al_Ply4").HasAttribute("checked"));
+        Assert.False(cut.Find("#am_Rollout").HasAttribute("checked"));
+        Assert.False(cut.Find("#am_BookRollout").HasAttribute("checked"));
+
+        Assert.NotNull(capturedConfig);
+        Assert.Empty(capturedConfig!.AnalysisLevels);
+        Assert.False(capturedConfig.IncludeRollouts);
+        Assert.False(capturedConfig.IncludeBookRollouts);
+    }
+
+    // Round-trips the depth facet through the single-key persistence path: check
+    // a couple of levels and a mode toggle, Apply (writes the FilterConfig blob —
+    // AnalysisLevels as member-name strings, the toggles as booleans), then
+    // re-mount with the captured blob and assert exactly those controls restore.
     [Fact]
     public async Task AnalysisDepth_RoundTripsAcrossRemount()
     {
         var cut = Render<FilterPanel>();
 
-        cut.Find("#ad_Ply3").Change(true);
-        cut.Find("#ad_RolloutPly7").Change(true);
+        cut.Find("#al_Ply3").Change(true);
+        cut.Find("#al_Ply7").Change(true);
+        cut.Find("#am_BookRollout").Change(true);
         await cut.Find("button.btn-primary").ClickAsync(new());
 
         var stored = JSInterop.Invocations["localStorage.setItem"]
@@ -215,26 +344,49 @@ public class FilterPanelTests : BunitContext
         JSInterop.Setup<string?>("localStorage.getItem", ConfigKey).SetResult(stored);
         var restored = Render<FilterPanel>();
 
-        Assert.True(restored.Find("#ad_Ply3").HasAttribute("checked"));
-        Assert.True(restored.Find("#ad_RolloutPly7").HasAttribute("checked"));
-        Assert.DoesNotContain("checked", restored.Find("#ad_Book").OuterHtml);
+        Assert.True(restored.Find("#al_Ply3").HasAttribute("checked"));
+        Assert.True(restored.Find("#al_Ply7").HasAttribute("checked"));
+        Assert.True(restored.Find("#am_BookRollout").HasAttribute("checked"));
+        Assert.False(restored.Find("#am_Rollout").HasAttribute("checked"));
+        Assert.DoesNotContain("checked", restored.Find("#al_XgRoller").OuterHtml);
     }
 
-    // Persistence back-compat: a blob saved before the analysis-depth axis
-    // existed carries no AnalysisDepthClasses field. TryFromJson must restore it
-    // to an empty (inactive) include-list — no depth checkbox checked — which
-    // falls out of System.Text.Json leaving the initialized-empty list untouched
-    // for an absent member. Verified here rather than assumed.
+    // Persistence back-compat: a blob saved before the depth axis existed carries
+    // none of AnalysisLevels / IncludeRollouts / IncludeBookRollouts. TryFromJson
+    // must restore the facet inactive — no level checked, both toggles off —
+    // which falls out of System.Text.Json leaving the initialized defaults for
+    // the absent members. Verified here rather than assumed.
     [Fact]
-    public void LegacyConfigWithoutDepthField_RestoresToNoneSelected()
+    public void LegacyConfigWithoutDepthField_RestoresToInactive()
     {
         JSInterop.Setup<string?>("localStorage.getItem", ConfigKey)
             .SetResult("{\"DecisionType\":\"Both\"}");
 
         var cut = Render<FilterPanel>();
 
-        foreach (var depth in Enum.GetValues<AnalysisDepthClass>())
-            Assert.DoesNotContain("checked", cut.Find($"#ad_{depth}").OuterHtml);
+        foreach (var level in Enum.GetValues<AnalysisLevel>())
+            Assert.DoesNotContain("checked", cut.Find($"#al_{level}").OuterHtml);
+        Assert.False(cut.Find("#am_Rollout").HasAttribute("checked"));
+        Assert.False(cut.Find("#am_BookRollout").HasAttribute("checked"));
+    }
+
+    // Migration guard: a blob saved under the retired flat depth axis carries an
+    // AnalysisDepthClasses array with member names (e.g. "RolloutPly7") that no
+    // longer exist on any current enum. System.Text.Json ignores it as an unknown
+    // property, so the two-axis facet restores inactive rather than throwing —
+    // the reset-on-read path for old saved configs.
+    [Fact]
+    public void ConfigWithRetiredDepthField_IsIgnored_RestoresToInactive()
+    {
+        JSInterop.Setup<string?>("localStorage.getItem", ConfigKey)
+            .SetResult("{\"DecisionType\":\"Both\",\"AnalysisDepthClasses\":[\"Ply3\",\"RolloutPly7\"]}");
+
+        var cut = Render<FilterPanel>();
+
+        foreach (var level in Enum.GetValues<AnalysisLevel>())
+            Assert.DoesNotContain("checked", cut.Find($"#al_{level}").OuterHtml);
+        Assert.False(cut.Find("#am_Rollout").HasAttribute("checked"));
+        Assert.False(cut.Find("#am_BookRollout").HasAttribute("checked"));
     }
 
     // Silent-splat guard for the Position-pattern field: an unbound text input

@@ -24,10 +24,13 @@ https://github.com/halheinrich/XgFilter_Razor — branch `main`.
   (`DecisionTypeOption`, `PositionType`, `PlayType`), and the
   `EnumLabel.ToLabel<TEnum>()` extension. Project reference, not a
   package.
-- **BgDataTypes_Lib** — `AnalysisDepthClass`, whose members drive the
-  Analysis-depth facet (labels via `EnumLabel.ToLabel`). Owned here, not in
-  `XgFilter_Lib.Enums`, because the producer (`ConvertXgToJson_Lib`) stamps it.
-  Beyond that, consumers of `DecisionFilterSet` typically work against
+- **BgDataTypes_Lib** — `AnalysisMode` and `AnalysisLevel`, the two-axis
+  taxonomy that replaced the retired flat `AnalysisDepthClass` and drives the
+  Analysis-depth facet: `AnalysisLevel`'s members are the level checkboxes and
+  `AnalysisMode.Rollout` / `.BookRollout` label the two mode toggles (labels via
+  `EnumLabel.ToLabel`). Owned there, not in `XgFilter_Lib.Enums`, because the
+  producer (`ConvertXgToJson_Lib`) stamps both axes. Beyond
+  that, consumers of `DecisionFilterSet` typically work against
   `IDecisionFilterData`, so the dependency is conceptually direct as well. The
   precedent in `ExtractFromXgToCsv.Client.csproj` is to list every such
   dependency explicitly.
@@ -63,8 +66,15 @@ primitives into a Blazor component and surfaces the resulting
 
 `FilterPanel` owns the entire filter-form UI as a Bootstrap card with
 controls for player names, decision type, match scores, error range, move
-number range, contact type, analysis depth, and a position pattern. Position
-type and play type are shelved for later reintroduction — their UI groups have
+number range, contact type, analysis depth, and a position pattern. The
+analysis-depth control is a **two-axis** facet: one checkbox per
+`AnalysisLevel` (rendered in `Enum.GetValues` declaration order) for the level
+axis, plus two rule-separated toggle checkboxes for the mode axis, bound to
+`FilterConfig.IncludeRollouts` / `IncludeBookRollouts` and labelled from
+`AnalysisMode.Rollout` / `.BookRollout`'s `[Description]`s. The panel binds
+these three raw-intent members and **never** derives the effective
+`AnalysisMode` set — that SSOT is `FilterConfig.Build()` (see Pitfalls).
+Position type and play type are shelved for later reintroduction — their UI groups have
 been hidden since `ddb9c98`, while the `XgFilter_Lib` machinery behind them
 (`FilterConfig.PositionTypes` / `PlayTypes`, the filters, the enums) stays
 intact. State is held in private fields on the component instance.
@@ -143,6 +153,17 @@ state").
   events as the user types — only `OnFilterDirty`. The contract is
   "user thinks, then commits via Apply." Don't wire a downstream
   consumer to assume `OnFilterConfigChanged` fires per keystroke.
+- **The depth facet's mode set is derived in `Build()`, not the panel.**
+  The Analysis-depth control writes only raw intent — a checked-level set
+  (`AnalysisLevels`) plus the two independent toggles (`IncludeRollouts`,
+  `IncludeBookRollouts`) — and calls `MarkDirty()`. The mapping from those
+  toggles to the effective `AnalysisMode` set (Rollouts→`Rollout`, Book
+  rollouts→`BookRollout`, neither→`Evaluation`, plus the "no level checked and
+  neither toggle = facet off" rule) lives **only** in `FilterConfig.Build()` —
+  it is the single source of truth, and XgFilter_Lib's Pitfalls flag
+  re-encoding it in a consumer as a silent-drift hazard. The panel must not
+  pre-compute a mode list; it binds the three members verbatim and lets
+  `Build()` own the semantics.
 - **Single callback by design.** `FilterConfig.Build()` is the canonical
   `FilterConfig` → `DecisionFilterSet` adapter; a parallel callback
   raising `DecisionFilterSet` would be a redundant encapsulation leak.
