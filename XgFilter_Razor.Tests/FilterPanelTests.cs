@@ -495,6 +495,44 @@ public class FilterPanelTests : BunitContext
         Assert.Equal("[6,2,] [5,,-2]", capturedConfig.PositionPattern!.ToBracketList());
     }
 
+    // The panel is where users type the grammar by hand, so pin the borne-off
+    // vocabulary at the wire: an off/opp-off pattern must reach the emitted
+    // config, and mixed-case names must come back canonicalized. BoardPattern
+    // parses the names case-insensitively and renders them lower-case; typing
+    // "OFF"/"Opp-Off" here proves the panel hands the text to TryParse verbatim
+    // rather than pre-chewing (or pre-rejecting) it.
+    [Fact]
+    public async Task PositionPatternWithOffTokens_FlowsIntoEmittedConfigCanonicalized()
+    {
+        FilterConfig? capturedConfig = null;
+        var cut = Render<FilterPanel>(parameters => parameters
+            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
+
+        cut.Find("#positionPattern").Input("[OFF,10,] [Opp-Off,,-2]");
+        await cut.Find("button.btn-primary").ClickAsync(new());
+
+        Assert.NotNull(capturedConfig);
+        Assert.NotNull(capturedConfig!.PositionPattern);
+        Assert.Equal("[off,10,] [opp-off,,-2]", capturedConfig.PositionPattern!.ToBracketList());
+    }
+
+    // A wrong-signed borne-off bound is a grammar error, not a typo the panel
+    // should quietly tolerate: [off,,-2] asks for a negative count of the on-roll
+    // player's borne-off checkers, which CheckerRange rejects. The lib surfaces
+    // that through TryParse like any malformed token, so the panel must land it
+    // in the same invalid-field state — proving the gate keys on "does it parse,"
+    // not on a local shape check that only catches unbalanced brackets.
+    [Fact]
+    public void WrongSignedOffBound_MarksFieldAndGatesApply()
+    {
+        var cut = Render<FilterPanel>();
+
+        cut.Find("#positionPattern").Input("[off,,-2]");
+
+        Assert.Contains("is-invalid", cut.Find("#positionPattern").GetAttribute("class"));
+        Assert.True(cut.Find("button.btn-primary").HasAttribute("disabled"));
+    }
+
     // Round-trips the Position-pattern field through the single-key persistence
     // path: set a pattern, Apply (writes the FilterConfig blob, PositionPattern
     // serialized as its bracket list by BoardPatternJsonConverter), then re-mount

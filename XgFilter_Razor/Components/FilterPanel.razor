@@ -211,25 +211,35 @@
         </div>
 
         @* ── Position pattern ──────────────────────────────────────────────────── *@
-        @* Per-point checker-range constraint, entered as the lib's raw bracket
+        @* Per-location checker-range constraint, entered as the lib's raw bracket
            list until the board-grid widget replaces this field in a later arc.
            Parsed through BoardPattern.TryParse so half-typed input never throws
            out of the panel; while the text is non-blank and unparseable the
            field is marked invalid and Apply is disabled, so an invalid pattern
-           can never silently drop the filter the user meant to set. *@
+           can never silently drop the filter the user meant to set.
+
+           The help text below documents the lib's location vocabulary — board
+           indices plus the named borne-off tokens — but does not re-implement it:
+           BoardPattern remains the single source of truth for what parses, and a
+           wrong-signed borne-off bound (say [off,,-2]) fails TryParse and lands
+           in the same invalid-field state as any other unparseable text. *@
         <div class="mb-3">
             <label class="form-label" for="positionPattern">
                 Position pattern
-                <small class="text-muted">(per-point checker ranges; blank = no pattern filter)</small>
+                <small class="text-muted">(checker ranges by location; blank = no pattern filter)</small>
             </label>
             <input id="positionPattern"
                    class="form-control @(IsPositionPatternValid ? string.Empty : "is-invalid")"
-                   placeholder="e.g. [6,2,] [5,,-2] [13,2,]"
+                   placeholder="e.g. [6,2,] [5,,-2] [opp-off,,-2]"
                    value="@_positionPatternText"
                    @oninput="e => { _positionPatternText = e.Value?.ToString() ?? string.Empty; MarkDirty(); }" />
             <div class="form-text">
-                [pt,min,max] per point; blank bound = unbounded; negative = opponent.
-                E.g. [6,2,] [5,,-2] [13,2,].
+                [location,min,max] per location; blank bound = unbounded; positive counts
+                belong to the player on roll, negative to the opponent.
+                Locations: points 1–24, bar 25 (player on roll) and bar 0 (opponent),
+                plus borne off — off for the player on roll (bounds 0 to 15) and
+                opp-off for the opponent (bounds -15 to 0).
+                E.g. [6,2,] [5,,-2] [25,1,] [opp-off,,-2] [off,10,].
             </div>
             <div class="invalid-feedback">
                 Not a valid bracket list — fix it to apply, or clear it for no pattern filter.
