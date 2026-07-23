@@ -1,0 +1,253 @@
+@using XgFilter_Lib.Filtering
+
+@* ── SavedFiltersPanel.razor ─────────────────────────────────────────────────
+   Persistence-agnostic pick list over a NamedFilterCollection. The panel owns
+   no document state and mutates nothing: every gesture is raised as a request
+   (OnLoadRequested / OnSaveAsRequested / OnDeleteRequested) for the host to
+   mediate — the host calls With/Without, persists wherever it persists, and
+   passes the new collection instance back down through Filters. Selection is
+   deliberately stateless: the "current" config lives in FilterPanel's edit
+   buffers and would go stale the moment the user edits there, so a highlighted
+   row would be a second source of truth that lies. Overwrite and delete run
+   through inline confirms here (the lib's With doc assigns overwrite
+   confirmation to "the consumer's UI concern"; keeping it in the shared panel
+   gives every host identical UX, and Contains keeps the case-insensitive name
+   rule in the lib). Hosts that cannot persist right now (e.g. a missing
+   FS-Access grant) say so via CanPersist — the panel is told, it never knows.
+   Location: XgFilter_Razor/Components/SavedFiltersPanel.razor
+──────────────────────────────────────────────────────────────────────────── *@
+
+<div class="card mb-4" style="max-width:800px">
+    <div class="card-header">
+        <strong>Saved Filters</strong>
+    </div>
+    <div class="card-body">
+
+        @* ── Pick list ───────────────────────────────────────────────────────
+           Names verbatim from the collection — the lib owns the sort. *@
+        @if (Filters.Count == 0)
+        {
+            <p class="text-muted mb-3">No saved filters yet.</p>
+        }
+        else
+        {
+            <ul class="list-group mb-3">
+                @foreach (var name in Filters.Names)
+                {
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <span>@name</span>
+                        @if (_pendingDeleteName == name)
+                        {
+                            <div class="d-flex gap-2 align-items-center">
+                                <span>Delete '@name'?</span>
+                                <button class="btn btn-danger btn-sm"
+                                        @onclick="() => ConfirmDeleteAsync(name)">
+                                    Confirm delete
+                                </button>
+                                <button class="btn btn-outline-secondary btn-sm"
+                                        @onclick="() => _pendingDeleteName = null">
+                                    Cancel
+                                </button>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="d-flex gap-2">
+                                <button class="btn btn-outline-primary btn-sm"
+                                        @onclick="() => OnLoadRequested.InvokeAsync(name)">
+                                    Load
+                                </button>
+                                <button class="btn btn-outline-danger btn-sm"
+                                        disabled="@(!CanPersist)"
+                                        title="@DisabledTitle"
+                                        @onclick="() => RequestDelete(name)">
+                                    Delete
+                                </button>
+                            </div>
+                        }
+                    </li>
+                }
+            </ul>
+        }
+
+        @* ── Save-as row ───────────────────────────────────────────────────── *@
+        @if (_pendingOverwriteName is null)
+        {
+            <div class="d-flex gap-2">
+                <input id="saveFilterName" class="form-control" style="max-width:300px"
+                       placeholder="Filter name"
+                       value="@_saveNameText"
+                       @oninput="e => _saveNameText = e.Value?.ToString() ?? string.Empty" />
+                <button class="btn btn-primary btn-sm"
+                        disabled="@(!CanPersist || IsSaveNameBlank)"
+                        title="@DisabledTitle"
+                        @onclick="SaveClickedAsync">
+                    Save
+                </button>
+            </div>
+        }
+        else
+        {
+            <div class="d-flex gap-2 align-items-center">
+                <span>Overwrite '@_pendingOverwriteName'?</span>
+                <button class="btn btn-primary btn-sm" @onclick="ConfirmOverwriteAsync">
+                    Overwrite
+                </button>
+                <button class="btn btn-outline-secondary btn-sm"
+                        @onclick="() => _pendingOverwriteName = null">
+                    Cancel
+                </button>
+            </div>
+        }
+
+        @if (!CanPersist && PersistDisabledReason is not null)
+        {
+            <div class="form-text">@PersistDisabledReason</div>
+        }
+    </div>
+</div>
+
+@code {
+    /// <summary>
+    /// The saved-filter document to render. Immutable — after mediating a save
+    /// or delete the host passes the <em>new</em> instance returned by
+    /// <see cref="NamedFilterCollection.With"/> /
+    /// <see cref="NamedFilterCollection.Without"/> back down, and the panel
+    /// re-renders from its <see cref="NamedFilterCollection.Names"/>. A
+    /// reference change also cancels any pending inline confirm (it was posed
+    /// against the old document). Required: the panel is meaningless without a
+    /// document, so <see cref="EditorRequiredAttribute"/> makes a missing
+    /// binding an <c>RZ2012</c> compile error rather than a silent Razor splat.
+    /// </summary>
+    [Parameter, EditorRequired]
+    public NamedFilterCollection Filters { get; set; } = NamedFilterCollection.Empty;
+
+    /// <summary>
+    /// Raised when the user clicks a row's Load button, carrying the saved
+    /// name. The host resolves it (e.g.
+    /// <see cref="NamedFilterCollection.TryGetConfig"/>) and pushes the config
+    /// wherever it goes — typically <c>FilterPanel.LoadConfig</c>. The panel
+    /// mutates nothing. Required: the button renders unconditionally, and an
+    /// unbound callback would be a silent no-op affordance.
+    /// </summary>
+    [Parameter, EditorRequired]
+    public EventCallback<string> OnLoadRequested { get; set; }
+
+    /// <summary>
+    /// Raised when the user commits save-as — including only <em>after</em>
+    /// the inline confirm when the name already exists (case-insensitively,
+    /// per <see cref="NamedFilterCollection.Contains"/>) — carrying the
+    /// trimmed, non-blank name, pre-normalized to satisfy
+    /// <see cref="NamedFilterCollection.With"/>'s name contract. The host
+    /// snapshots the config (e.g. <c>FilterPanel.TryGetEditedConfig</c>),
+    /// calls <c>With</c>, persists, and passes the new collection back down.
+    /// Required for the same silent-splat reason as
+    /// <see cref="OnLoadRequested"/>.
+    /// </summary>
+    [Parameter, EditorRequired]
+    public EventCallback<string> OnSaveAsRequested { get; set; }
+
+    /// <summary>
+    /// Raised only after the user confirms a row's inline delete prompt,
+    /// carrying the name. The host calls
+    /// <see cref="NamedFilterCollection.Without"/>, persists, and passes the
+    /// new collection back down. Required for the same silent-splat reason as
+    /// <see cref="OnLoadRequested"/>.
+    /// </summary>
+    [Parameter, EditorRequired]
+    public EventCallback<string> OnDeleteRequested { get; set; }
+
+    /// <summary>
+    /// Gates the mutating affordances — Save and Delete — as one switch: both
+    /// mutate the persisted document, so a host that cannot persist right now
+    /// (e.g. BgQuiz without its FS-Access grant) disables both by binding this.
+    /// Load stays enabled regardless; it is read-only over a collection already
+    /// in memory. Defaults to <see langword="true"/>. The handlers early-return
+    /// as well, so the contract holds even for programmatic event dispatch that
+    /// ignores the <c>disabled</c> attribute.
+    /// </summary>
+    [Parameter]
+    public bool CanPersist { get; set; } = true;
+
+    /// <summary>
+    /// Optional host-supplied explanation shown while
+    /// <see cref="CanPersist"/> is <see langword="false"/> — as the disabled
+    /// buttons' <c>title</c> and as a muted hint line — e.g. "Grant folder
+    /// access to save filters." Ignored while persisting is enabled.
+    /// </summary>
+    [Parameter]
+    public string? PersistDisabledReason { get; set; }
+
+    // Save-as name buffer. Trimmed at the moment of raising — the With
+    // contract says the caller normalizes; the panel is that caller's proxy.
+    private string _saveNameText = string.Empty;
+
+    // At most one inline confirm of each kind is pending at a time; starting a
+    // new gesture replaces the old. Both are view-state posed against the
+    // current Filters instance and are cleared when that instance changes.
+    private string? _pendingDeleteName;
+    private string? _pendingOverwriteName;
+
+    // Tracks the previous Filters reference across parameter sets so a
+    // document swap (the host acted, or reloaded) cancels stale confirms.
+    private NamedFilterCollection? _lastSeenFilters;
+
+    private bool IsSaveNameBlank => _saveNameText.Trim().Length == 0;
+
+    private string? DisabledTitle => CanPersist ? null : PersistDisabledReason;
+
+    protected override void OnParametersSet()
+    {
+        if (!ReferenceEquals(_lastSeenFilters, Filters))
+        {
+            _lastSeenFilters = Filters;
+            _pendingDeleteName = null;
+            _pendingOverwriteName = null;
+        }
+    }
+
+    private void RequestDelete(string name)
+    {
+        if (!CanPersist) return;
+        _pendingDeleteName = name;
+    }
+
+    private async Task ConfirmDeleteAsync(string name)
+    {
+        if (!CanPersist) return;
+        _pendingDeleteName = null;
+        await OnDeleteRequested.InvokeAsync(name);
+    }
+
+    private Task SaveClickedAsync()
+    {
+        if (!CanPersist) return Task.CompletedTask;
+        var name = _saveNameText.Trim();
+        if (name.Length == 0) return Task.CompletedTask;
+
+        // Contains keeps the case-insensitive one-name rule in the lib — the
+        // panel never re-implements the comparison.
+        if (Filters.Contains(name))
+        {
+            _pendingOverwriteName = name;
+            return Task.CompletedTask;
+        }
+
+        return RaiseSaveAsync(name);
+    }
+
+    private async Task ConfirmOverwriteAsync()
+    {
+        if (!CanPersist || _pendingOverwriteName is null) return;
+        await RaiseSaveAsync(_pendingOverwriteName);
+    }
+
+    private async Task RaiseSaveAsync(string name)
+    {
+        await OnSaveAsRequested.InvokeAsync(name);
+        // Optimistic clear: the request is out; the host's new collection
+        // instance arriving through Filters is the confirmation channel.
+        _saveNameText = string.Empty;
+        _pendingOverwriteName = null;
+    }
+}
