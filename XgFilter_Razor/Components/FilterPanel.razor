@@ -1,3 +1,4 @@
+@using System.Diagnostics.CodeAnalysis
 @using XgFilter_Lib.Filtering
 @using XgFilter_Lib.Enums
 @using XgFilter_Lib.Patterns
@@ -319,17 +320,89 @@
     // lib's (DiceRoll.All), never re-derived here.
     private HashSet<DiceRoll> _diceRolls = new();
 
+    // True once LoadConfig has staged an externally supplied config. The
+    // first-render localStorage restore checks it both before and after its
+    // await, so a restore completing late can never clobber an external load.
+    // Blazor's single-threaded sync context makes the segments between awaits
+    // atomic — a plain bool is a sufficient guard, no locking.
+    private bool _externalConfigLoaded;
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
+        if (_externalConfigLoaded) return;
 
         var stored = await JS.InvokeAsync<string?>("localStorage.getItem", ConfigKey);
+
+        // Re-check after the await: a host's LoadConfig may have run while the
+        // interop was in flight, and the external config must win.
+        if (_externalConfigLoaded) return;
+
         // Tolerant restore: a missing key, the literal null token, or corrupt
         // JSON all yield a fresh default config — no try/catch here.
         FilterConfig.TryFromJson(stored, out var cfg);
         HydrateFrom(cfg);
 
         StateHasChanged();
+    }
+
+    /// <summary>
+    /// Projects <paramref name="config"/> into the panel's edit buffers as a
+    /// staging-only bulk edit — exactly as if the user had typed every value.
+    /// No <em>Apply-side</em> effects occur: nothing is persisted to
+    /// <c>localStorage</c> and <see cref="OnFilterConfigChanged"/> is not
+    /// raised — the user (or host) still commits via Apply.
+    /// <see cref="OnFilterDirty"/> <em>is</em> raised, unconditionally, like
+    /// any other edit gesture: after a load the staged state diverges from the
+    /// last-applied config, and a host gating actions on dirtiness must hear
+    /// about it. Calling this also suppresses the first-render
+    /// <c>localStorage</c> restore, so a config loaded during host startup
+    /// cannot be clobbered when the restore's interop completes afterwards.
+    /// Must be called on the renderer's synchronization context (any event
+    /// handler or lifecycle method qualifies), typically via <c>&#64;ref</c>.
+    /// </summary>
+    /// <param name="config">The configuration to stage. Read, never stored.</param>
+    /// <exception cref="ArgumentNullException">
+    /// Thrown when <paramref name="config"/> is <see langword="null"/>.
+    /// </exception>
+    public void LoadConfig(FilterConfig config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        _externalConfigLoaded = true;
+        HydrateFrom(config);
+        MarkDirty();
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Snapshots the current edit buffers — including unapplied edits — into a
+    /// <see cref="FilterConfig"/>, for host-driven save-as while the panel is
+    /// dirty. The gate is exactly Apply's, single-sourced through the same
+    /// build path: this fails only when the position-pattern text is non-blank
+    /// and unparseable, the one state in which Apply is disabled. It is
+    /// deliberately no stricter than Apply — match-score tokens ride raw here
+    /// as on the Apply path, validated downstream by
+    /// <see cref="FilterConfig.Build"/> — so save-as can capture exactly what
+    /// Apply could produce.
+    /// </summary>
+    /// <param name="config">
+    /// The snapshot when this returns <see langword="true"/>; otherwise
+    /// <see langword="null"/>.
+    /// </param>
+    /// <returns>
+    /// <see langword="true"/> when the buffers are in a state Apply would
+    /// accept; <see langword="false"/> otherwise.
+    /// </returns>
+    public bool TryGetEditedConfig([NotNullWhen(true)] out FilterConfig? config)
+    {
+        if (!IsPositionPatternValid)
+        {
+            config = null;
+            return false;
+        }
+
+        config = BuildConfig();
+        return true;
     }
 
     private void MarkDirty() => OnFilterDirty.InvokeAsync();

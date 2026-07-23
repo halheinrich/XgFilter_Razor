@@ -663,4 +663,106 @@ public class FilterPanelTests : BunitContext
         var cfg = new FilterConfig { MatchScores = [.. examples] };
         Assert.Null(Record.Exception(() => cfg.Build()));
     }
+
+    // LoadConfig is staging-only: it projects the config into the edit buffers
+    // like a bulk edit gesture. Edit-side signaling fires (OnFilterDirty, once —
+    // staged state now diverges from last-applied), but no Apply-side effect
+    // may occur: no OnFilterConfigChanged, no localStorage write. The user
+    // still commits via Apply.
+    [Fact]
+    public async Task LoadConfig_HydratesBuffers_WithoutApplySideEffects()
+    {
+        FilterConfig? capturedConfig = null;
+        var dirtyCount = 0;
+        var cut = Render<FilterPanel>(parameters => parameters
+            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; })
+            .Add(p => p.OnFilterDirty, () => { dirtyCount++; }));
+
+        var loaded = new FilterConfig
+        {
+            Players = ["Magriel"],
+            DecisionType = DecisionTypeOption.CubeOnly,
+            ContactTypes = [ContactType.Race],
+        };
+        await cut.InvokeAsync(() => cut.Instance.LoadConfig(loaded));
+
+        Assert.Equal("Magriel", cut.Find("input[placeholder='e.g. Hal, Magriel']").GetAttribute("value"));
+        Assert.True(cut.Find("#dt_CubeOnly").HasAttribute("checked"));
+        Assert.True(cut.Find("#ct_Race").HasAttribute("checked"));
+
+        Assert.Null(capturedConfig);
+        Assert.Equal(1, dirtyCount);
+        Assert.DoesNotContain(JSInterop.Invocations, i => i.Identifier == "localStorage.setItem");
+    }
+
+    // Reproduces, deterministically, the interleaving the post-await guard in
+    // OnAfterRenderAsync exists for: the first-render restore is suspended at
+    // its getItem await when the host's LoadConfig runs. A Setup with no
+    // SetResult holds the interop task open — the restore parks on it — then
+    // LoadConfig stages Y, then SetResult releases the restore with X. The
+    // resumed continuation must yield, not clobber: Y's values survive.
+    [Fact]
+    public async Task LoadConfig_DuringPendingStoredRestore_TakesPrecedence()
+    {
+        var pendingGet = JSInterop.Setup<string?>("localStorage.getItem", ConfigKey);
+
+        var cut = Render<FilterPanel>();
+
+        var loaded = new FilterConfig { Players = ["Hal"] };
+        await cut.InvokeAsync(() => cut.Instance.LoadConfig(loaded));
+
+        var storedConfig = new FilterConfig { Players = ["Magriel"] };
+        pendingGet.SetResult(storedConfig.ToJson());
+
+        // WaitForAssertion: the released continuation resumes asynchronously
+        // relative to SetResult; only after it has run is "didn't clobber"
+        // actually proven.
+        cut.WaitForAssertion(() => Assert.Equal(
+            "Hal",
+            cut.Find("input[placeholder='e.g. Hal, Magriel']").GetAttribute("value")));
+    }
+
+    // Save-as must capture the live buffers, not the last-applied config —
+    // the whole point is saving while dirty, before (or instead of) Apply.
+    [Fact]
+    public void TryGetEditedConfig_UnappliedEdits_ReturnsLiveBuffers()
+    {
+        var cut = Render<FilterPanel>();
+
+        cut.Find("input[placeholder='e.g. Hal, Magriel']").Input("Hal");
+        cut.Find("#ct_Race").Change(true);
+
+        Assert.True(cut.Instance.TryGetEditedConfig(out var cfg));
+        Assert.Equal(["Hal"], cfg!.Players);
+        Assert.Contains(ContactType.Race, cfg.ContactTypes);
+    }
+
+    // The one state Apply refuses — non-blank, unparseable position-pattern
+    // text — is exactly the state TryGetEditedConfig refuses. Same gate,
+    // same build path.
+    [Fact]
+    public void TryGetEditedConfig_InvalidPositionPattern_ReturnsFalseNull()
+    {
+        var cut = Render<FilterPanel>();
+
+        cut.Find("#positionPattern").Input("[6,2");
+
+        Assert.False(cut.Instance.TryGetEditedConfig(out var cfg));
+        Assert.Null(cfg);
+    }
+
+    // Pins the deliberate Apply-parity contract: TryGetEditedConfig is no
+    // stricter than Apply. Match-score text rides raw through both paths and
+    // is validated only downstream in FilterConfig.Build() — a config you
+    // could Apply is always a config you can save.
+    [Fact]
+    public void TryGetEditedConfig_MirrorsApplyGate_RawMatchScoreTextPasses()
+    {
+        var cut = Render<FilterPanel>();
+
+        cut.Find("input[placeholder^='e.g. 4a5a']").Input("not-a-score");
+
+        Assert.True(cut.Instance.TryGetEditedConfig(out var cfg));
+        Assert.Contains("not-a-score", cfg!.MatchScores);
+    }
 }
