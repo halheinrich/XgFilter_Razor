@@ -198,11 +198,23 @@
 
     protected override void OnParametersSet()
     {
+        // A new Filters instance is the host's confirmation channel: any new
+        // document resets all in-flight view-state posed against the old one —
+        // the pending confirms and the typed save-as name alike. Causation is
+        // deliberately not tracked: the panel does not know (and must not
+        // guess) whether the swap was its own save landing, a delete, or a
+        // host re-pick, so a successful save clears the input via the same
+        // reset that a delete or reload does. Inferring "my save confirmed"
+        // (an awaiting-confirmation flag, or a Contains check on the arriving
+        // document) would be the second source of truth this panel's
+        // statelessness exists to avoid — and it lies subtly, e.g. a re-pick
+        // to a document that happens to contain the just-typed name.
         if (!ReferenceEquals(_lastSeenFilters, Filters))
         {
             _lastSeenFilters = Filters;
             _pendingDeleteName = null;
             _pendingOverwriteName = null;
+            _saveNameText = string.Empty;
         }
     }
 
@@ -244,10 +256,13 @@
 
     private async Task RaiseSaveAsync(string name)
     {
+        // Raise only — no optimistic clear. The typed name and the overwrite
+        // prompt are cleared when (and only when) the host's new collection
+        // instance arrives through Filters, in OnParametersSet. A save the host
+        // refuses (invalid pattern) or that fails to persist raises no swap, so
+        // the name survives for the user to fix and retry. The overwrite
+        // prompt's own dismissal likewise rides that swap; Cancel clears it
+        // directly (see the save-as row markup).
         await OnSaveAsRequested.InvokeAsync(name);
-        // Optimistic clear: the request is out; the host's new collection
-        // instance arriving through Filters is the confirmation channel.
-        _saveNameText = string.Empty;
-        _pendingOverwriteName = null;
     }
 }

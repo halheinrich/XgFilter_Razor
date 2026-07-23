@@ -110,20 +110,42 @@ public class SavedFiltersPanelTests : BunitContext
     }
 
     // The With contract says the caller normalizes the name; the panel is that
-    // caller's proxy, so the raised payload is trimmed. The input clears
-    // optimistically — the host's new Filters instance is the confirmation
-    // channel.
+    // caller's proxy, so the raised payload is trimmed. The input clears on the
+    // confirmation channel — the host's new Filters instance arriving — not on
+    // the raise, so the raise alone leaves the typed name in place.
     [Fact]
-    public async Task SaveAs_NewName_RaisesTrimmedName_AndClearsInput()
+    public async Task SaveAs_NewName_RaisesTrimmedName_ClearsInputOnSwap()
     {
         var cut = RenderPanel(NamedFilterCollection.Empty);
 
         cut.Find("#saveFilterName").Input("  Race  ");
         await ClickSaveButtonAsync(cut);
 
+        // Raised trimmed; nothing cleared yet — no new document has arrived.
         Assert.Equal(["Race"], _saveRequests);
-        Assert.Equal(string.Empty, cut.Find("#saveFilterName").GetAttribute("value"));
         Assert.DoesNotContain("Overwrite", cut.Markup);
+
+        // The host mediated the save and passed the new collection down; that
+        // swap is the confirmation channel that clears the input.
+        cut.Render(parameters => parameters.Add(p => p.Filters, Collection("Race")));
+
+        Assert.Equal(string.Empty, cut.Find("#saveFilterName").GetAttribute("value"));
+    }
+
+    // The behavioral fix this change exists for: a save the host refuses (an
+    // invalid pattern) or that fails to persist raises no new Filters instance,
+    // so the typed name must survive for the user to fix and retry. The old
+    // optimistic clear ate it on hope; the clear now waits for confirmation.
+    [Fact]
+    public async Task SaveAs_NoFiltersSwap_KeepsTypedName()
+    {
+        var cut = RenderPanel(NamedFilterCollection.Empty);
+
+        cut.Find("#saveFilterName").Input("Race");
+        await ClickSaveButtonAsync(cut);
+
+        Assert.Equal(["Race"], _saveRequests);
+        Assert.Equal("Race", cut.Find("#saveFilterName").GetAttribute("value"));
     }
 
     // Blank (after trim) can never satisfy With's name contract, so Save is
@@ -158,8 +180,17 @@ public class SavedFiltersPanelTests : BunitContext
 
         await ClickButtonByTextAsync(cut, "Overwrite");
 
+        // Raised — but the overwrite prompt, like the typed name, rides the
+        // confirmation swap, not the click. Until the host passes the new
+        // collection down the prompt stays posed, so a refused overwrite is
+        // retryable in place.
         Assert.Equal(["Race"], _saveRequests);
+        Assert.Contains("Overwrite 'Race'?", cut.Markup);
+
+        cut.Render(parameters => parameters.Add(p => p.Filters, Collection("Race")));
+
         Assert.DoesNotContain("Overwrite 'Race'?", cut.Markup);
+        Assert.Equal(string.Empty, cut.Find("#saveFilterName").GetAttribute("value"));
     }
 
     // Pins that overwrite detection flows through Filters.Contains — the
@@ -237,6 +268,25 @@ public class SavedFiltersPanelTests : BunitContext
 
         Assert.DoesNotContain("Delete 'Race'?", cut.Markup);
         Assert.Empty(_deleteRequests);
+    }
+
+    // The clear rides ANY new document, not just the user's own save. A delete
+    // (or a host re-pick / reload) swaps Filters and clears a half-typed name
+    // too — the panel does not track which gesture caused the swap. This pins
+    // that deliberate tradeoff: one invariant (a new document invalidates all
+    // in-flight view-state), no causation guessing, at the cost of a rare
+    // retype after an event the user themselves caused.
+    [Fact]
+    public void FiltersParameterSwap_ClearsTypedSaveName()
+    {
+        var cut = RenderPanel(Collection("Race", "Blitz"));
+
+        cut.Find("#saveFilterName").Input("Half-typed");
+        // The host deletes a different filter and passes the smaller document
+        // down — a swap the typing did not cause.
+        cut.Render(parameters => parameters.Add(p => p.Filters, Collection("Race")));
+
+        Assert.Equal(string.Empty, cut.Find("#saveFilterName").GetAttribute("value"));
     }
 
     // ── Gesture helpers ─────────────────────────────────────────────────────
