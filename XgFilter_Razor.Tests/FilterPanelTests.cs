@@ -16,6 +16,30 @@ public class FilterPanelTests : BunitContext
         JSInterop.Mode = JSRuntimeMode.Loose;
     }
 
+    // The two localStorage keys the panel persists under: the whole
+    // FilterConfig as one serialized blob, and the disclosure's
+    // expand/collapse choice — user preference, deliberately outside the
+    // config blob.
+    private const string ConfigKey = "xg_filter_config";
+    private const string DisclosureKey = "xg_moreFiltersExpanded";
+
+    // The disclosure hides every section except Error range at rest, so tests
+    // that touch a hidden control expand first — through the real toggle
+    // button, so every such test also exercises the disclosure's actual
+    // wiring rather than reaching around it.
+    private static void ExpandMoreFilters(IRenderedComponent<FilterPanel> cut) =>
+        cut.Find("#moreFiltersToggle").Click();
+
+    // Render-and-expand, for the many tests whose subject controls live
+    // behind the disclosure.
+    private IRenderedComponent<FilterPanel> RenderExpanded(
+        Action<ComponentParameterCollectionBuilder<FilterPanel>>? parameters = null)
+    {
+        var cut = parameters is null ? Render<FilterPanel>() : Render<FilterPanel>(parameters);
+        ExpandMoreFilters(cut);
+        return cut;
+    }
+
     [Fact]
     public void Render_DefaultParameters_ProducesFilterCardMarkup()
     {
@@ -23,7 +47,7 @@ public class FilterPanelTests : BunitContext
 
         Assert.Contains("Filters", cut.Markup);
         Assert.Contains("Apply Filter", cut.Markup);
-        Assert.Contains("Reset", cut.Markup);
+        Assert.Contains("Clear filters", cut.Markup);
     }
 
     [Fact]
@@ -62,29 +86,27 @@ public class FilterPanelTests : BunitContext
     public void Render_LabelsUseLibDescriptions(Type enumType, string expectedLabel)
     {
         _ = enumType;  // present so failures cite the enum that caused them
-        var cut = Render<FilterPanel>();
+        var cut = RenderExpanded();
         Assert.Contains(expectedLabel, cut.Markup);
     }
 
     // Position type and Play type are shelved for later reintroduction in a
     // modified form: the XgFilter_Lib machinery (FilterConfig.PositionTypes /
     // PlayTypes, the filters, the enums) stays intact, but the UI groups are
-    // hidden. Assert both control groups are absent so an accidental re-add — or
-    // a future deliberate reintroduction — trips this test rather than shipping
-    // silently.
+    // hidden. Assert both control groups are absent — with the disclosure
+    // expanded, so absence means "not in the panel," not "behind the
+    // disclosure" — so an accidental re-add, or a future deliberate
+    // reintroduction, trips this test rather than shipping silently.
     [Fact]
     public void ShelvedGroups_PositionTypeAndPlayType_AreAbsentFromPanel()
     {
-        var cut = Render<FilterPanel>();
+        var cut = RenderExpanded();
 
         Assert.DoesNotContain("Position type", cut.Markup);
         Assert.DoesNotContain("Play type", cut.Markup);
         Assert.Empty(cut.FindAll("input[id^='pt_']"));
         Assert.Empty(cut.FindAll("input[id^='plt_']"));
     }
-
-    // The single localStorage key the panel persists its whole FilterConfig under.
-    private const string ConfigKey = "xg_filter_config";
 
     // Round-trips through the single-key persistence path: set a spread of
     // controls, Apply (which writes one xg_filter_config blob via
@@ -93,7 +115,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public async Task PersistedConfig_RoundTripsAcrossRemount()
     {
-        var cut = Render<FilterPanel>();
+        var cut = RenderExpanded();
 
         cut.Find("input[placeholder='e.g. Hal, Magriel']").Input("Hal, Magriel");
         cut.Find("input[type='number'][placeholder='Min']").Input("0.05");
@@ -110,7 +132,7 @@ public class FilterPanelTests : BunitContext
 
         // Feed it back through the getItem mock and mount a fresh panel.
         JSInterop.Setup<string?>("localStorage.getItem", ConfigKey).SetResult(stored);
-        var restored = Render<FilterPanel>();
+        var restored = RenderExpanded();
 
         Assert.Equal("Hal, Magriel", restored.Find("input[placeholder='e.g. Hal, Magriel']").GetAttribute("value"));
         Assert.Equal("0.05", restored.Find("input[type='number'][placeholder='Min']").GetAttribute("value"));
@@ -126,7 +148,7 @@ public class FilterPanelTests : BunitContext
     public async Task ContactTypeCheckbox_FlowsIntoEmittedConfig()
     {
         FilterConfig? capturedConfig = null;
-        var cut = Render<FilterPanel>(parameters => parameters
+        var cut = RenderExpanded(parameters => parameters
             .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
 
         cut.Find("#ct_Contact").Change(true);
@@ -146,7 +168,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void AnalysisDepthSection_RendersEveryLevelWithLibLabel()
     {
-        var cut = Render<FilterPanel>();
+        var cut = RenderExpanded();
 
         foreach (var level in Enum.GetValues<AnalysisLevel>())
         {
@@ -163,7 +185,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void AnalysisDepthSection_RendersModeTogglesWithLibLabels()
     {
-        var cut = Render<FilterPanel>();
+        var cut = RenderExpanded();
 
         Assert.Equal("checkbox", cut.Find("#am_Rollout").GetAttribute("type"));
         Assert.Equal("checkbox", cut.Find("#am_BookRollout").GetAttribute("type"));
@@ -181,7 +203,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void AnalysisLevelCheckboxes_RenderInEnumDeclarationOrder()
     {
-        var cut = Render<FilterPanel>();
+        var cut = RenderExpanded();
 
         var renderedOrder = cut.FindAll("input[id^='al_']")
             .Select(el => Enum.Parse<AnalysisLevel>(el.Id!["al_".Length..]))
@@ -199,7 +221,7 @@ public class FilterPanelTests : BunitContext
     public async Task AnalysisDepth_CanonicalSelection_4PlyPlusRollouts_EmitsRawIntent()
     {
         FilterConfig? capturedConfig = null;
-        var cut = Render<FilterPanel>(parameters => parameters
+        var cut = RenderExpanded(parameters => parameters
             .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
 
         cut.Find("#al_Ply4").Change(true);
@@ -220,7 +242,7 @@ public class FilterPanelTests : BunitContext
     public async Task AnalysisLevelCheckbox_FlowsIntoEmittedConfig()
     {
         FilterConfig? capturedConfig = null;
-        var cut = Render<FilterPanel>(parameters => parameters
+        var cut = RenderExpanded(parameters => parameters
             .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
 
         cut.Find("#al_Unknown").Change(true);
@@ -241,7 +263,7 @@ public class FilterPanelTests : BunitContext
     public async Task RolloutToggles_FlowIntoEmittedConfig()
     {
         FilterConfig? capturedConfig = null;
-        var cut = Render<FilterPanel>(parameters => parameters
+        var cut = RenderExpanded(parameters => parameters
             .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
 
         cut.Find("#am_Rollout").Change(true);
@@ -255,14 +277,18 @@ public class FilterPanelTests : BunitContext
     }
 
     // Every depth control must raise OnFilterDirty so the parent can disable Run
-    // until Apply. Toggle a level checkbox and each mode toggle and count the
-    // firings — one per interaction, none on initial render.
+    // until Apply. Expand (which must NOT count — disclosure is navigation, not
+    // an edit), then toggle a level checkbox and each mode toggle and count the
+    // firings — one per interaction.
     [Fact]
     public void AnalysisDepthControls_EachFireOnFilterDirty()
     {
         var dirtyCount = 0;
         var cut = Render<FilterPanel>(parameters => parameters
             .Add(p => p.OnFilterDirty, () => { dirtyCount++; }));
+
+        ExpandMoreFilters(cut);
+        Assert.Equal(0, dirtyCount);
 
         cut.Find("#al_Ply4").Change(true);
         Assert.Equal(1, dirtyCount);
@@ -282,7 +308,7 @@ public class FilterPanelTests : BunitContext
     public async Task AnalysisDepth_DeselectedToEmpty_EmitsInactiveState()
     {
         FilterConfig? capturedConfig = null;
-        var cut = Render<FilterPanel>(parameters => parameters
+        var cut = RenderExpanded(parameters => parameters
             .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
 
         cut.Find("#al_Ply3").Change(true);
@@ -297,20 +323,20 @@ public class FilterPanelTests : BunitContext
         Assert.False(capturedConfig.IncludeBookRollouts);
     }
 
-    // Reset must clear the whole depth facet — every level unchecked and both
-    // toggles off — in the UI and in the emitted reset config.
+    // Clear filters must clear the whole depth facet — every level unchecked and
+    // both toggles off — in the UI and in the emitted cleared config.
     [Fact]
-    public async Task Reset_ClearsAnalysisDepthSelections()
+    public async Task ClearFilters_ClearsAnalysisDepthSelections()
     {
         FilterConfig? capturedConfig = null;
-        var cut = Render<FilterPanel>(parameters => parameters
+        var cut = RenderExpanded(parameters => parameters
             .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
 
         cut.Find("#al_Ply4").Change(true);
         cut.Find("#am_Rollout").Change(true);
         cut.Find("#am_BookRollout").Change(true);
 
-        await cut.Find("button.btn-outline-secondary").ClickAsync(new());
+        await cut.Find("#clearFilters").ClickAsync(new());
 
         Assert.False(cut.Find("#al_Ply4").HasAttribute("checked"));
         Assert.False(cut.Find("#am_Rollout").HasAttribute("checked"));
@@ -329,7 +355,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public async Task AnalysisDepth_RoundTripsAcrossRemount()
     {
-        var cut = Render<FilterPanel>();
+        var cut = RenderExpanded();
 
         cut.Find("#al_Ply3").Change(true);
         cut.Find("#al_Ply7").Change(true);
@@ -342,7 +368,7 @@ public class FilterPanelTests : BunitContext
         Assert.NotNull(stored);
 
         JSInterop.Setup<string?>("localStorage.getItem", ConfigKey).SetResult(stored);
-        var restored = Render<FilterPanel>();
+        var restored = RenderExpanded();
 
         Assert.True(restored.Find("#al_Ply3").HasAttribute("checked"));
         Assert.True(restored.Find("#al_Ply7").HasAttribute("checked"));
@@ -362,7 +388,7 @@ public class FilterPanelTests : BunitContext
         JSInterop.Setup<string?>("localStorage.getItem", ConfigKey)
             .SetResult("{\"DecisionType\":\"Both\"}");
 
-        var cut = Render<FilterPanel>();
+        var cut = RenderExpanded();
 
         foreach (var level in Enum.GetValues<AnalysisLevel>())
             Assert.DoesNotContain("checked", cut.Find($"#al_{level}").OuterHtml);
@@ -381,7 +407,7 @@ public class FilterPanelTests : BunitContext
         JSInterop.Setup<string?>("localStorage.getItem", ConfigKey)
             .SetResult("{\"DecisionType\":\"Both\",\"AnalysisDepthClasses\":[\"Ply3\",\"RolloutPly7\"]}");
 
-        var cut = Render<FilterPanel>();
+        var cut = RenderExpanded();
 
         foreach (var level in Enum.GetValues<AnalysisLevel>())
             Assert.DoesNotContain("checked", cut.Find($"#al_{level}").OuterHtml);
@@ -397,7 +423,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void DiceSection_RendersAll21RollsInCanonicalOrder()
     {
-        var cut = Render<FilterPanel>();
+        var cut = RenderExpanded();
 
         var renderedOrder = cut.FindAll("input[id^='dr_']")
             .Select(el => DiceRoll.Parse(el.Id!["dr_".Length..]))
@@ -416,7 +442,7 @@ public class FilterPanelTests : BunitContext
     public async Task DiceRollCheckbox_FlowsIntoEmittedConfig()
     {
         FilterConfig? capturedConfig = null;
-        var cut = Render<FilterPanel>(parameters => parameters
+        var cut = RenderExpanded(parameters => parameters
             .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
 
         cut.Find("#dr_31").Change(true);
@@ -437,7 +463,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public async Task DiceRolls_RoundTripsAcrossRemount()
     {
-        var cut = Render<FilterPanel>();
+        var cut = RenderExpanded();
 
         cut.Find("#dr_31").Change(true);
         cut.Find("#dr_66").Change(true);
@@ -449,7 +475,7 @@ public class FilterPanelTests : BunitContext
         Assert.NotNull(stored);
 
         JSInterop.Setup<string?>("localStorage.getItem", ConfigKey).SetResult(stored);
-        var restored = Render<FilterPanel>();
+        var restored = RenderExpanded();
 
         Assert.True(restored.Find("#dr_31").HasAttribute("checked"));
         Assert.True(restored.Find("#dr_66").HasAttribute("checked"));
@@ -464,7 +490,7 @@ public class FilterPanelTests : BunitContext
     public async Task DiceRolls_DeselectedToEmpty_EmitsInactiveState()
     {
         FilterConfig? capturedConfig = null;
-        var cut = Render<FilterPanel>(parameters => parameters
+        var cut = RenderExpanded(parameters => parameters
             .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
 
         cut.Find("#dr_31").Change(true);
@@ -484,7 +510,7 @@ public class FilterPanelTests : BunitContext
     public async Task PositionPattern_FlowsIntoEmittedConfig()
     {
         FilterConfig? capturedConfig = null;
-        var cut = Render<FilterPanel>(parameters => parameters
+        var cut = RenderExpanded(parameters => parameters
             .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
 
         cut.Find("#positionPattern").Input("[6,2,] [5,,-2]");
@@ -505,7 +531,7 @@ public class FilterPanelTests : BunitContext
     public async Task PositionPatternWithOffTokens_FlowsIntoEmittedConfigCanonicalized()
     {
         FilterConfig? capturedConfig = null;
-        var cut = Render<FilterPanel>(parameters => parameters
+        var cut = RenderExpanded(parameters => parameters
             .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
 
         cut.Find("#positionPattern").Input("[OFF,10,] [Opp-Off,,-2]");
@@ -525,7 +551,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void WrongSignedOffBound_MarksFieldAndGatesApply()
     {
-        var cut = Render<FilterPanel>();
+        var cut = RenderExpanded();
 
         cut.Find("#positionPattern").Input("[off,,-2]");
 
@@ -540,7 +566,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public async Task PositionPattern_RoundTripsAcrossRemount()
     {
-        var cut = Render<FilterPanel>();
+        var cut = RenderExpanded();
 
         cut.Find("#positionPattern").Input("[6,2,] [5,,-2]");
         await cut.Find("button.btn-primary").ClickAsync(new());
@@ -551,7 +577,7 @@ public class FilterPanelTests : BunitContext
         Assert.NotNull(stored);
 
         JSInterop.Setup<string?>("localStorage.getItem", ConfigKey).SetResult(stored);
-        var restored = Render<FilterPanel>();
+        var restored = RenderExpanded();
 
         Assert.Equal("[6,2,] [5,,-2]", restored.Find("#positionPattern").GetAttribute("value"));
     }
@@ -578,7 +604,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void InvalidPositionPattern_MarksFieldAndGatesApply()
     {
-        var cut = Render<FilterPanel>();
+        var cut = RenderExpanded();
 
         cut.Find("#positionPattern").Input("[6,2");
 
@@ -598,7 +624,7 @@ public class FilterPanelTests : BunitContext
     {
         JSInterop.Setup<string?>("localStorage.getItem", ConfigKey).SetResult("}{ not valid json");
 
-        var cut = Render<FilterPanel>();
+        var cut = RenderExpanded();
 
         Assert.Equal(string.Empty, cut.Find("input[placeholder='e.g. Hal, Magriel']").GetAttribute("value"));
         Assert.True(cut.Find("#dt_Both").HasAttribute("checked"));
@@ -613,7 +639,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void MatchScoreSection_RendersOnRollAnchoredHint()
     {
-        var cut = Render<FilterPanel>();
+        var cut = RenderExpanded();
 
         // Anchor to the match-score section's own hint, not just page markup,
         // so an unrelated mention of the convention elsewhere can't satisfy this.
@@ -633,7 +659,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void MatchScorePlaceholder_DoesNotAdvertiseInvalidDmpToken()
     {
-        var cut = Render<FilterPanel>();
+        var cut = RenderExpanded();
 
         var placeholder = cut.Find("input[placeholder^='e.g. 4a5a']").GetAttribute("placeholder")!;
 
@@ -651,7 +677,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void MatchScorePlaceholder_ExampleTokensAllParse()
     {
-        var cut = Render<FilterPanel>();
+        var cut = RenderExpanded();
 
         var placeholder = cut.Find("input[placeholder^='e.g. 4a5a']").GetAttribute("placeholder")!;
         var examples = placeholder
@@ -667,8 +693,10 @@ public class FilterPanelTests : BunitContext
     // LoadConfig is staging-only: it projects the config into the edit buffers
     // like a bulk edit gesture. Edit-side signaling fires (OnFilterDirty, once —
     // staged state now diverges from last-applied), but no Apply-side effect
-    // may occur: no OnFilterConfigChanged, no localStorage write. The user
-    // still commits via Apply.
+    // may occur: no OnFilterConfigChanged, no config write. The expansion after
+    // the load writes the disclosure's own key, which is exactly why the
+    // no-write assertion is keyed to ConfigKey — the config blob is what
+    // staging must never touch.
     [Fact]
     public async Task LoadConfig_HydratesBuffers_WithoutApplySideEffects()
     {
@@ -685,6 +713,7 @@ public class FilterPanelTests : BunitContext
             ContactTypes = [ContactType.Race],
         };
         await cut.InvokeAsync(() => cut.Instance.LoadConfig(loaded));
+        ExpandMoreFilters(cut);
 
         Assert.Equal("Magriel", cut.Find("input[placeholder='e.g. Hal, Magriel']").GetAttribute("value"));
         Assert.True(cut.Find("#dt_CubeOnly").HasAttribute("checked"));
@@ -692,11 +721,12 @@ public class FilterPanelTests : BunitContext
 
         Assert.Null(capturedConfig);
         Assert.Equal(1, dirtyCount);
-        Assert.DoesNotContain(JSInterop.Invocations, i => i.Identifier == "localStorage.setItem");
+        Assert.DoesNotContain(JSInterop.Invocations, i =>
+            i.Identifier == "localStorage.setItem" && (string?)i.Arguments[0] == ConfigKey);
     }
 
     // Reproduces, deterministically, the interleaving the post-await guard in
-    // OnAfterRenderAsync exists for: the first-render restore is suspended at
+    // the config restore exists for: the first-render restore is suspended at
     // its getItem await when the host's LoadConfig runs. A Setup with no
     // SetResult holds the interop task open — the restore parks on it — then
     // LoadConfig stages Y, then SetResult releases the restore with X. The
@@ -717,6 +747,7 @@ public class FilterPanelTests : BunitContext
         // WaitForAssertion: the released continuation resumes asynchronously
         // relative to SetResult; only after it has run is "didn't clobber"
         // actually proven.
+        ExpandMoreFilters(cut);
         cut.WaitForAssertion(() => Assert.Equal(
             "Hal",
             cut.Find("input[placeholder='e.g. Hal, Magriel']").GetAttribute("value")));
@@ -727,7 +758,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void TryGetEditedConfig_UnappliedEdits_ReturnsLiveBuffers()
     {
-        var cut = Render<FilterPanel>();
+        var cut = RenderExpanded();
 
         cut.Find("input[placeholder='e.g. Hal, Magriel']").Input("Hal");
         cut.Find("#ct_Race").Change(true);
@@ -743,7 +774,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void TryGetEditedConfig_InvalidPositionPattern_ReturnsFalseNull()
     {
-        var cut = Render<FilterPanel>();
+        var cut = RenderExpanded();
 
         cut.Find("#positionPattern").Input("[6,2");
 
@@ -758,11 +789,340 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void TryGetEditedConfig_MirrorsApplyGate_RawMatchScoreTextPasses()
     {
-        var cut = Render<FilterPanel>();
+        var cut = RenderExpanded();
 
         cut.Find("input[placeholder^='e.g. 4a5a']").Input("not-a-score");
 
         Assert.True(cut.Instance.TryGetEditedConfig(out var cfg));
         Assert.Contains("not-a-score", cfg!.MatchScores);
+    }
+
+    // ── Disclosure ─────────────────────────────────────────────────────────
+
+    // The default-hidden information hierarchy: at rest the panel shows the
+    // error-range section, the disclosure toggle, and the two buttons —
+    // every other section's controls are absent from the DOM, not styled
+    // away. The toggle is an honest disclosure control: a real button
+    // carrying aria-expanded and aria-controls.
+    [Fact]
+    public void Disclosure_DefaultHidden_OnlyErrorRangeToggleAndButtonsAtRest()
+    {
+        var cut = Render<FilterPanel>();
+
+        var toggle = cut.Find("#moreFiltersToggle");
+        Assert.Equal("BUTTON", toggle.TagName);
+        Assert.Equal("false", toggle.GetAttribute("aria-expanded"));
+        Assert.Equal("moreFilters", toggle.GetAttribute("aria-controls"));
+        Assert.NotNull(cut.Find("#moreFilters"));
+
+        Assert.NotNull(cut.Find("input[type='number'][placeholder='Min']"));
+        Assert.NotNull(cut.Find("button.btn-primary"));
+        Assert.NotNull(cut.Find("#clearFilters"));
+
+        Assert.Empty(cut.FindAll("input[placeholder='e.g. Hal, Magriel']"));
+        Assert.Empty(cut.FindAll("input[id^='dt_']"));
+        Assert.Empty(cut.FindAll("input[placeholder^='e.g. 4a5a']"));
+        Assert.Empty(cut.FindAll("input[id^='ct_']"));
+        Assert.Empty(cut.FindAll("input[id^='al_']"));
+        Assert.Empty(cut.FindAll("input[id^='dr_']"));
+        Assert.Empty(cut.FindAll("#positionPattern"));
+    }
+
+    // The toggle round-trips: expand shows the hidden sections and flips
+    // aria-expanded; a second click collapses back to the at-rest state.
+    [Fact]
+    public void DisclosureToggle_ExpandsAndCollapses()
+    {
+        var cut = Render<FilterPanel>();
+
+        ExpandMoreFilters(cut);
+        Assert.Equal("true", cut.Find("#moreFiltersToggle").GetAttribute("aria-expanded"));
+        Assert.NotNull(cut.Find("#positionPattern"));
+        Assert.NotNull(cut.Find("input[id^='dr_']"));
+
+        cut.Find("#moreFiltersToggle").Click();
+        Assert.Equal("false", cut.Find("#moreFiltersToggle").GetAttribute("aria-expanded"));
+        Assert.Empty(cut.FindAll("#positionPattern"));
+        Assert.Empty(cut.FindAll("input[id^='dr_']"));
+    }
+
+    // Toggling the disclosure is navigation, not an edit: OnFilterDirty must
+    // not fire, in either direction.
+    [Fact]
+    public void DisclosureToggle_DoesNotRaiseFilterDirty()
+    {
+        var dirtyCount = 0;
+        var cut = Render<FilterPanel>(parameters => parameters
+            .Add(p => p.OnFilterDirty, () => { dirtyCount++; }));
+
+        cut.Find("#moreFiltersToggle").Click();
+        cut.Find("#moreFiltersToggle").Click();
+
+        Assert.Equal(0, dirtyCount);
+    }
+
+    // Each toggle click persists the choice immediately under the disclosure's
+    // own key — "true"/"false" literals — and never writes the config blob's
+    // key: visibility is user preference, not filter state.
+    [Fact]
+    public void DisclosureToggle_PersistsChoiceUnderOwnKey()
+    {
+        var cut = Render<FilterPanel>();
+
+        cut.Find("#moreFiltersToggle").Click();
+        Assert.Equal("true", JSInterop.Invocations["localStorage.setItem"]
+            .Last(i => (string?)i.Arguments[0] == DisclosureKey).Arguments[1] as string);
+
+        cut.Find("#moreFiltersToggle").Click();
+        Assert.Equal("false", JSInterop.Invocations["localStorage.setItem"]
+            .Last(i => (string?)i.Arguments[0] == DisclosureKey).Arguments[1] as string);
+
+        Assert.DoesNotContain(JSInterop.Invocations["localStorage.setItem"],
+            i => (string?)i.Arguments[0] == ConfigKey);
+    }
+
+    // The remembered choice restores across sessions: a stored "true" mounts
+    // the panel expanded, no click needed.
+    [Fact]
+    public void StoredDisclosureTrue_MountsExpanded()
+    {
+        JSInterop.Setup<string?>("localStorage.getItem", DisclosureKey).SetResult("true");
+
+        var cut = Render<FilterPanel>();
+
+        Assert.Equal("true", cut.Find("#moreFiltersToggle").GetAttribute("aria-expanded"));
+        Assert.NotNull(cut.Find("#positionPattern"));
+    }
+
+    // Anything but the literal "true" — a corrupt value included — keeps the
+    // default-hidden posture; the tolerant-restore twin of
+    // CorruptStoredConfig_MountsWithDefaults.
+    [Fact]
+    public void StoredDisclosureCorrupt_MountsCollapsed()
+    {
+        JSInterop.Setup<string?>("localStorage.getItem", DisclosureKey).SetResult("expanded!!");
+
+        var cut = Render<FilterPanel>();
+
+        Assert.Equal("false", cut.Find("#moreFiltersToggle").GetAttribute("aria-expanded"));
+        Assert.Empty(cut.FindAll("#positionPattern"));
+    }
+
+    // The disclosure twin of LoadConfig_DuringPendingStoredRestore: a toggle
+    // click landing while the getItem interop is in flight is a fresh user
+    // choice the late restore must not clobber. Expand-then-collapse while a
+    // stored "true" is pending; the released restore must yield — the panel
+    // stays collapsed.
+    [Fact]
+    public void Toggle_DuringPendingStoredRestore_UserChoiceWins()
+    {
+        var pendingGet = JSInterop.Setup<string?>("localStorage.getItem", DisclosureKey);
+
+        var cut = Render<FilterPanel>();
+
+        cut.Find("#moreFiltersToggle").Click();   // expand…
+        cut.Find("#moreFiltersToggle").Click();   // …and collapse: a settled choice
+
+        pendingGet.SetResult("true");
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            "false", cut.Find("#moreFiltersToggle").GetAttribute("aria-expanded")));
+    }
+
+    // ── Hidden-active signal ───────────────────────────────────────────────
+
+    // Nothing active, nothing signalled.
+    [Fact]
+    public void HiddenActiveSignal_AbsentOnDefaults()
+    {
+        var cut = Render<FilterPanel>();
+
+        Assert.Empty(cut.FindAll("#hiddenActiveCount"));
+        Assert.Empty(cut.FindAll("#hiddenActiveNames"));
+    }
+
+    // ErrorRange is the one always-visible facet — active error bounds must
+    // never light the hidden-active signal.
+    [Fact]
+    public void HiddenActiveSignal_ErrorRangeExcluded()
+    {
+        var cut = Render<FilterPanel>();
+
+        cut.Find("input[type='number'][placeholder='Min']").Input("0.05");
+
+        Assert.Empty(cut.FindAll("#hiddenActiveCount"));
+        Assert.Empty(cut.FindAll("#hiddenActiveNames"));
+    }
+
+    // Staged values in hidden sections light the signal the moment the panel
+    // collapses — before any Apply, because the signal reads the live edit
+    // buffers through the same build path Apply uses (the deliberate mid-edit
+    // choice). The names are the lib's FilterFacet [Description] labels, in
+    // declaration order — exactly the section headings the user will find on
+    // expanding.
+    [Fact]
+    public void HiddenActiveSignal_CountsAndNamesHiddenFacets()
+    {
+        var cut = RenderExpanded();
+
+        cut.Find("input[placeholder='e.g. Hal, Magriel']").Input("Hal");
+        cut.Find("#ct_Race").Change(true);
+        cut.Find("#dr_31").Change(true);
+        cut.Find("#moreFiltersToggle").Click();   // collapse
+
+        Assert.Equal("3", cut.Find("#hiddenActiveCount").TextContent.Trim());
+        Assert.Contains(
+            string.Join(", ",
+                FilterFacet.Players.ToLabel(),
+                FilterFacet.ContactTypes.ToLabel(),
+                FilterFacet.DiceRolls.ToLabel()),
+            cut.Find("#hiddenActiveNames").TextContent);
+    }
+
+    // While expanded nothing is hidden, so the signal would be noise — it
+    // renders only while collapsed.
+    [Fact]
+    public void HiddenActiveSignal_NotRenderedWhileExpanded()
+    {
+        var cut = RenderExpanded();
+
+        cut.Find("#ct_Race").Change(true);
+
+        Assert.Empty(cut.FindAll("#hiddenActiveCount"));
+        Assert.Empty(cut.FindAll("#hiddenActiveNames"));
+    }
+
+    // A loaded saved filter can stage values into hidden sections. The signal
+    // must report them at rest — and staging must not move the disclosure:
+    // expanding is the user's gesture, never LoadConfig's.
+    [Fact]
+    public async Task LoadConfig_StagedHiddenFacets_LightSignal_WithoutExpanding()
+    {
+        var cut = Render<FilterPanel>();
+
+        var loaded = new FilterConfig
+        {
+            ContactTypes = [ContactType.Race],
+            DiceRolls = [new DiceRoll(3, 1)],
+        };
+        await cut.InvokeAsync(() => cut.Instance.LoadConfig(loaded));
+
+        Assert.Equal("false", cut.Find("#moreFiltersToggle").GetAttribute("aria-expanded"));
+        Assert.Equal("2", cut.Find("#hiddenActiveCount").TextContent.Trim());
+        var names = cut.Find("#hiddenActiveNames").TextContent;
+        Assert.Contains(FilterFacet.ContactTypes.ToLabel(), names);
+        Assert.Contains(FilterFacet.DiceRolls.ToLabel(), names);
+    }
+
+    // A restored session with hidden-section facets active shows the signal at
+    // rest — the first-render restore hydrates the buffers the signal reads.
+    [Fact]
+    public void StoredConfigWithHiddenFacets_LightsSignalAtRest()
+    {
+        var stored = new FilterConfig { ContactTypes = [ContactType.Race] };
+        JSInterop.Setup<string?>("localStorage.getItem", ConfigKey).SetResult(stored.ToJson());
+
+        var cut = Render<FilterPanel>();
+
+        Assert.Equal("1", cut.Find("#hiddenActiveCount").TextContent.Trim());
+        Assert.Contains(FilterFacet.ContactTypes.ToLabel(),
+            cut.Find("#hiddenActiveNames").TextContent);
+    }
+
+    // Clear filters empties every buffer, so the signal goes out with them.
+    [Fact]
+    public async Task ClearFilters_ExtinguishesSignal()
+    {
+        var cut = RenderExpanded();
+
+        cut.Find("#ct_Race").Change(true);
+        cut.Find("#moreFiltersToggle").Click();   // collapse
+        Assert.NotNull(cut.Find("#hiddenActiveCount"));
+
+        await cut.Find("#clearFilters").ClickAsync(new());
+
+        Assert.Empty(cut.FindAll("#hiddenActiveCount"));
+        Assert.Empty(cut.FindAll("#hiddenActiveNames"));
+    }
+
+    // ── Clear filters contract ─────────────────────────────────────────────
+
+    // The control says what the gesture does; the old Reset label is gone.
+    [Fact]
+    public void ClearButton_IsLabeledClearFilters()
+    {
+        var cut = Render<FilterPanel>();
+
+        Assert.Equal("Clear filters", cut.Find("#clearFilters").TextContent.Trim());
+        Assert.DoesNotContain("Reset", cut.Markup);
+    }
+
+    // Clearing raises the empty config, judged by the lib's own predicates —
+    // GetActiveFacets() empty — never by re-inspecting config fields here.
+    [Fact]
+    public async Task ClearFilters_RaisesEmptyConfig()
+    {
+        FilterConfig? capturedConfig = null;
+        var cut = RenderExpanded(parameters => parameters
+            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
+
+        cut.Find("input[placeholder='e.g. Hal, Magriel']").Input("Hal");
+        cut.Find("#ct_Race").Change(true);
+        cut.Find("input[type='number'][placeholder='Min']").Input("0.05");
+
+        await cut.Find("#clearFilters").ClickAsync(new());
+
+        Assert.NotNull(capturedConfig);
+        Assert.Empty(capturedConfig!.GetActiveFacets());
+    }
+
+    // Clearing touches filter values only: the disclosure stays exactly where
+    // the user put it — expanded stays expanded…
+    [Fact]
+    public async Task ClearFilters_LeavesExpandedDisclosureExpanded()
+    {
+        var cut = RenderExpanded();
+
+        cut.Find("#ct_Race").Change(true);
+        await cut.Find("#clearFilters").ClickAsync(new());
+
+        Assert.Equal("true", cut.Find("#moreFiltersToggle").GetAttribute("aria-expanded"));
+        Assert.False(cut.Find("#ct_Race").HasAttribute("checked"));
+    }
+
+    // …and collapsed stays collapsed, even when the cleared values lived in
+    // hidden sections (staged via LoadConfig, so the panel was never expanded).
+    [Fact]
+    public async Task ClearFilters_LeavesCollapsedDisclosureCollapsed()
+    {
+        var cut = Render<FilterPanel>();
+
+        await cut.InvokeAsync(() => cut.Instance.LoadConfig(
+            new FilterConfig { ContactTypes = [ContactType.Race] }));
+
+        await cut.Find("#clearFilters").ClickAsync(new());
+
+        Assert.Equal("false", cut.Find("#moreFiltersToggle").GetAttribute("aria-expanded"));
+        Assert.Empty(cut.FindAll("#hiddenActiveCount"));
+    }
+
+    // The gesture's whole persisted side-effect surface is one write: the
+    // empty config blob under ConfigKey. No disclosure-key write — and host
+    // state (e.g. BgQuiz's picked folder) is structurally out of reach: the
+    // panel has no parameter or interop path to any; the raised config is its
+    // only channel to the host.
+    [Fact]
+    public async Task ClearFilters_WritesOnlyTheConfigKey()
+    {
+        var cut = Render<FilterPanel>();
+
+        await cut.InvokeAsync(() => cut.Instance.LoadConfig(
+            new FilterConfig { ContactTypes = [ContactType.Race] }));
+
+        await cut.Find("#clearFilters").ClickAsync(new());
+
+        var setKey = Assert.Single(JSInterop.Invocations["localStorage.setItem"]
+            .Select(i => (string?)i.Arguments[0]).Distinct());
+        Assert.Equal(ConfigKey, setKey);
     }
 }

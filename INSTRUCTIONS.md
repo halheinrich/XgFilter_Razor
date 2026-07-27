@@ -49,10 +49,12 @@ XgFilter_Razor/
   _Imports.razor
   Components/
     FilterPanel.razor                — markup + @code state
+    SavedFiltersPanel.razor          — saved-filter pick list, host-mediated
   wwwroot/
 XgFilter_Razor.Tests/
   XgFilter_Razor.Tests.csproj
-  FilterPanelTests.cs                — bUnit smoke tests
+  FilterPanelTests.cs                — bUnit tests for FilterPanel
+  SavedFiltersPanelTests.cs          — bUnit tests for SavedFiltersPanel
 ```
 
 ## Architecture
@@ -62,9 +64,10 @@ XgFilter_Razor.Tests/
 Parallel to `BgDiag_Razor`'s relationship with `BackgammonDiagram_Lib`:
 this subproject lets `XgFilter_Lib` stay free of any Blazor / Razor
 dependency. All filter logic, classification, the `FilterConfig` DTO,
-and enum labels live in the core lib; this project only binds those
-primitives into a Blazor component and surfaces the resulting
-`FilterConfig` via an `EventCallback`.
+the `NamedFilterCollection` document, facet activation
+(`GetActiveFacets`), and enum labels live in the core lib; this project
+only binds those primitives into Blazor components and surfaces the
+resulting `FilterConfig` via an `EventCallback`.
 
 ### `FilterPanel` component
 
@@ -92,22 +95,80 @@ been hidden since `ddb9c98`, while the `XgFilter_Lib` machinery behind them
 (`FilterConfig.PositionTypes` / `PlayTypes`, the filters, the enums) stays
 intact. State is held in private fields on the component instance.
 
-The component emits filter results only on **Apply** (or **Reset**) — not
-on every keystroke. On any input change (typing, radio selection,
-checkbox toggle), `OnFilterDirty` fires so the parent can disable a Run
-button until Apply is clicked. On Apply, the component:
+**Information hierarchy** (dogfooding-driven): the error-range section is
+first and always visible — it is the panel's most-used control. The other
+eight sections (player names, decision type, match scores, move number
+range, contact type, analysis depth, dice rolls, position pattern) sit
+behind a single disclosure, default hidden. The disclosure is an honest
+control — a real `<button>` carrying `aria-expanded` / `aria-controls`
+over an always-rendered `#moreFilters` region whose children render only
+while expanded (absent from the DOM when collapsed, not styled away).
+The expand/collapse choice is the user's, persisted under its own
+localStorage key (`xg_moreFiltersExpanded`, values `"true"`/`"false"`;
+anything else restores to the default-hidden posture) — never inside the
+config blob, and never moved by `LoadConfig` or Clear filters.
 
-1. Persists each control value to `localStorage` via `IJSRuntime`.
+**Hidden-active signal**: while collapsed, the toggle carries a count
+badge plus the names of any hidden sections holding active filters. It is
+computed from the live edit buffers through the same build path Apply
+uses — `BuildConfig().GetActiveFacets()` minus `FilterFacet.ErrorRange`
+(the always-visible facet) — never by re-inspecting config fields. The
+facet labels are the section headings by the lib's design (`FilterFacet`
+`[Description]`s via `ToLabel()`), so the signal names exactly the
+sections the user will find on expanding. Feeding from the live buffers
+makes it honest at rest after restore, Apply, Clear filters, and
+`LoadConfig` staging — and live mid-edit: it tracks staged values the
+moment they are typed, not on Apply.
+
+The component emits filter results only on **Apply** (or **Clear
+filters**) — not on every keystroke. On any input change (typing, radio
+selection, checkbox toggle), `OnFilterDirty` fires so the parent can
+disable a Run button until Apply is clicked. Toggling the disclosure is
+navigation, not an edit — it never fires `OnFilterDirty`. On Apply, the
+component:
+
+1. Persists the whole selection to `localStorage` via `IJSRuntime`.
 2. Builds a `XgFilter_Lib.Filtering.FilterConfig` and raises
    `OnFilterConfigChanged`.
+
+**Clear filters** (the old Reset, renamed to say what it does) is the
+full-clear gesture: it hydrates every edit buffer back to defaults, then
+persists + raises the empty config, which consumers treat as applied. It
+touches filter values only — no host state (the panel has no path to
+any; the raised config is its only channel) and no disclosure movement.
 
 Consumers that want a `DecisionFilterSet` for in-memory filtering call
 `cfg.Build()` themselves; consumers that want to POST the configuration
 to a server send `cfg` as JSON. Single callback by design — see Pitfalls
 for the encapsulation rationale.
 
-`OnAfterRenderAsync(firstRender: true)` rehydrates state from
-`localStorage` once on first render and calls `StateHasChanged`.
+`OnAfterRenderAsync(firstRender: true)` rehydrates both localStorage keys
+once on first render — the disclosure choice, then the config — and calls
+`StateHasChanged`. Each restore double-checks its guard
+(`_disclosureTouched` / `_externalConfigLoaded`) after its await, so a
+user toggle or a host `LoadConfig` landing mid-interop is never
+clobbered.
+
+### `SavedFiltersPanel` component
+
+A persistence-agnostic pick list over `XgFilter_Lib`'s
+`NamedFilterCollection`. The panel owns no document state and mutates
+nothing: every gesture is raised as a request — `OnLoadRequested`,
+`OnSaveAsRequested`, `OnDeleteRequested`, each carrying the name — for
+the host to mediate. The host calls `With` / `Without`, persists wherever
+it persists, and passes the **new** collection instance back down through
+`Filters`; the reference change is also the panel's confirmation channel
+(it cancels pending inline confirms and clears the typed save-as name).
+Selection is deliberately stateless — the "current" config lives in
+`FilterPanel`'s edit buffers, so a highlighted row would be a second
+source of truth that lies. Overwrite and delete run through inline
+confirms in the panel; `Contains` keeps the case-insensitive name rule in
+the lib. Hosts that cannot persist right now (e.g. BgQuiz without its
+FS-Access grant) disable Save/Delete via `CanPersist` +
+`PersistDisabledReason`; Load stays enabled — it is read-only over a
+collection already in memory. The typical wiring: `OnLoadRequested` →
+resolve via `TryGetConfig` → `FilterPanel.LoadConfig`; `OnSaveAsRequested`
+→ `FilterPanel.TryGetEditedConfig` → `With` → persist.
 
 ### `FilterConfig` provenance
 
@@ -131,16 +192,46 @@ state").
 
 ## Public API
 
-`FilterPanel` component, namespace `XgFilter_Razor.Components`. Two
-`EventCallback` parameters:
+Both components live in namespace `XgFilter_Razor.Components`.
 
-- `EventCallback<FilterConfig> OnFilterConfigChanged` — raised on Apply
-  / Reset with the configured `XgFilter_Lib.Filtering.FilterConfig`.
-  Consumers that want a `DecisionFilterSet` call `cfg.Build()`; consumers
-  that want to ship the configuration over the wire serialize `cfg`
-  with `System.Text.Json`.
+### `FilterPanel`
+
+Two `EventCallback` parameters:
+
+- `EventCallback<FilterConfig> OnFilterConfigChanged` (`[EditorRequired]`)
+  — raised on Apply / Clear filters with the configured
+  `XgFilter_Lib.Filtering.FilterConfig`. Consumers that want a
+  `DecisionFilterSet` call `cfg.Build()`; consumers that want to ship the
+  configuration over the wire serialize `cfg` with `System.Text.Json`.
 - `EventCallback OnFilterDirty` — raised on every input change so the
-  parent can disable downstream actions until Apply is clicked.
+  parent can disable downstream actions until Apply is clicked. Not
+  raised by the disclosure toggle (navigation, not an edit).
+
+Two host-facing methods, typically reached via `@ref` (added in the
+saved-filters arc):
+
+- `void LoadConfig(FilterConfig)` — stages a config into the edit
+  buffers as a bulk edit: no Apply-side effects (no persist, no
+  `OnFilterConfigChanged`), `OnFilterDirty` fires once, and the
+  first-render localStorage restore is suppressed so a host-startup load
+  can't be clobbered. Never moves the disclosure.
+- `bool TryGetEditedConfig(out FilterConfig?)` — snapshots the live
+  buffers (including unapplied edits) for host-driven save-as. Gate is
+  exactly Apply's: fails only on non-blank, unparseable position-pattern
+  text.
+
+### `SavedFiltersPanel`
+
+Parameters (all callbacks `[EditorRequired]`, as is `Filters`):
+
+- `NamedFilterCollection Filters` — the immutable document to render;
+  the host passes each new instance back down after mediating a change.
+- `EventCallback<string> OnLoadRequested` / `OnSaveAsRequested` /
+  `OnDeleteRequested` — request-only gestures carrying the filter name;
+  the panel mutates nothing.
+- `bool CanPersist` (default `true`) + `string? PersistDisabledReason` —
+  gate Save/Delete as one switch when the host cannot persist; Load
+  stays enabled.
 
 ## Pitfalls
 
@@ -194,6 +285,32 @@ state").
   needs to wrap `FilterConfig` with output-format options (CSV / PPTX
   selection, output paths, etc.) defines that wrapper in the consumer,
   not here. `FilterConfig` is purely the filter selection.
+- **Disclosure state never goes into `xg_filter_config`.** The panel
+  persists under two keys with different owners: `xg_filter_config` is
+  the wire-traveling `FilterConfig` DTO whose JSON shape the lib owns,
+  and `xg_moreFiltersExpanded` is UI preference owned by this panel.
+  Folding visibility into the config blob would make a saved or loaded
+  filter drag the disclosure around — expanding is the user's gesture,
+  never the config's.
+- **The hidden-active signal is computed from `GetActiveFacets()`, never
+  by re-inspecting config fields or edit buffers.** The activation
+  predicates are the lib's SSOT (the `FacetRules` table behind both
+  `Build()` and `GetActiveFacets()` — the `DecisionFilterSet.IsEmpty`
+  ruling); the panel only excludes `ErrorRange` as the always-visible
+  facet. The signal reads the live buffers via `BuildConfig()`, so it is
+  honest for everything the panel can apply. The shelved facets
+  (`PositionTypes` / `PlayTypes`) are outside that scope by pre-existing
+  panel behavior — `HydrateFrom` / `BuildConfig` ignore them — so a stale
+  `xg_filter_config` blob carrying them is not surfaced by the signal;
+  since the panel is the only apply path, they also can never become
+  active through it.
+- **Clear filters touches filter values only.** It hydrates the buffers
+  to defaults and persists + raises the empty config — nothing else. No
+  host state (the panel has no parameter or interop path to any — e.g.
+  BgQuiz's picked folder is out of reach by construction; keep it that
+  way) and no disclosure movement. `LoadConfig` likewise stages values
+  without moving the disclosure; visibility changes only on the user's
+  toggle.
 
 ## Subproject-internal next steps
 
