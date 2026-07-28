@@ -90,10 +90,11 @@ axis, plus two rule-separated toggle checkboxes for the mode axis, bound to
 `AnalysisMode.Rollout` / `.BookRollout`'s `[Description]`s. The panel binds
 these three raw-intent members and **never** derives the effective
 `AnalysisMode` set — that SSOT is `FilterConfig.Build()` (see Pitfalls).
-Position type and play type are shelved for later reintroduction — their UI groups have
-been hidden since `ddb9c98`, while the `XgFilter_Lib` machinery behind them
-(`FilterConfig.PositionTypes` / `PlayTypes`, the filters, the enums) stays
-intact. State is held in private fields on the component instance.
+Position type and play type are shelved for later reintroduction — their UI
+groups have been hidden since the FilterPanel hide pass, while the
+`XgFilter_Lib` machinery behind them (`FilterConfig.PositionTypes` /
+`PlayTypes`, the filters, the enums) stays intact. State is held in private
+fields on the component instance.
 
 **Information hierarchy** (dogfooding-driven): the error-range section is
 first and always visible — it is the panel's most-used control. The other
