@@ -178,54 +178,89 @@
                 </div>
 
                 @* ── Analysis depth ──────────────────────────────────────────── *@
-                @* Two-axis facet over BgDataTypes_Lib's AnalysisMode × AnalysisLevel.
-                   The panel binds three raw-intent inputs — a checked-level set plus the
-                   two mode toggles — and never derives modes itself: FilterConfig.Build()
-                   is the single owner of the mode-set semantics (Rollouts → Rollout,
-                   Book rollouts → BookRollout, neither toggle → Evaluation, nothing
-                   selected at all → facet off). Re-encoding that here would duplicate the
-                   SSOT and silently drift — see this panel's Pitfalls and XgFilter_Lib's
-                   Depth-facet block. Levels render in Enum.GetValues declaration order
-                   (the lib's ascending-rigor order), so no UI-side sort rule is imposed;
-                   Unknown is a first-class, selectable level (checking it opts legacy /
-                   unenriched rows back in on whichever mode is selected). The two mode
-                   toggles are a distinct axis, not more members of the level list, so
-                   they sit in a rule-separated group below the checkboxes. Their labels
-                   come from AnalysisMode's [Description]s via EnumLabel.ToLabel — display
-                   text stays owned by the enum, never hardcoded here. *@
+                @* Union-of-clauses facet over BgDataTypes_Lib's AnalysisMode ×
+                   AnalysisLevel: three per-mode pairs, each a mode toggle plus its own
+                   level group. The panel binds the six raw-intent inputs (three bools,
+                   three level sets) verbatim and derives nothing — the mapping to
+                   AnalysisDepthFilter clauses (one clause per enabled toggle, empty
+                   level list = any level, all toggles off = facet off, inert level
+                   lists) lives only in FilterConfig.Build(); re-encoding it here would
+                   duplicate the SSOT and silently drift — see this panel's Pitfalls and
+                   XgFilter_Lib's Depth-facet block. Mode labels come from AnalysisMode's
+                   [Description]s via EnumLabel.ToLabel, never hardcoded. Levels render
+                   in Enum.GetValues declaration order (the lib's ascending-rigor order);
+                   Unknown is a first-class, selectable level.
+
+                   Each level group is an honest disclosure in the #moreFilters idiom —
+                   real button, aria-expanded / aria-controls, children rendered only
+                   while expanded — but deliberately UNPERSISTED, unlike the panel-level
+                   disclosure's xg_moreFiltersExpanded key: while collapsed, the count
+                   badge ("any" / "N selected", the hidden-active-signal ruling) already
+                   carries everything the closed state hides, so remembering the open
+                   state buys no information and would cost three more localStorage keys.
+                   The badge reads the live buffer, so it is honest mid-edit and after
+                   restore / LoadConfig / Clear. Collapsing or expanding a group is
+                   navigation, not an edit — no MarkDirty.
+
+                   Unchecking a mode hides its level group but keeps the checked levels
+                   in the buffer (and in the emitted config): the lib guarantees a level
+                   list whose toggle is off is inert — no activation, no constraint — so
+                   re-toggling the mode restores the user's selection instead of
+                   punishing an exploratory untoggle. *@
                 <div class="mb-3">
                     <label class="form-label">
                         Analysis depth
-                        <small class="text-muted">(toggles off = plain evaluations; levels filter the selected mode; nothing selected = facet off)</small>
+                        <small class="text-muted">(each checked mode admits its decisions — checking more always matches more; nothing checked = facet off)</small>
                     </label>
-                    <div>
-                        @foreach (var level in Enum.GetValues<AnalysisLevel>())
-                        {
-                            <div class="form-check form-check-inline">
+                    @foreach (var group in DepthGroups)
+                    {
+                        <div>
+                            <div class="form-check">
                                 <input class="form-check-input" type="checkbox"
-                                       id="al_@level"
-                                       checked="@_analysisLevels.Contains(level)"
-                                       @onchange="(e) => { if (e.Value is bool b && b) _analysisLevels.Add(level); else _analysisLevels.Remove(level); MarkDirty(); }" />
-                                <label class="form-check-label" for="al_@level">@level.ToLabel()</label>
+                                       id="md_@group.Mode"
+                                       checked="@group.Include"
+                                       @onchange="(e) => { group.Include = e.Value is bool b && b; MarkDirty(); }" />
+                                <label class="form-check-label" for="md_@group.Mode">@group.Mode.ToLabel()</label>
                             </div>
-                        }
-                    </div>
-                    <div class="mt-2 pt-2 border-top">
-                        <div class="form-check form-check-inline">
-                            <input class="form-check-input" type="checkbox"
-                                   id="am_Rollout"
-                                   checked="@_includeRollouts"
-                                   @onchange="(e) => { _includeRollouts = e.Value is bool b && b; MarkDirty(); }" />
-                            <label class="form-check-label" for="am_Rollout">@AnalysisMode.Rollout.ToLabel()</label>
+                            @if (group.Include)
+                            {
+                                <div class="ms-4 mb-2">
+                                    <button type="button" id="lvlToggle_@group.Mode"
+                                            class="btn btn-link btn-sm p-0 text-decoration-none"
+                                            aria-expanded="@(group.LevelsExpanded ? "true" : "false")"
+                                            aria-controls="lvl_@group.Mode"
+                                            @onclick="() => group.LevelsExpanded = !group.LevelsExpanded">
+                                        Analysis level
+                                        @if (!group.LevelsExpanded)
+                                        {
+                                            <span id="lvlBadge_@group.Mode"
+                                                  class="badge ms-1 @(group.Levels.Count > 0 ? "text-bg-primary" : "text-bg-secondary")">
+                                                @(group.Levels.Count > 0 ? $"{group.Levels.Count} selected" : "any")
+                                            </span>
+                                        }
+                                    </button>
+                                    <div id="lvl_@group.Mode">
+                                        @if (group.LevelsExpanded)
+                                        {
+                                            <div>
+                                                @foreach (var level in Enum.GetValues<AnalysisLevel>())
+                                                {
+                                                    <div class="form-check form-check-inline">
+                                                        <input class="form-check-input" type="checkbox"
+                                                               id="lv_@(group.Mode)_@level"
+                                                               checked="@group.Levels.Contains(level)"
+                                                               @onchange="(e) => { if (e.Value is bool b && b) group.Levels.Add(level); else group.Levels.Remove(level); MarkDirty(); }" />
+                                                        <label class="form-check-label" for="lv_@(group.Mode)_@level">@level.ToLabel()</label>
+                                                    </div>
+                                                }
+                                            </div>
+                                            <div class="form-text">None checked = any level. @group.LevelHint</div>
+                                        }
+                                    </div>
+                                </div>
+                            }
                         </div>
-                        <div class="form-check form-check-inline">
-                            <input class="form-check-input" type="checkbox"
-                                   id="am_BookRollout"
-                                   checked="@_includeBookRollouts"
-                                   @onchange="(e) => { _includeBookRollouts = e.Value is bool b && b; MarkDirty(); }" />
-                            <label class="form-check-label" for="am_BookRollout">@AnalysisMode.BookRollout.ToLabel()</label>
-                        </div>
-                    </div>
+                    }
                 </div>
 
                 @* ── Dice rolls ──────────────────────────────────────────────── *@
@@ -370,13 +405,51 @@
     private DecisionTypeOption _decisionType = DecisionTypeOption.Both;
     private HashSet<ContactType> _contactTypes = new();
 
-    // Depth facet — raw user intent along two axes, stored verbatim and handed
-    // to FilterConfig.Build() which owns the mode-set derivation. The panel
-    // never maps these to an AnalysisMode set itself (that SSOT lives in the
-    // lib; see the Analysis-depth markup comment).
-    private HashSet<AnalysisLevel> _analysisLevels = new();
-    private bool _includeRollouts;
-    private bool _includeBookRollouts;
+    // Depth facet — raw user intent as three per-mode pairs, stored verbatim
+    // and handed to FilterConfig.Build() which owns the clause-union
+    // derivation. The panel never maps toggles and level lists to clauses
+    // itself (that SSOT lives in the lib; see the Analysis-depth markup
+    // comment). Each group also carries its level disclosure's session-only
+    // open/closed state — navigation, never persisted (see the markup comment
+    // for why, in contrast to DisclosureKey).
+    private sealed class DepthModeGroup
+    {
+        public required AnalysisMode Mode { get; init; }
+
+        // Mode-specific hint line rendered after the shared "None checked =
+        // any level." sentence — panel-owned copy explaining what "level"
+        // means for this mode.
+        public required string LevelHint { get; init; }
+
+        public bool Include { get; set; }
+        public HashSet<AnalysisLevel> Levels { get; set; } = new();
+        public bool LevelsExpanded { get; set; }
+    }
+
+    private readonly DepthModeGroup _evaluations = new()
+    {
+        Mode = AnalysisMode.Evaluation,
+        LevelHint = "The level is the evaluation's own.",
+    };
+
+    private readonly DepthModeGroup _rollouts = new()
+    {
+        Mode = AnalysisMode.Rollout,
+        LevelHint = "The level is the inner level the rollout's games were played at — "
+            + "checker plays never carry XG Roller-family inner levels.",
+    };
+
+    private readonly DepthModeGroup _bookRollouts = new()
+    {
+        Mode = AnalysisMode.BookRollout,
+        LevelHint = "The level is the inner level from the opening-book entry, "
+            + "when the book recorded it.",
+    };
+
+    // Render order = AnalysisMode declaration order (Evaluation, Rollout,
+    // BookRollout). A property rather than a field because field initializers
+    // cannot reference the instance fields above.
+    private IReadOnlyList<DepthModeGroup> DepthGroups => [_evaluations, _rollouts, _bookRollouts];
 
     // Dice facet — the raw set of admitted rolls, stored verbatim and handed to
     // FilterConfig.Build(); empty = facet off. The roll set and its order are the
@@ -562,9 +635,12 @@
         MoveNumberMin = ParseInt(_moveNumberMinText),
         MoveNumberMax = ParseInt(_moveNumberMaxText),
         ContactTypes = _contactTypes.ToList(),
-        AnalysisLevels = _analysisLevels.ToList(),
-        IncludeRollouts = _includeRollouts,
-        IncludeBookRollouts = _includeBookRollouts,
+        IncludeEvaluations = _evaluations.Include,
+        EvaluationLevels = _evaluations.Levels.ToList(),
+        IncludeRollouts = _rollouts.Include,
+        RolloutLevels = _rollouts.Levels.ToList(),
+        IncludeBookRollouts = _bookRollouts.Include,
+        BookRolloutLevels = _bookRollouts.Levels.ToList(),
         DiceRolls = _diceRolls.ToList(),
         PositionPattern = ParsePositionPattern(_positionPatternText),
     };
@@ -580,9 +656,12 @@
         _moveNumberMinText = FormatNumber(cfg.MoveNumberMin);
         _moveNumberMaxText = FormatNumber(cfg.MoveNumberMax);
         _contactTypes = new HashSet<ContactType>(cfg.ContactTypes);
-        _analysisLevels = new HashSet<AnalysisLevel>(cfg.AnalysisLevels);
-        _includeRollouts = cfg.IncludeRollouts;
-        _includeBookRollouts = cfg.IncludeBookRollouts;
+        _evaluations.Include = cfg.IncludeEvaluations;
+        _evaluations.Levels = new HashSet<AnalysisLevel>(cfg.EvaluationLevels);
+        _rollouts.Include = cfg.IncludeRollouts;
+        _rollouts.Levels = new HashSet<AnalysisLevel>(cfg.RolloutLevels);
+        _bookRollouts.Include = cfg.IncludeBookRollouts;
+        _bookRollouts.Levels = new HashSet<AnalysisLevel>(cfg.BookRolloutLevels);
         _diceRolls = new HashSet<DiceRoll>(cfg.DiceRolls);
         _positionPatternText = cfg.PositionPattern?.ToBracketList() ?? string.Empty;
     }

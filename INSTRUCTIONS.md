@@ -26,9 +26,9 @@ https://github.com/halheinrich/XgFilter_Razor — branch `main`.
   package.
 - **BgDataTypes_Lib** — `AnalysisMode` and `AnalysisLevel`, the two-axis
   taxonomy that replaced the retired flat `AnalysisDepthClass` and drives the
-  Analysis-depth facet: `AnalysisLevel`'s members are the level checkboxes and
-  `AnalysisMode.Rollout` / `.BookRollout` label the two mode toggles (labels via
-  `EnumLabel.ToLabel`). Owned there, not in `XgFilter_Lib.Enums`, because the
+  Analysis-depth facet: the three selectable `AnalysisMode` members label the
+  mode toggles and `AnalysisLevel`'s members are each mode's level checkboxes
+  (labels via `EnumLabel.ToLabel`). Owned there, not in `XgFilter_Lib.Enums`, because the
   producer (`ConvertXgToJson_Lib`) stamps both axes. Beyond
   that, consumers of `DecisionFilterSet` typically work against
   `IDecisionFilterData`, so the dependency is conceptually direct as well. The
@@ -83,13 +83,19 @@ by the type as the enum facets defer to `ToLabel`. Selections are stored raw in
 `FilterConfig.DiceRolls` (empty = facet off); the panel derives nothing —
 `Build()` owns materialization into a `DiceRollFilter`, the same SSOT posture as
 the depth facet (see Pitfalls). The
-analysis-depth control is a **two-axis** facet: one checkbox per
-`AnalysisLevel` (rendered in `Enum.GetValues` declaration order) for the level
-axis, plus two rule-separated toggle checkboxes for the mode axis, bound to
-`FilterConfig.IncludeRollouts` / `IncludeBookRollouts` and labelled from
-`AnalysisMode.Rollout` / `.BookRollout`'s `[Description]`s. The panel binds
-these three raw-intent members and **never** derives the effective
-`AnalysisMode` set — that SSOT is `FilterConfig.Build()` (see Pitfalls).
+analysis-depth control renders the facet's **three per-mode pairs**: one
+toggle checkbox per selectable `AnalysisMode` (labelled from the enum's
+`[Description]`s; `Unknown` gets no toggle), each disclosing its own
+"Analysis level" group while checked — one checkbox per `AnalysisLevel` in
+`Enum.GetValues` declaration order. Each level group is an honest disclosure
+(real button, `aria-expanded` / `aria-controls`), collapsed by default and
+deliberately **unpersisted** (see Pitfalls); while collapsed it carries a
+count badge — "any" with no level checked, "N selected" otherwise — the
+hidden-active-signal ruling one tier down. The panel binds the six raw-intent
+members (`IncludeEvaluations`+`EvaluationLevels`, `IncludeRollouts`+
+`RolloutLevels`, `IncludeBookRollouts`+`BookRolloutLevels`) verbatim and
+**never** derives the clause union — that SSOT is `FilterConfig.Build()`
+(see Pitfalls).
 Position type and play type are shelved for later reintroduction — their UI
 groups have been hidden since the FilterPanel hide pass, while the
 `XgFilter_Lib` machinery behind them (`FilterConfig.PositionTypes` /
@@ -258,17 +264,33 @@ Parameters (all callbacks `[EditorRequired]`, as is `Filters`):
   events as the user types — only `OnFilterDirty`. The contract is
   "user thinks, then commits via Apply." Don't wire a downstream
   consumer to assume `OnFilterConfigChanged` fires per keystroke.
-- **The depth facet's mode set is derived in `Build()`, not the panel.**
-  The Analysis-depth control writes only raw intent — a checked-level set
-  (`AnalysisLevels`) plus the two independent toggles (`IncludeRollouts`,
-  `IncludeBookRollouts`) — and calls `MarkDirty()`. The mapping from those
-  toggles to the effective `AnalysisMode` set (Rollouts→`Rollout`, Book
-  rollouts→`BookRollout`, neither→`Evaluation`, plus the "no level checked and
-  neither toggle = facet off" rule) lives **only** in `FilterConfig.Build()` —
-  it is the single source of truth, and XgFilter_Lib's Pitfalls flag
-  re-encoding it in a consumer as a silent-drift hazard. The panel must not
-  pre-compute a mode list; it binds the three members verbatim and lets
+- **The depth facet's clause union is derived in `Build()`, not the panel.**
+  The Analysis-depth control writes only raw intent — three per-mode pairs,
+  each a toggle plus its own checked-level set — and calls `MarkDirty()`. The
+  mapping to `AnalysisDepthFilter` clauses (one clause per enabled toggle
+  carrying its own level list, empty list = any level, all toggles off =
+  facet off, inert level lists) lives **only** in `FilterConfig.Build()` — it
+  is the single source of truth, and XgFilter_Lib's Pitfalls flag re-encoding
+  it in a consumer as a silent-drift hazard. The panel must not pre-compute
+  clauses or a mode list; it binds the six members verbatim and lets
   `Build()` own the semantics.
+- **Level-group disclosure state is deliberately unpersisted.** The
+  panel-level disclosure persists under `xg_moreFiltersExpanded` because its
+  collapsed state hides *which* sections hold what — the hidden-active signal
+  compresses that to a count-plus-names summary, and the user's chosen
+  layout is worth remembering across sessions. A level group's collapsed
+  state hides only one thing — which levels are checked — and its badge
+  ("any" / "N selected") already carries that in full, so remembering the
+  open state would buy no information at the cost of three more
+  localStorage keys and their interop. Each group therefore mounts
+  collapsed, and toggling it is navigation: no `OnFilterDirty`, no write.
+- **Unchecking a mode keeps its checked levels.** The buffer (and the
+  emitted config) retain a group's level selections when its toggle goes
+  off: the lib guarantees a level list whose toggle is off is inert — no
+  activation, no constraint, no validation — so re-toggling the mode
+  restores the user's selection instead of punishing an exploratory
+  untoggle. Only Clear filters (or a hydrating restore/load) resets the
+  level lists.
 - **Single callback by design.** `FilterConfig.Build()` is the canonical
   `FilterConfig` → `DecisionFilterSet` adapter; a parallel callback
   raising `DecisionFilterSet` would be a redundant encapsulation leak.
