@@ -1,0 +1,144 @@
+@using XgFilter_Lib.Enums
+
+@* ── FilterHelp.razor ────────────────────────────────────────────────────────
+   Producer-owned documentation for every facet FilterPanel offers, in
+   user-level language — behavior only, never FilterConfig internals or field
+   names. It lives beside the panel that renders the facets so the prose has
+   one owner: consumers embed this component (BgQuiz's Help adds only
+   app-level framing around it) and must never write their own facet prose —
+   a second description of a facet's semantics is a second encoding that
+   silently drifts.
+
+   Render-only and parameterless: no JS, no localStorage, no state. Structured
+   for embedding — one section per facet, each heading carrying a stable
+   fh-* anchor id, headings from the lib's FilterFacet [Description]s via
+   ToLabel() so help titles, panel section headings, and the hidden-active
+   signal all name a facet identically. The shelved facets (Position types /
+   Play types) are documented only when their UI returns.
+   Location: XgFilter_Razor/Components/FilterHelp.razor
+──────────────────────────────────────────────────────────────────────────── *@
+
+<div class="filter-help">
+
+    <h4 id="fh-filters">Filters</h4>
+    <p>
+        Filters select which analyzed decisions are admitted. Every filter you
+        set must agree for a decision to pass — the facets combine with AND.
+        Within a single facet, checked options combine with OR: checking more
+        options admits more decisions. A facet left at rest (nothing typed,
+        nothing checked) admits everything, so an empty panel passes every
+        decision.
+    </p>
+
+    <section>
+        <h5 id="fh-error-range">@FilterFacet.ErrorRange.ToLabel()</h5>
+        <p>
+            Admits decisions whose error size falls between the two bounds,
+            inclusive. Leave a bound blank for no limit on that side. While an
+            error range is set, decisions without a measured error are
+            excluded.
+        </p>
+    </section>
+
+    <section>
+        <h5 id="fh-players">@FilterFacet.Players.ToLabel()</h5>
+        <p>
+            Admits decisions made by any of the listed players
+            (comma-separated). Blank means all players. A match involving none
+            of the listed players is skipped entirely.
+        </p>
+    </section>
+
+    <section>
+        <h5 id="fh-decision-type">@FilterFacet.DecisionType.ToLabel()</h5>
+        <p>
+            Restricts to checker plays only, cube decisions only, or admits
+            both.
+        </p>
+    </section>
+
+    <section>
+        <h5 id="fh-match-scores">@FilterFacet.MatchScores.ToLabel()</h5>
+        <p>
+            Admits decisions taken at any of the listed scores
+            (comma-separated). Scores are written <em>MaNa</em> and are
+            anchored to the player on roll: M is the points the player on roll
+            still needs, N the opponent — so 4a5a and 5a4a are different
+            scores; list both to catch either orientation. Append C for a
+            Crawford game (1a2aC), write money for money sessions, and note
+            double match point is 1a1a.
+        </p>
+    </section>
+
+    <section>
+        <h5 id="fh-move-number-range">@FilterFacet.MoveNumberRange.ToLabel()</h5>
+        <p>
+            Admits decisions by their move number within the game, between the
+            two bounds, inclusive. Leave a bound blank for no limit on that
+            side. Games that do not begin from the standard starting position
+            are excluded while this filter is active.
+        </p>
+    </section>
+
+    <section>
+        <h5 id="fh-contact-type">@FilterFacet.ContactTypes.ToLabel()</h5>
+        <p>
+            Admits decisions by the character of the position — contact or
+            race. Nothing checked means all types.
+        </p>
+    </section>
+
+    <section>
+        <h5 id="fh-analysis-depth">@FilterFacet.AnalysisDepth.ToLabel()</h5>
+        <p>
+            Admits decisions by how they were analyzed. There are three modes:
+            an <strong>evaluation</strong> (XG's neural-net judgment at some
+            ply level), a <strong>rollout</strong> (games played out to
+            settle the decision), and a <strong>book rollout</strong> (a
+            stored result looked up from XG's opening book).
+        </p>
+        <p>
+            Check a mode to admit its decisions; each checked mode admits its
+            decisions independently, so checking more always matches more, and
+            with no mode checked the facet is off — every decision passes,
+            including older ones whose analysis depth was never recorded.
+            While the facet is on, those unrecorded decisions are excluded.
+        </p>
+        <p>
+            Under each checked mode you can narrow by analysis level. Levels
+            you check narrow only their own mode; none checked means any level
+            for that mode. What "level" means differs by mode: an
+            evaluation's level is its own; a rollout's level is the
+            <em>inner</em> level its games were played at — checker plays
+            never carry XG Roller-family inner levels; a book rollout's level
+            is the inner level from the opening-book entry, when the book
+            recorded one.
+        </p>
+    </section>
+
+    <section>
+        <h5 id="fh-dice-rolls">@FilterFacet.DiceRolls.ToLabel()</h5>
+        <p>
+            Admits checker plays made with any of the checked rolls. Dice
+            order does not matter — 31 covers 3-1 and 1-3 alike. Nothing
+            checked means all rolls. While rolls are checked, cube decisions
+            never match: no roll exists before the cube is offered.
+        </p>
+    </section>
+
+    <section>
+        <h5 id="fh-position-pattern">@FilterFacet.PositionPattern.ToLabel()</h5>
+        <p>
+            Admits decisions whose position matches a set of per-location
+            checker-count ranges, written as a bracket list —
+            [location,min,max] per location, with a blank bound meaning
+            unbounded. Positive counts belong to the player on roll, negative
+            to the opponent. Locations are points 1–24 (numbered from the
+            player on roll's perspective), the bars (25 for the player on
+            roll, 0 for the opponent), and the borne-off trays (off and
+            opp-off). Every listed location must match. Blank means no
+            pattern filter.
+        </p>
+    </section>
+
+</div>

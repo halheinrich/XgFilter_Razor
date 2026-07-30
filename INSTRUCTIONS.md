@@ -50,11 +50,13 @@ XgFilter_Razor/
   Components/
     FilterPanel.razor                — markup + @code state
     SavedFiltersPanel.razor          — saved-filter pick list, host-mediated
+    FilterHelp.razor                 — producer-owned facet documentation
   wwwroot/
 XgFilter_Razor.Tests/
   XgFilter_Razor.Tests.csproj
   FilterPanelTests.cs                — bUnit tests for FilterPanel
   SavedFiltersPanelTests.cs          — bUnit tests for SavedFiltersPanel
+  FilterHelpTests.cs                 — bUnit tests for FilterHelp
 ```
 
 ## Architecture
@@ -177,6 +179,25 @@ collection already in memory. The typical wiring: `OnLoadRequested` →
 resolve via `TryGetConfig` → `FilterPanel.LoadConfig`; `OnSaveAsRequested`
 → `FilterPanel.TryGetEditedConfig` → `With` → persist.
 
+### `FilterHelp` component
+
+Producer-owned documentation for every facet the panel offers, in
+user-level language — behavior only, never `FilterConfig` internals or
+field names. It lives beside the panel that renders the facets so the
+prose has one owner: consumers embed this component and add only
+app-level framing (BgQuiz's Help does exactly that); they must never
+write their own facet prose — a second description of a facet's
+semantics is a second encoding that silently drifts. Render-only,
+parameterless, no JS or localStorage. Structured for embedding: one
+`<section>` per facet, each heading carrying a stable `fh-*` anchor id,
+heading text from the lib's `FilterFacet` `[Description]`s via
+`ToLabel()` — so help titles, panel section headings, and the
+hidden-active signal all name a facet identically. The depth section
+explains the union semantics (each checked mode admits its decisions;
+more checked = more matched; nothing checked = facet off) and the
+inner-level distinction per mode. The shelved facets (Position types /
+Play types) are deliberately undocumented until their UI returns.
+
 ### `FilterConfig` provenance
 
 `FilterConfig` lives in `XgFilter_Lib.Filtering`, not here. It is a
@@ -199,7 +220,7 @@ state").
 
 ## Public API
 
-Both components live in namespace `XgFilter_Razor.Components`.
+All components live in namespace `XgFilter_Razor.Components`.
 
 ### `FilterPanel`
 
@@ -239,6 +260,13 @@ Parameters (all callbacks `[EditorRequired]`, as is `Filters`):
 - `bool CanPersist` (default `true`) + `string? PersistDisabledReason` —
   gate Save/Delete as one switch when the host cannot persist; Load
   stays enabled.
+
+### `FilterHelp`
+
+No parameters, no callbacks, no host-facing methods — embed it where the
+host's help lives and add app-level framing around it. Stable `fh-*`
+anchor ids on every facet heading are the embedding surface for hosts
+that want to deep-link a section.
 
 ## Pitfalls
 
@@ -304,6 +332,13 @@ Parameters (all callbacks `[EditorRequired]`, as is `Filters`):
   `EventCallback` parameters catches missing-binding (yields `RZ2012`)
   but not stale-binding; supplement with bUnit integration tests that
   fire Apply and assert the consumer's downstream state actually flips.
+- **Facet documentation has one owner: `FilterHelp`.** Consumers embed
+  the component and add app-level framing only — a consumer that writes
+  its own description of a facet's semantics creates a second encoding
+  of lib behavior that silently drifts when the lib's rules change
+  (exactly the depth-facet redesign scenario). If a host needs prose
+  `FilterHelp` lacks, the fix is to extend `FilterHelp` here, not to
+  write it host-side.
 - **Host-app-specific wrappers stay with the host.** A consumer that
   needs to wrap `FilterConfig` with output-format options (CSV / PPTX
   selection, output paths, etc.) defines that wrapper in the consumer,
