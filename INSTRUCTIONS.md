@@ -50,7 +50,7 @@ XgFilter_Razor/
   Components/
     FilterPanel.razor                — markup + @code state
     SavedFiltersPanel.razor          — saved-filter pick list, host-mediated
-    FilterHelp.razor                 — producer-owned facet documentation
+    FilterHelp.razor                 — producer-owned facet + storage documentation
   wwwroot/
 XgFilter_Razor.Tests/
   XgFilter_Razor.Tests.csproj
@@ -187,8 +187,10 @@ field names. It lives beside the panel that renders the facets so the
 prose has one owner: consumers embed this component and add only
 app-level framing (BgQuiz's Help does exactly that); they must never
 write their own facet prose — a second description of a facet's
-semantics is a second encoding that silently drifts. Render-only,
-parameterless, no JS or localStorage. Structured for embedding: one
+semantics is a second encoding that silently drifts. Render-only and
+parameterless: it issues no JS interop and touches no storage or state
+of its own — it *documents* what `FilterPanel` persists without
+participating in it. Structured for embedding: one
 `<section>` per facet, each heading carrying a stable `fh-*` anchor id,
 heading text from the lib's `FilterFacet` `[Description]`s via
 `ToLabel()` — so help titles, panel section headings, and the
@@ -197,6 +199,20 @@ explains the union semantics (each checked mode admits its decisions;
 more checked = more matched; nothing checked = facet off) and the
 inner-level distinction per mode. The shelved facets (Position types /
 Play types) are deliberately undocumented until their UI returns.
+
+A final non-facet section, **What the panel remembers**
+(`fh-what-is-remembered`), is the storage-assurance copy: it states in
+user terms that the panel saves its settings in the reader's own browser
+on their own machine and uploads nothing, and it names both
+`localStorage` entries — the applied config and the disclosure
+preference — so a reader can verify them in devtools. Both key names are
+**rendered from `FilterPanel`'s own constants** (`ConfigKey` /
+`DisclosureKey`, `internal` for exactly this), never written as prose
+literals, so the copy cannot drift from what the panel actually writes.
+Scope is exactly what `FilterPanel` persists: a sibling `xg_*` key
+belonging to a host app is that host's to document. A host with its own
+data-ownership copy points *into* this section rather than restating it
+(BgQuiz's Help does that) — the same one-owner rule as the facet prose.
 
 ### `FilterConfig` provenance
 
@@ -265,8 +281,15 @@ Parameters (all callbacks `[EditorRequired]`, as is `Filters`):
 
 No parameters, no callbacks, no host-facing methods — embed it where the
 host's help lives and add app-level framing around it. Stable `fh-*`
-anchor ids on every facet heading are the embedding surface for hosts
-that want to deep-link a section.
+anchor ids on every heading are the embedding surface for hosts that
+want to deep-link a section — including `fh-what-is-remembered`, the
+storage-assurance section a host's data-ownership copy points at.
+
+`FilterPanel`'s two `localStorage` key constants are `internal`, not
+public: the copy naming them lives here, in the producer, so a consumer
+never sees or depends on this panel's key names. Test-only
+`InternalsVisibleTo("XgFilter_Razor.Tests")` lets the wiring test pin
+the rendered names to those constants.
 
 ## Pitfalls
 
@@ -338,7 +361,23 @@ that want to deep-link a section.
   of lib behavior that silently drifts when the lib's rules change
   (exactly the depth-facet redesign scenario). If a host needs prose
   `FilterHelp` lacks, the fix is to extend `FilterHelp` here, not to
-  write it host-side.
+  write it host-side. That rule is why the storage-assurance copy for
+  the panel's own keys is producer-owned too — a host states its own
+  data ownership and points into `fh-what-is-remembered` for the panel's
+  half.
+- **The storage keys are a documented surface now — `internal`, and no
+  wider.** `ConfigKey` / `DisclosureKey` on `FilterPanel` are `internal`
+  solely so `FilterHelp` can render the names it tells users to look for
+  in devtools from the one constant. Two consequences. (1) Renaming a
+  key is a user-facing copy change as well as a storage-format change:
+  the name in the help text follows automatically, but a reader's
+  existing entry silently stops being found, so treat a rename as a
+  migration question, not a refactor. (2) They must never become
+  `public`. A consumer that can see this panel's key names will
+  eventually hardcode one, and the point of siting the copy here is that
+  no consumer needs to know them. The test project reaches them through
+  test-only `InternalsVisibleTo` in the csproj — that grant is the whole
+  intended audience.
 - **Host-app-specific wrappers stay with the host.** A consumer that
   needs to wrap `FilterConfig` with output-format options (CSV / PPTX
   selection, output paths, etc.) defines that wrapper in the consumer,

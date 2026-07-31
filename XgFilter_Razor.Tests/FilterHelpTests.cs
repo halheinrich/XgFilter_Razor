@@ -58,9 +58,10 @@ public class FilterHelpTests : BunitContext
         Assert.DoesNotContain(FilterFacet.PlayTypes.ToLabel(), cut.Markup);
     }
 
-    // Render-only by contract: no JS interop may occur. JSInterop stays in
-    // Strict mode (the BunitContext default) here, so any interop call would
-    // throw — rendering cleanly is the proof.
+    // Render-only by contract: no JS interop may occur — documenting what the
+    // panel persists must not turn this component into a storage participant.
+    // JSInterop stays in Strict mode (the BunitContext default) here, so any
+    // interop call would throw — rendering cleanly is the proof.
     [Fact]
     public void Render_IssuesNoJsInterop()
     {
@@ -68,5 +69,36 @@ public class FilterHelpTests : BunitContext
 
         Assert.Empty(JSInterop.Invocations);
         Assert.NotNull(cut.Find("#fh-analysis-depth"));
+    }
+
+    // Wiring, not content. Per the copy-pin SSOT ruling, an independent literal
+    // is the right oracle for "the user can read X" and lives in the e2e suite;
+    // here the property under test is that the key names in the copy are the
+    // *same* source the panel writes with. Two literals would agree today and
+    // drift silently the day a key is renamed, so this assertion deliberately
+    // references FilterPanel's constants (visible test-only via
+    // InternalsVisibleTo) — that is what makes it catch the drift.
+    [Fact]
+    public void WhatIsRemembered_NamesTheKeysFromFilterPanelsConstants()
+    {
+        var cut = Render<FilterHelp>();
+
+        var keys = cut.FindAll("#fh-what-is-remembered ~ ul code")
+                      .Select(e => e.TextContent.Trim())
+                      .ToArray();
+
+        Assert.Equal(new[] { FilterPanel.ConfigKey, FilterPanel.DisclosureKey }, keys);
+    }
+
+    // The section carries a stable anchor id on a heading, like every facet
+    // section here — that anchor is the embedding surface a host's own
+    // data-ownership copy points at instead of restating what the panel
+    // persists. Structure only: the wording is the e2e suite's to pin.
+    [Fact]
+    public void WhatIsRemembered_HasAnchoredHeading()
+    {
+        var cut = Render<FilterHelp>();
+
+        Assert.NotNull(cut.Find(".filter-help section h5#fh-what-is-remembered"));
     }
 }

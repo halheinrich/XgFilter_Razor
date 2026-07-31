@@ -9,12 +9,16 @@
    a second description of a facet's semantics is a second encoding that
    silently drifts.
 
-   Render-only and parameterless: no JS, no localStorage, no state. Structured
-   for embedding — one section per facet, each heading carrying a stable
-   fh-* anchor id, headings from the lib's FilterFacet [Description]s via
-   ToLabel() so help titles, panel section headings, and the hidden-active
-   signal all name a facet identically. The shelved facets (Position types /
-   Play types) are documented only when their UI returns.
+   Render-only and parameterless: it issues no JS interop and touches no
+   storage or state of its own. It does *document* what FilterPanel persists
+   (the "what the panel remembers" section) — but only by rendering the
+   panel's own key constants, never by reading or writing them.
+
+   Structured for embedding — one section per facet, each heading carrying a
+   stable fh-* anchor id, headings from the lib's FilterFacet [Description]s
+   via ToLabel() so help titles, panel section headings, and the
+   hidden-active signal all name a facet identically. The shelved facets
+   (Position types / Play types) are documented only when their UI returns.
    Location: XgFilter_Razor/Components/FilterHelp.razor
 ──────────────────────────────────────────────────────────────────────────── *@
 
@@ -138,6 +142,45 @@
             roll, 0 for the opponent), and the borne-off trays (off and
             opp-off). Every listed location must match. Blank means no
             pattern filter.
+        </p>
+    </section>
+
+    @* Storage copy — the two keys are rendered from FilterPanel's own internal
+       constants, never written here as prose literals, so the names a reader
+       verifies in devtools cannot drift from the names the panel actually
+       writes. Scope is exactly what FilterPanel itself persists: a sibling key
+       belonging to a host app is that host's to document, not this panel's. *@
+    <section>
+        <h5 id="fh-what-is-remembered">What the panel remembers</h5>
+        <p>
+            The panel remembers your filter settings so they are still there
+            next time. It saves them in your own browser, on this machine, and
+            nowhere else — nothing is uploaded. What is saved is the filter
+            settings themselves, not your positions, your matches, or the files
+            you analyzed.
+        </p>
+        <p>
+            There are two saved entries, both kept in your browser's local
+            storage for this site. They survive reloading the page and closing
+            the browser, and they are tied to this browser and this site — so
+            another browser, or another machine, starts fresh:
+        </p>
+        <ul>
+            <li>
+                <code>@FilterPanel.ConfigKey</code> — the filters you last
+                applied. Written when you press Apply Filter and when you press
+                Clear filters, and read back when the panel first appears.
+            </li>
+            <li>
+                <code>@FilterPanel.DisclosureKey</code> — whether
+                <em>Show more filters</em> is open. That is a display
+                preference, kept apart from your filters: it is not part of the
+                saved filter settings, and Clear filters never changes it.
+            </li>
+        </ul>
+        <p>
+            You can see both entries under local storage for this site in your
+            browser's developer tools, and delete them there whenever you like.
         </p>
     </section>
 

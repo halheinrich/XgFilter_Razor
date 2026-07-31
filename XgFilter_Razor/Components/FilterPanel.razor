@@ -375,19 +375,33 @@
     /// </summary>
     [Parameter] public EventCallback OnFilterDirty { get; set; }
 
-    // Single localStorage key holding the whole filter state as one serialized
-    // FilterConfig blob. The lib owns the JSON shape (ToJson / TryFromJson);
-    // this component never touches a JSON serializer directly.
-    private const string ConfigKey = "xg_filter_config";
+    /// <summary>
+    /// Single <c>localStorage</c> key holding the whole filter state as one serialized
+    /// <see cref="FilterConfig"/> blob. The lib owns the JSON shape (<c>ToJson</c> /
+    /// <c>TryFromJson</c>); this component never touches a JSON serializer directly.
+    /// </summary>
+    /// <remarks>
+    /// <c>internal</c>, not private, so <see cref="FilterHelp"/> can render the key
+    /// name in its "what the panel remembers" copy from this one constant rather than
+    /// repeating it as a prose literal. Deliberately not <c>public</c>: a consumer must
+    /// never see — let alone depend on — this panel's storage keys, which is precisely
+    /// why the copy naming them is producer-owned and lives here.
+    /// </remarks>
+    internal const string ConfigKey = "xg_filter_config";
 
-    // The disclosure's expand/collapse choice, under its own key (camelCase
-    // after the xg_ prefix, per the sibling convention: xg_quizMix,
-    // xg_xgpPattern). User preference, not filter state — it never rides in
-    // the ConfigKey blob, and LoadConfig / Clear filters never change it.
-    // Values are the literals "true" / "false"; restore treats exactly "true"
-    // as expanded and anything else (missing, corrupt) as the default-hidden
-    // posture.
-    private const string DisclosureKey = "xg_moreFiltersExpanded";
+    /// <summary>
+    /// The disclosure's expand/collapse choice, under its own key (camelCase after the
+    /// <c>xg_</c> prefix, per the sibling convention: <c>xg_quizMix</c>,
+    /// <c>xg_xgpPattern</c>). User preference, not filter state — it never rides in the
+    /// <see cref="ConfigKey"/> blob, and <see cref="LoadConfig"/> / Clear filters never
+    /// change it. Values are the literals <c>"true"</c> / <c>"false"</c>; restore treats
+    /// exactly <c>"true"</c> as expanded and anything else (missing, corrupt) as the
+    /// default-hidden posture.
+    /// </summary>
+    /// <remarks>
+    /// <c>internal</c> for the same reason as <see cref="ConfigKey"/> — see its remarks.
+    /// </remarks>
+    internal const string DisclosureKey = "xg_moreFiltersExpanded";
 
     // Free-text / numeric buffers. These exist only because in-progress typing
     // needs a string distinct from the parsed value; they are transient

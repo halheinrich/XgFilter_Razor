@@ -10,6 +10,14 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Test-only. FilterPanel's localStorage keys are internal so FilterHelp can
+         render them in user copy from the one constant; the wiring test that pins
+         that copy to the constant needs the same access. Grants nothing to
+         consumers — the keys stay invisible outside this repo by design. -->
+    <InternalsVisibleTo Include="XgFilter_Razor.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Components.Web" />
   </ItemGroup>
 
