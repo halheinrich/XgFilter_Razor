@@ -7,9 +7,13 @@
 
 @* ── FilterPanel.razor ───────────────────────────────────────────────────────
    Owns all filter state. Raises OnFilterConfigChanged only when "Apply Filter"
-   is clicked (or "Clear filters"). Raises OnFilterDirty whenever any control
-   changes, so the parent can disable Run until Apply. Consumers that need a
-   DecisionFilterSet call FilterConfig.Build() on the received config.
+   is clicked (or "Clear filters"). Raises OnAppliedStateChanged after every
+   buffer-affecting gesture, carrying the committed config the buffers now
+   equal (null when they equal none), so the parent can gate downstream actions
+   on whether the panel's selection is still the one it acted on. That same
+   truth gates Apply itself: re-applying an unchanged selection is not offered.
+   Consumers that need a DecisionFilterSet call FilterConfig.Build() on the
+   received config.
    Information hierarchy: the error-range section is first and always visible;
    the other eight sections sit behind one disclosure, default hidden. While
    collapsed, the toggle carries a signal naming any hidden sections that hold
@@ -39,12 +43,12 @@
                 <input class="form-control" style="max-width:140px"
                        type="number" step="0.001" placeholder="Min"
                        value="@_errorMinText"
-                       @oninput="e => { _errorMinText = e.Value?.ToString() ?? string.Empty; MarkDirty(); }" />
+                       @oninput="e => { _errorMinText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
                 <span>–</span>
                 <input class="form-control" style="max-width:140px"
                        type="number" step="0.001" placeholder="Max"
                        value="@_errorMaxText"
-                       @oninput="e => { _errorMaxText = e.Value?.ToString() ?? string.Empty; MarkDirty(); }" />
+                       @oninput="e => { _errorMaxText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
             </div>
         </div>
 
@@ -98,7 +102,7 @@
                     <input class="form-control"
                            placeholder="e.g. Hal, Magriel"
                            value="@_playerText"
-                           @oninput="e => { _playerText = e.Value?.ToString() ?? string.Empty; MarkDirty(); }" />
+                           @oninput="e => { _playerText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
                 </div>
 
                 @* ── Decision type ───────────────────────────────────────────── *@
@@ -112,7 +116,7 @@
                                        name="decisionType"
                                        id="dt_@opt"
                                        checked="@(_decisionType == opt)"
-                                       @onchange="() => { _decisionType = opt; MarkDirty(); }" />
+                                       @onchange="() => { _decisionType = opt; ReportAppliedState(); }" />
                                 <label class="form-check-label" for="dt_@opt">
                                     @opt.ToLabel()
                                 </label>
@@ -130,7 +134,7 @@
                     <input class="form-control"
                            placeholder="e.g. 4a5a, 1a1a, 1a2aC, money"
                            value="@_matchScoreText"
-                           @oninput="e => { _matchScoreText = e.Value?.ToString() ?? string.Empty; MarkDirty(); }" />
+                           @oninput="e => { _matchScoreText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
                     <div class="form-text">
                         MaNa is on-roll-anchored — M = points the player on roll needs, N = the
                         opponent — so 4a5a and 5a4a are distinct (list both to catch either
@@ -148,12 +152,12 @@
                         <input class="form-control" style="max-width:140px"
                                type="number" step="1" min="1" placeholder="Min"
                                value="@_moveNumberMinText"
-                               @oninput="e => { _moveNumberMinText = e.Value?.ToString() ?? string.Empty; MarkDirty(); }" />
+                               @oninput="e => { _moveNumberMinText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
                         <span>–</span>
                         <input class="form-control" style="max-width:140px"
                                type="number" step="1" min="1" placeholder="Max"
                                value="@_moveNumberMaxText"
-                               @oninput="e => { _moveNumberMaxText = e.Value?.ToString() ?? string.Empty; MarkDirty(); }" />
+                               @oninput="e => { _moveNumberMaxText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
                     </div>
                 </div>
 
@@ -170,7 +174,7 @@
                                 <input class="form-check-input" type="checkbox"
                                        id="ct_@ct"
                                        checked="@_contactTypes.Contains(ct)"
-                                       @onchange="(e) => { if (e.Value is bool b && b) _contactTypes.Add(ct); else _contactTypes.Remove(ct); MarkDirty(); }" />
+                                       @onchange="(e) => { if (e.Value is bool b && b) _contactTypes.Add(ct); else _contactTypes.Remove(ct); ReportAppliedState(); }" />
                                 <label class="form-check-label" for="ct_@ct">@ct.ToLabel()</label>
                             </div>
                         }
@@ -200,7 +204,7 @@
                    state buys no information and would cost three more localStorage keys.
                    The badge reads the live buffer, so it is honest mid-edit and after
                    restore / LoadConfig / Clear. Collapsing or expanding a group is
-                   navigation, not an edit — no MarkDirty.
+                   navigation, not an edit — no ReportAppliedState.
 
                    Unchecking a mode hides its level group but keeps the checked levels
                    in the buffer (and in the emitted config): the lib guarantees a level
@@ -219,7 +223,7 @@
                                 <input class="form-check-input" type="checkbox"
                                        id="md_@group.Mode"
                                        checked="@group.Include"
-                                       @onchange="(e) => { group.Include = e.Value is bool b && b; MarkDirty(); }" />
+                                       @onchange="(e) => { group.Include = e.Value is bool b && b; ReportAppliedState(); }" />
                                 <label class="form-check-label" for="md_@group.Mode">@group.Mode.ToLabel()</label>
                             </div>
                             @if (group.Include)
@@ -249,7 +253,7 @@
                                                         <input class="form-check-input" type="checkbox"
                                                                id="lv_@(group.Mode)_@level"
                                                                checked="@group.Levels.Contains(level)"
-                                                               @onchange="(e) => { if (e.Value is bool b && b) group.Levels.Add(level); else group.Levels.Remove(level); MarkDirty(); }" />
+                                                               @onchange="(e) => { if (e.Value is bool b && b) group.Levels.Add(level); else group.Levels.Remove(level); ReportAppliedState(); }" />
                                                         <label class="form-check-label" for="lv_@(group.Mode)_@level">@level.ToLabel()</label>
                                                     </div>
                                                 }
@@ -288,7 +292,7 @@
                                 <input class="form-check-input" type="checkbox"
                                        id="dr_@roll"
                                        checked="@_diceRolls.Contains(roll)"
-                                       @onchange="(e) => { if (e.Value is bool b && b) _diceRolls.Add(roll); else _diceRolls.Remove(roll); MarkDirty(); }" />
+                                       @onchange="(e) => { if (e.Value is bool b && b) _diceRolls.Add(roll); else _diceRolls.Remove(roll); ReportAppliedState(); }" />
                                 <label class="form-check-label" for="dr_@roll">@roll</label>
                             </div>
                         }
@@ -317,7 +321,7 @@
                            class="form-control @(IsPositionPatternValid ? string.Empty : "is-invalid")"
                            placeholder="e.g. [6,2,] [5,,-2] [opp-off,,-2]"
                            value="@_positionPatternText"
-                           @oninput="e => { _positionPatternText = e.Value?.ToString() ?? string.Empty; MarkDirty(); }" />
+                           @oninput="e => { _positionPatternText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
                     <div class="form-text">
                         [location,min,max] per location; blank bound = unbounded; positive counts
                         belong to the player on roll, negative to the opponent.
@@ -336,10 +340,19 @@
         @* ── Buttons ──────────────────────────────────────────────────────────
            "Clear filters" is the full-clear gesture under an honest name: it
            clears filter values only (buffers to defaults, persist + raise the
-           empty config) — it never touches host state or the disclosure. *@
+           empty config) — it never touches host state or the disclosure.
+           Apply is gated on CanApply: the position pattern must be committable
+           AND the selection must differ from the last-committed config.
+           ApplyDisabledReason explains the second case in the
+           SavedFiltersPanel disabled-reason idiom (title + muted hint line);
+           the first already explains itself in the pattern field's own
+           invalid-feedback line. Hoisted into a local like the hidden-active
+           signal above: both surfaces of the reason read the one evaluation. *@
+        @{ var applyDisabledReason = ApplyDisabledReason; }
         <div class="d-flex gap-2">
             <button class="btn btn-primary btn-sm"
-                    disabled="@(!IsPositionPatternValid)"
+                    disabled="@(!CanApply)"
+                    title="@applyDisabledReason"
                     @onclick="ApplyAsync">
                 Apply Filter
             </button>
@@ -347,6 +360,10 @@
                 Clear filters
             </button>
         </div>
+        @if (applyDisabledReason is not null)
+        {
+            <div id="applyDisabledReason" class="form-text">@applyDisabledReason</div>
+        }
 
     </div>
 </div>
@@ -366,14 +383,35 @@
     [Parameter, EditorRequired] public EventCallback<FilterConfig> OnFilterConfigChanged { get; set; }
 
     /// <summary>
-    /// Raised on every input change (typing, radio, checkbox) so the parent can
-    /// disable a Run button until the user commits via Apply — it signals only
-    /// that the selection is dirty and carries no payload. Optional by design: a
-    /// consumer that doesn't gate downstream actions on dirtiness simply leaves it
-    /// unbound, and the panel still emits on Apply. It is deliberately <em>not</em>
-    /// <c>[EditorRequired]</c> for that reason.
+    /// Raised after <em>every</em> gesture that touches the edit buffers — a
+    /// control edit (typing, radio, checkbox), <see cref="LoadConfig"/> staging,
+    /// Apply, and Clear filters — carrying the committed <see cref="FilterConfig"/>
+    /// the buffers now equal, or <see langword="null"/> when they equal none. A
+    /// consumer gating a downstream action (a Run / Start button) on "is the
+    /// panel's selection still the one I acted on?" compares the payload against
+    /// the config it last received from <see cref="OnFilterConfigChanged"/>; a
+    /// <see langword="null"/> payload always means uncommitted edits are pending.
+    /// <para>
+    /// <b>Per-gesture, not transition-only — deliberately.</b> The panel
+    /// re-reports the current answer on every gesture rather than firing only
+    /// when the answer changes, and the reason is remounting. The committed
+    /// config is component-instance state that dies with the panel, so a freshly
+    /// mounted panel has committed nothing and reports <see langword="null"/> on
+    /// the user's first edit — while a consumer whose own applied state survived
+    /// the navigation is still holding a config from the previous mount, and so
+    /// a stale "clean" belief that only this event can correct. A transition-only
+    /// event is silent in exactly that state, because from the new panel's point
+    /// of view nothing transitioned. Consumers therefore handle it statelessly
+    /// and idempotently — assign from the payload, never diff it against a
+    /// remembered previous one.
+    /// </para>
+    /// Required: gating downstream actions is what this panel's consumers use it
+    /// for, and an unbound callback fails silently at runtime as a gate that
+    /// never re-opens, so <see cref="EditorRequiredAttribute"/> turns a missing
+    /// binding into an <c>RZ2012</c> compile error — see the silent-splat entry
+    /// in this subproject's Pitfalls.
     /// </summary>
-    [Parameter] public EventCallback OnFilterDirty { get; set; }
+    [Parameter, EditorRequired] public EventCallback<FilterConfig?> OnAppliedStateChanged { get; set; }
 
     /// <summary>
     /// Single <c>localStorage</c> key holding the whole filter state as one serialized
@@ -470,6 +508,17 @@
     // lib's (DiceRoll.All), never re-derived here.
     private HashSet<DiceRoll> _diceRolls = new();
 
+    // The config this panel last committed — the one it raised through
+    // OnFilterConfigChanged from Apply or Clear filters — and the reference
+    // point for "has the selection moved since?". Plain component-instance
+    // state, deliberately dying on unmount: a host that remounts the panel
+    // (BgQuiz on a new folder pick) starts with nothing committed, which is
+    // what re-enables Apply for the new folder without any host-side reset
+    // call. Never persisted and never a holder: the first-render localStorage
+    // restore *stages* a selection, it does not commit one, so a fresh mount
+    // has no committed config even when it restores a full selection.
+    private FilterConfig? _committedConfig;
+
     // True once LoadConfig has staged an externally supplied config. The
     // first-render localStorage restore checks it both before and after its
     // await, so a restore completing late can never clobber an external load.
@@ -537,11 +586,14 @@
     /// staging-only bulk edit — exactly as if the user had typed every value.
     /// No <em>Apply-side</em> effects occur: nothing is persisted to
     /// <c>localStorage</c> and <see cref="OnFilterConfigChanged"/> is not
-    /// raised — the user (or host) still commits via Apply.
-    /// <see cref="OnFilterDirty"/> <em>is</em> raised, unconditionally, like
-    /// any other edit gesture: after a load the staged state diverges from the
-    /// last-applied config, and a host gating actions on dirtiness must hear
-    /// about it. Calling this also suppresses the first-render
+    /// raised — the user (or host) still commits via Apply, and this method
+    /// never moves the committed config.
+    /// <see cref="OnAppliedStateChanged"/> <em>is</em> raised, like any other
+    /// edit gesture, reporting what the staged buffers now equal: normally
+    /// <see langword="null"/>, since a loaded config generally differs from
+    /// what was committed — but the committed config itself when the load
+    /// happens to stage exactly it, which is a genuinely clean state and is
+    /// reported as one. Calling this also suppresses the first-render
     /// <c>localStorage</c> restore, so a config loaded during host startup
     /// cannot be clobbered when the restore's interop completes afterwards.
     /// The disclosure's visibility is deliberately untouched — a staged config
@@ -559,7 +611,7 @@
         ArgumentNullException.ThrowIfNull(config);
         _externalConfigLoaded = true;
         HydrateFrom(config);
-        MarkDirty();
+        ReportAppliedState();
         StateHasChanged();
     }
 
@@ -594,9 +646,50 @@
         return true;
     }
 
-    private void MarkDirty() => OnFilterDirty.InvokeAsync();
+    // The panel's cleanliness truth, computed in one place and consumed by the
+    // two surfaces that need it — the Apply gate (CanApply) and the payload of
+    // OnAppliedStateChanged — so the button and the event can never disagree.
+    // Null means the buffers equal no committed config: either nothing has been
+    // committed this mount, or the selection has moved since. Equality is
+    // FilterConfig's own value equality, which is precisely why an edit undone
+    // back to the committed values counts as clean again — a one-way dirty flag
+    // would strand the user behind a disabled Apply in exactly that state.
+    // Unparseable position-pattern text builds as "no pattern" (see
+    // ParsePositionPattern), so it never reads as a *different* config; it never
+    // opens the gate either, because CanApply also requires
+    // IsPositionPatternValid.
+    private FilterConfig? MatchedCommittedConfig =>
+        _committedConfig is not null && _committedConfig.Equals(BuildConfig())
+            ? _committedConfig
+            : null;
 
-    private Task ApplyAsync() => PersistAndRaiseAsync(BuildConfig());
+    // Apply's gate: the selection must be committable (a parseable position
+    // pattern) and must differ from what was last committed.
+    private bool CanApply => IsPositionPatternValid && MatchedCommittedConfig is null;
+
+    // Why Apply is disabled — the SavedFiltersPanel disabled-reason idiom
+    // (button title plus a muted hint line), except that here the panel knows
+    // its own reason instead of being told it by the host. Covers only the
+    // nothing-to-apply case: the invalid-pattern case already explains itself in
+    // the pattern field's invalid-feedback line, and re-stating it here would be
+    // a second encoding of the same rule. Null while Apply is enabled, so no
+    // stale explanation lingers.
+    private string? ApplyDisabledReason =>
+        IsPositionPatternValid && MatchedCommittedConfig is not null
+            ? "No changes to apply — this filter is already applied."
+            : null;
+
+    // Report what the buffers now equal, after a gesture that touched them.
+    // Fire-and-forget like the edit handlers that call it: the panel has nothing
+    // to await on the consumer's reaction.
+    private void ReportAppliedState() => OnAppliedStateChanged.InvokeAsync(MatchedCommittedConfig);
+
+    // Guarded as well as visually disabled, matching SavedFiltersPanel's
+    // handler-side gates: programmatic event dispatch ignores the disabled
+    // attribute, and re-committing an unchanged selection would raise a
+    // spurious OnFilterConfigChanged.
+    private Task ApplyAsync() =>
+        CanApply ? PersistAndRaiseAsync(BuildConfig()) : Task.CompletedTask;
 
     // "Clear filters" — the full-clear gesture: hydrate every edit buffer back
     // to defaults, then persist + raise the empty config (consumers treat it
@@ -610,15 +703,23 @@
         return PersistAndRaiseAsync(cfg);
     }
 
+    // The single commit point — Apply and Clear filters both land here, and it
+    // is the only place _committedConfig moves.
     private async Task PersistAndRaiseAsync(FilterConfig cfg)
     {
+        _committedConfig = cfg;
         await JS.InvokeVoidAsync("localStorage.setItem", ConfigKey, cfg.ToJson());
         await OnFilterConfigChanged.InvokeAsync(cfg);
+
+        // Re-derived through MatchedCommittedConfig rather than handing cfg
+        // straight on: one computation feeds both the gate and the payload, so
+        // the event can never claim clean while the button says otherwise.
+        await OnAppliedStateChanged.InvokeAsync(MatchedCommittedConfig);
     }
 
-    // Flip + persist the disclosure. Not an edit gesture: no OnFilterDirty and
-    // no config write — the choice is remembered immediately under its own
-    // key, independent of Apply.
+    // Flip + persist the disclosure. Not an edit gesture: no
+    // OnAppliedStateChanged and no config write — the choice is remembered
+    // immediately under its own key, independent of Apply.
     private async Task ToggleMoreFiltersAsync()
     {
         _disclosureTouched = true;

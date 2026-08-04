@@ -1,4 +1,7 @@
+using System.Reflection;
+using AngleSharp.Dom;
 using Bunit;
+using Microsoft.AspNetCore.Components;
 using BgDataTypes_Lib;
 using XgFilter_Lib.Enums;
 using XgFilter_Lib.Filtering;
@@ -40,6 +43,29 @@ public class FilterPanelTests : BunitContext
         return cut;
     }
 
+    // Render with the applied-state channel captured into `reports`. A list,
+    // not a single field: OnAppliedStateChanged is per-gesture by contract, so
+    // how many times it fired is as much a part of the assertion as what it
+    // carried.
+    private IRenderedComponent<FilterPanel> RenderReporting(List<FilterConfig?> reports) =>
+        Render<FilterPanel>(parameters => parameters
+            .Add(p => p.OnAppliedStateChanged, (FilterConfig? c) => { reports.Add(c); }));
+
+    private IRenderedComponent<FilterPanel> RenderExpandedReporting(List<FilterConfig?> reports)
+    {
+        var cut = RenderReporting(reports);
+        ExpandMoreFilters(cut);
+        return cut;
+    }
+
+    // The two controls these tests drive to make the panel dirty and clean
+    // again — the always-visible Error-range Min box and the Apply button.
+    private static IElement ErrorMin(IRenderedComponent<FilterPanel> cut) =>
+        cut.Find("input[type='number'][placeholder='Min']");
+
+    private static IElement Apply(IRenderedComponent<FilterPanel> cut) =>
+        cut.Find("button.btn-primary");
+
     [Fact]
     public void Render_DefaultParameters_ProducesFilterCardMarkup()
     {
@@ -55,7 +81,7 @@ public class FilterPanelTests : BunitContext
     {
         var cut = Render<FilterPanel>(parameters => parameters
             .Add(p => p.OnFilterConfigChanged, (FilterConfig _) => { })
-            .Add(p => p.OnFilterDirty, () => { }));
+            .Add(p => p.OnAppliedStateChanged, (FilterConfig? _) => { }));
 
         Assert.NotNull(cut);
     }
@@ -72,6 +98,296 @@ public class FilterPanelTests : BunitContext
 
         Assert.NotNull(capturedConfig);
         Assert.Equal(DecisionTypeOption.Both, capturedConfig!.DecisionType);
+    }
+
+    // ── Apply gate & applied-state reporting ─────────────────────────────────
+    // The panel owns the cleanliness truth because it is the only party holding
+    // both the live edit buffers and the config it last committed. The tests
+    // below pin that truth's two surfaces — the Apply button's disabled state
+    // and the OnAppliedStateChanged payload — which are computed once in the
+    // component and must therefore never disagree.
+
+    // Nothing has been committed on a fresh mount, so Apply is offered from the
+    // start and the panel volunteers no disabled-reason.
+    [Fact]
+    public void FreshMount_LeavesApplyEnabled_WithNoDisabledReason()
+    {
+        var cut = Render<FilterPanel>();
+
+        Assert.False(Apply(cut).HasAttribute("disabled"));
+        Assert.Empty(cut.FindAll("#applyDisabledReason"));
+    }
+
+    // Applying commits: the button disables itself, the event reports the very
+    // config just committed (the same instance the config callback carried, not
+    // a fresh equal one), and the panel says why the button is dead.
+    [Fact]
+    public async Task Apply_DisablesItself_AndReportsTheCommittedConfig()
+    {
+        FilterConfig? committed = null;
+        var reports = new List<FilterConfig?>();
+        var cut = Render<FilterPanel>(parameters => parameters
+            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { committed = c; })
+            .Add(p => p.OnAppliedStateChanged, (FilterConfig? c) => { reports.Add(c); }));
+
+        ErrorMin(cut).Input("0.05");
+        await Apply(cut).ClickAsync(new());
+
+        // The edit reported dirty, then the commit reported clean.
+        Assert.Equal(2, reports.Count);
+        Assert.Null(reports[0]);
+        Assert.NotNull(committed);
+        Assert.Same(committed, reports[1]);
+
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+        Assert.Contains("already applied", cut.Find("#applyDisabledReason").TextContent);
+    }
+
+    // Any edit moves the buffers off the committed config: Apply re-opens, the
+    // event reports null, and the disabled-reason disappears rather than going
+    // stale.
+    [Fact]
+    public async Task EditAfterApply_ReEnablesApply_AndReportsNull()
+    {
+        var reports = new List<FilterConfig?>();
+        var cut = RenderReporting(reports);
+
+        await Apply(cut).ClickAsync(new());
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+
+        ErrorMin(cut).Input("0.05");
+
+        Assert.Null(reports[^1]);
+        Assert.False(Apply(cut).HasAttribute("disabled"));
+        Assert.Empty(cut.FindAll("#applyDisabledReason"));
+    }
+
+    // The wedge this design exists to kill. Deriving cleanliness from value
+    // equality — rather than latching a one-way dirty flag — means an edit
+    // undone back to the committed values counts as clean again, so the panel
+    // re-reports the committed config and closes the gate. Under a dirty flag
+    // the panel would stay "dirty" with Apply's own equality check disabling
+    // the only control that could clear it: a consumer gating on the flag would
+    // be stranded with no recovery gesture.
+    [Fact]
+    public async Task EditUndoneBackToCommittedValues_GoesCleanAgain()
+    {
+        FilterConfig? committed = null;
+        var reports = new List<FilterConfig?>();
+        var cut = Render<FilterPanel>(parameters => parameters
+            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { committed = c; })
+            .Add(p => p.OnAppliedStateChanged, (FilterConfig? c) => { reports.Add(c); }));
+
+        ErrorMin(cut).Input("0.05");
+        await Apply(cut).ClickAsync(new());
+
+        ErrorMin(cut).Input("0.1");
+        Assert.Null(reports[^1]);
+        Assert.False(Apply(cut).HasAttribute("disabled"));
+
+        ErrorMin(cut).Input("0.05");
+        Assert.Same(committed, reports[^1]);
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+    }
+
+    // Clear filters is a commit like Apply — it persists and raises the defaults
+    // config — so it moves the committed config too: the event reports the
+    // defaults, Apply disables, and the next edit re-opens it.
+    [Fact]
+    public async Task ClearFilters_CommitsTheDefaults_AndDisablesApply()
+    {
+        FilterConfig? committed = null;
+        var reports = new List<FilterConfig?>();
+        var cut = Render<FilterPanel>(parameters => parameters
+            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { committed = c; })
+            .Add(p => p.OnAppliedStateChanged, (FilterConfig? c) => { reports.Add(c); }));
+
+        ErrorMin(cut).Input("0.05");
+        await cut.Find("#clearFilters").ClickAsync(new());
+
+        Assert.NotNull(committed);
+        Assert.Null(committed!.ErrorMin);
+        Assert.Same(committed, reports[^1]);
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+
+        ErrorMin(cut).Input("0.05");
+        Assert.Null(reports[^1]);
+        Assert.False(Apply(cut).HasAttribute("disabled"));
+    }
+
+    // LoadConfig stages, never commits — so staging anything other than the
+    // committed config leaves the buffers matching nothing: null reported,
+    // Apply re-opened.
+    [Fact]
+    public async Task LoadConfig_DifferingFromCommitted_ReportsNull_AndEnablesApply()
+    {
+        var reports = new List<FilterConfig?>();
+        var cut = RenderReporting(reports);
+
+        await Apply(cut).ClickAsync(new());
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+
+        await cut.InvokeAsync(() => cut.Instance.LoadConfig(new FilterConfig { Players = ["Magriel"] }));
+
+        Assert.Null(reports[^1]);
+        Assert.False(Apply(cut).HasAttribute("disabled"));
+    }
+
+    // ...and staging exactly what was committed is a genuinely clean state, so
+    // it is reported as one. The staged instance is a different object built
+    // independently, which is the point: the comparison is FilterConfig's value
+    // equality, not reference identity.
+    [Fact]
+    public async Task LoadConfig_OfExactlyTheCommittedConfig_ReportsClean()
+    {
+        FilterConfig? committed = null;
+        var reports = new List<FilterConfig?>();
+        var cut = Render<FilterPanel>(parameters => parameters
+            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { committed = c; })
+            .Add(p => p.OnAppliedStateChanged, (FilterConfig? c) => { reports.Add(c); }));
+
+        ErrorMin(cut).Input("0.05");
+        await Apply(cut).ClickAsync(new());
+
+        ErrorMin(cut).Input("0.9");
+        Assert.Null(reports[^1]);
+
+        await cut.InvokeAsync(() => cut.Instance.LoadConfig(new FilterConfig { ErrorMin = 0.05 }));
+
+        Assert.Same(committed, reports[^1]);
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+    }
+
+    // Validity and cleanliness compose: both must hold for Apply to be offered.
+    // Here the selection is genuinely dirty — the event says so — yet the
+    // unparseable pattern text keeps Apply disabled. The panel volunteers no
+    // disabled-reason line for this case: the pattern field's own
+    // invalid-feedback already explains it, and repeating it here would be a
+    // second encoding of the same rule.
+    [Fact]
+    public async Task InvalidPositionPattern_DisablesApply_EvenWhileDirty()
+    {
+        var reports = new List<FilterConfig?>();
+        var cut = RenderExpandedReporting(reports);
+
+        cut.Find("#positionPattern").Input("[6,2,]");
+        await Apply(cut).ClickAsync(new());
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+
+        cut.Find("#positionPattern").Input("[6,2");
+
+        Assert.Null(reports[^1]);
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+        Assert.Empty(cut.FindAll("#applyDisabledReason"));
+    }
+
+    // A fresh mount is silent. The first-render localStorage restore *stages* a
+    // stored selection — it does not commit one — so neither event fires and
+    // Apply starts enabled even though every control is populated. That is the
+    // pre-existing restore contract, and the committed-config state must not
+    // disturb it.
+    [Fact]
+    public void FreshMount_RestoringStoredConfig_RaisesNothing_AndLeavesApplyEnabled()
+    {
+        JSInterop.Setup<string?>("localStorage.getItem", ConfigKey)
+            .SetResult(new FilterConfig { ErrorMin = 0.05 }.ToJson());
+
+        FilterConfig? committed = null;
+        var reports = new List<FilterConfig?>();
+        var cut = Render<FilterPanel>(parameters => parameters
+            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { committed = c; })
+            .Add(p => p.OnAppliedStateChanged, (FilterConfig? c) => { reports.Add(c); }));
+
+        Assert.Equal("0.05", ErrorMin(cut).GetAttribute("value"));
+        Assert.Null(committed);
+        Assert.Empty(reports);
+        Assert.False(Apply(cut).HasAttribute("disabled"));
+    }
+
+    // The per-gesture rationale, as a test. This panel has committed nothing,
+    // so the first edit is not a *transition* from any state it knows about —
+    // and yet it must report null, because the consumer on the other side may
+    // have survived a remount still holding a config from the previous mount
+    // and gating on it. A transition-only event would be silent here, which is
+    // precisely the state where the consumer is most wrong. Don't "optimize"
+    // this into firing only on change.
+    [Fact]
+    public void FreshMount_ThenFirstEdit_ReportsNull()
+    {
+        JSInterop.Setup<string?>("localStorage.getItem", ConfigKey)
+            .SetResult(new FilterConfig { ErrorMin = 0.05 }.ToJson());
+
+        var reports = new List<FilterConfig?>();
+        var cut = RenderReporting(reports);
+        Assert.Empty(reports);
+
+        ErrorMin(cut).Input("0.09");
+
+        Assert.Equal([null], reports);
+    }
+
+    // A second Apply on an unchanged selection commits nothing — no repeat
+    // OnFilterConfigChanged, no second config write. ApplyAsync guards on
+    // CanApply as well as rendering `disabled`, matching SavedFiltersPanel's
+    // handler-side gates, so the contract survives an event dispatch that
+    // ignores the disabled attribute.
+    [Fact]
+    public async Task ApplyTwiceWithoutEditing_CommitsOnlyOnce()
+    {
+        var commits = 0;
+        var reports = new List<FilterConfig?>();
+        var cut = Render<FilterPanel>(parameters => parameters
+            .Add(p => p.OnFilterConfigChanged, (FilterConfig _) => { commits++; })
+            .Add(p => p.OnAppliedStateChanged, (FilterConfig? c) => { reports.Add(c); }));
+
+        ErrorMin(cut).Input("0.05");
+        await Apply(cut).ClickAsync(new());
+        await Apply(cut).ClickAsync(new());
+
+        Assert.Equal(1, commits);
+        Assert.Equal(2, reports.Count);
+        Assert.Single(JSInterop.Invocations["localStorage.setItem"],
+            i => (string?)i.Arguments[0] == ConfigKey);
+    }
+
+    // The stale-binding half of the silent-splat discipline. Razor emits an
+    // unrecognized component attribute without complaint at build time, so a
+    // consumer still carrying `OnFilterDirty="…"` after this panel replaced it
+    // compiles green. It must not then run green: this panel deliberately
+    // declares no CaptureUnmatchedValues catch-all, so the renderer rejects the
+    // unmatched attribute outright. Built here through RenderTreeBuilder because
+    // that is precisely what a stale Razor binding compiles down to — a named
+    // AddAttribute the component has no property for. Adding a catch-all to the
+    // panel would silently turn this exception back into a dead handler.
+    [Fact]
+    public void StaleParameterBinding_ThrowsAtRender()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() => Render(builder =>
+        {
+            builder.OpenComponent<FilterPanel>(0);
+            builder.AddAttribute(1, nameof(FilterPanel.OnFilterConfigChanged),
+                EventCallback.Factory.Create<FilterConfig>(this, _ => { }));
+            builder.AddAttribute(2, nameof(FilterPanel.OnAppliedStateChanged),
+                EventCallback.Factory.Create<FilterConfig?>(this, _ => { }));
+            builder.AddAttribute(3, "OnFilterDirty", EventCallback.Empty);
+            builder.CloseComponent();
+        }));
+
+        Assert.Contains("OnFilterDirty", ex.Message);
+    }
+
+    // The silent-splat discipline: a consumer that drops this binding must fail
+    // at build time (RZ2012), not silently lose its gate at runtime. Both
+    // in-tree consumers genuinely require it, so the attribute is part of the
+    // contract, not decoration.
+    [Fact]
+    public void OnAppliedStateChanged_IsEditorRequired()
+    {
+        var property = typeof(FilterPanel).GetProperty(nameof(FilterPanel.OnAppliedStateChanged));
+
+        Assert.NotNull(property);
+        Assert.NotNull(property!.GetCustomAttribute<ParameterAttribute>());
+        Assert.NotNull(property.GetCustomAttribute<EditorRequiredAttribute>());
     }
 
     // Pins the rendered control labels to the lib's [Description] text from
@@ -357,31 +673,30 @@ public class FilterPanelTests : BunitContext
         Assert.True(cut.Find("#lv_Rollout_Ply4").HasAttribute("checked"));
     }
 
-    // Every depth edit control must raise OnFilterDirty so the parent can
+    // Every depth edit control must report applied state so the parent can
     // disable Run until Apply — and neither disclosure tier may: expanding the
     // panel's #moreFilters and expanding a level group are both navigation,
     // not edits.
     [Fact]
-    public void AnalysisDepthControls_FireOnFilterDirty_DisclosuresDoNot()
+    public void AnalysisDepthControls_ReportAppliedState_DisclosuresDoNot()
     {
-        var dirtyCount = 0;
-        var cut = Render<FilterPanel>(parameters => parameters
-            .Add(p => p.OnFilterDirty, () => { dirtyCount++; }));
+        var reports = new List<FilterConfig?>();
+        var cut = RenderReporting(reports);
 
         ExpandMoreFilters(cut);
-        Assert.Equal(0, dirtyCount);
+        Assert.Empty(reports);
 
         cut.Find("#md_Rollout").Change(true);
-        Assert.Equal(1, dirtyCount);
+        Assert.Single(reports);
 
         cut.Find("#lvlToggle_Rollout").Click();
-        Assert.Equal(1, dirtyCount);
+        Assert.Single(reports);
 
         cut.Find("#lv_Rollout_Ply4").Change(true);
-        Assert.Equal(2, dirtyCount);
+        Assert.Equal(2, reports.Count);
 
         cut.Find("#md_BookRollout").Change(true);
-        Assert.Equal(3, dirtyCount);
+        Assert.Equal(3, reports.Count);
     }
 
     // The level-group disclosure is deliberately unpersisted — unlike the
@@ -816,9 +1131,9 @@ public class FilterPanelTests : BunitContext
     }
 
     // LoadConfig is staging-only: it projects the config into the edit buffers
-    // like a bulk edit gesture. Edit-side signaling fires (OnFilterDirty, once —
-    // staged state now diverges from last-applied), but no Apply-side effect
-    // may occur: no OnFilterConfigChanged, no config write. The expansion after
+    // like a bulk edit gesture. Edit-side signaling fires (OnAppliedStateChanged,
+    // once — the staged state equals no committed config), but no Apply-side
+    // effect may occur: no OnFilterConfigChanged, no config write. The expansion after
     // the load writes the disclosure's own key, which is exactly why the
     // no-write assertion is keyed to ConfigKey — the config blob is what
     // staging must never touch.
@@ -826,10 +1141,10 @@ public class FilterPanelTests : BunitContext
     public async Task LoadConfig_HydratesBuffers_WithoutApplySideEffects()
     {
         FilterConfig? capturedConfig = null;
-        var dirtyCount = 0;
+        var reports = new List<FilterConfig?>();
         var cut = Render<FilterPanel>(parameters => parameters
             .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; })
-            .Add(p => p.OnFilterDirty, () => { dirtyCount++; }));
+            .Add(p => p.OnAppliedStateChanged, (FilterConfig? c) => { reports.Add(c); }));
 
         var loaded = new FilterConfig
         {
@@ -845,7 +1160,7 @@ public class FilterPanelTests : BunitContext
         Assert.True(cut.Find("#ct_Race").HasAttribute("checked"));
 
         Assert.Null(capturedConfig);
-        Assert.Equal(1, dirtyCount);
+        Assert.Equal([null], reports);
         Assert.DoesNotContain(JSInterop.Invocations, i =>
             i.Identifier == "localStorage.setItem" && (string?)i.Arguments[0] == ConfigKey);
     }
@@ -971,19 +1286,18 @@ public class FilterPanelTests : BunitContext
         Assert.Empty(cut.FindAll("input[id^='dr_']"));
     }
 
-    // Toggling the disclosure is navigation, not an edit: OnFilterDirty must
-    // not fire, in either direction.
+    // Toggling the disclosure is navigation, not an edit: OnAppliedStateChanged
+    // must not fire, in either direction.
     [Fact]
-    public void DisclosureToggle_DoesNotRaiseFilterDirty()
+    public void DisclosureToggle_DoesNotReportAppliedState()
     {
-        var dirtyCount = 0;
-        var cut = Render<FilterPanel>(parameters => parameters
-            .Add(p => p.OnFilterDirty, () => { dirtyCount++; }));
+        var reports = new List<FilterConfig?>();
+        var cut = RenderReporting(reports);
 
         cut.Find("#moreFiltersToggle").Click();
         cut.Find("#moreFiltersToggle").Click();
 
-        Assert.Equal(0, dirtyCount);
+        Assert.Empty(reports);
     }
 
     // Each toggle click persists the choice immediately under the disclosure's

@@ -130,21 +130,58 @@ makes it honest at rest after restore, Apply, Clear filters, and
 moment they are typed, not on Apply.
 
 The component emits filter results only on **Apply** (or **Clear
-filters**) — not on every keystroke. On any input change (typing, radio
-selection, checkbox toggle), `OnFilterDirty` fires so the parent can
-disable a Run button until Apply is clicked. Toggling the disclosure is
-navigation, not an edit — it never fires `OnFilterDirty`. On Apply, the
-component:
+filters**) — not on every keystroke. On Apply, the component:
 
-1. Persists the whole selection to `localStorage` via `IJSRuntime`.
-2. Builds a `XgFilter_Lib.Filtering.FilterConfig` and raises
-   `OnFilterConfigChanged`.
+1. Builds a `XgFilter_Lib.Filtering.FilterConfig` from the edit buffers
+   and records it as the **last-committed config**.
+2. Persists the whole selection to `localStorage` via `IJSRuntime`.
+3. Raises `OnFilterConfigChanged` with that config.
+4. Raises `OnAppliedStateChanged` with it too — the buffers now equal it.
 
 **Clear filters** (the old Reset, renamed to say what it does) is the
 full-clear gesture: it hydrates every edit buffer back to defaults, then
 persists + raises the empty config, which consumers treat as applied. It
 touches filter values only — no host state (the panel has no path to
 any; the raised config is its only channel) and no disclosure movement.
+It runs the same commit path as Apply, so it moves the last-committed
+config too.
+
+**Cleanliness is derived, never latched.** The panel is the only party
+holding both the live edit buffers and the config it last committed, so
+it — not the consumer — owns the answer to "is this selection still the
+applied one?". That answer is one computed member: the committed config
+the buffers currently equal (`FilterConfig`'s value equality), or `null`
+when they equal none. Two surfaces consume that one computation and can
+therefore never disagree:
+
+- **The Apply gate.** Apply is offered only when the selection differs
+  from the last-committed config *and* the position pattern is
+  committable. `ApplyAsync` guards on the same condition it renders
+  `disabled` from, so programmatic dispatch cannot re-commit either.
+  While Apply is disabled *because nothing changed*, the panel says so —
+  a `title` plus a muted hint line, the `SavedFiltersPanel`
+  disabled-reason idiom, except that here the panel knows its own reason
+  rather than being told it by the host. The invalid-pattern case gets no
+  hint line: the field's own `invalid-feedback` already explains it.
+- **`OnAppliedStateChanged`**, raised after every buffer-affecting
+  gesture — a control edit, `LoadConfig` staging, Apply, Clear filters —
+  carrying that same value. Toggling either disclosure tier is
+  navigation, not an edit, and raises nothing.
+
+Deriving from equality rather than latching a dirty flag is what makes
+an edit-then-undo recoverable: typing a change and typing it back lands
+on the committed values, so the panel goes clean again and re-reports.
+A one-way flag would leave the consumer's gate stuck with no recovery
+gesture, because Apply — the only control that could clear it — is
+itself disabled on an unchanged selection.
+
+The last-committed config is plain component-instance state that dies on
+unmount, and is deliberately **never persisted**: the first-render
+`localStorage` restore *stages* a selection, it does not commit one, so a
+fresh mount has committed nothing, raises neither event, and starts with
+Apply enabled. A host that remounts the panel (BgQuiz on a new folder
+pick) therefore gets a re-enabled Apply for free, with no host-side reset
+call.
 
 Consumers that want a `DecisionFilterSet` for in-memory filtering call
 `cfg.Build()` themselves; consumers that want to POST the configuration
@@ -240,25 +277,35 @@ All components live in namespace `XgFilter_Razor.Components`.
 
 ### `FilterPanel`
 
-Two `EventCallback` parameters:
+Two `EventCallback` parameters, both `[EditorRequired]`:
 
-- `EventCallback<FilterConfig> OnFilterConfigChanged` (`[EditorRequired]`)
-  — raised on Apply / Clear filters with the configured
+- `EventCallback<FilterConfig> OnFilterConfigChanged` — raised on Apply /
+  Clear filters with the configured
   `XgFilter_Lib.Filtering.FilterConfig`. Consumers that want a
   `DecisionFilterSet` call `cfg.Build()`; consumers that want to ship the
   configuration over the wire serialize `cfg` with `System.Text.Json`.
-- `EventCallback OnFilterDirty` — raised on every input change so the
-  parent can disable downstream actions until Apply is clicked. Not
-  raised by the disclosure toggle (navigation, not an edit).
+- `EventCallback<FilterConfig?> OnAppliedStateChanged` — raised after
+  every gesture that touches the edit buffers (control edit, `LoadConfig`
+  staging, Apply, Clear filters), carrying **the committed config the
+  buffers now equal, or `null` when they equal none**. A consumer gating
+  a downstream action on "is the panel's selection still the one I acted
+  on?" compares the payload against the config it last received from
+  `OnFilterConfigChanged`; `null` always means uncommitted edits are
+  pending. Not raised by either disclosure toggle (navigation, not an
+  edit), and not raised at all by the first-render restore. **Per-gesture,
+  not transition-only** — see Pitfalls for why, and handle it statelessly
+  and idempotently.
 
 Two host-facing methods, typically reached via `@ref` (added in the
 saved-filters arc):
 
 - `void LoadConfig(FilterConfig)` — stages a config into the edit
   buffers as a bulk edit: no Apply-side effects (no persist, no
-  `OnFilterConfigChanged`), `OnFilterDirty` fires once, and the
-  first-render localStorage restore is suppressed so a host-startup load
-  can't be clobbered. Never moves the disclosure.
+  `OnFilterConfigChanged`, no move of the last-committed config),
+  `OnAppliedStateChanged` fires once — `null` normally, or the committed
+  config when the load stages exactly it — and the first-render
+  localStorage restore is suppressed so a host-startup load can't be
+  clobbered. Never moves the disclosure.
 - `bool TryGetEditedConfig(out FilterConfig?)` — snapshots the live
   buffers (including unapplied edits) for host-driven save-as. Gate is
   exactly Apply's: fails only on non-blank, unparseable position-pattern
@@ -312,13 +359,43 @@ the rendered names to those constants.
   serializes; it hands typed C# objects via `EventCallback`. The
   converter requirement applies to the consumer's HTTP plumbing.
 - **Apply, not on-change.** The component does not raise filter-change
-  events as the user types — only `OnFilterDirty`. The contract is
-  "user thinks, then commits via Apply." Don't wire a downstream
+  events as the user types — only `OnAppliedStateChanged`. The contract
+  is "user thinks, then commits via Apply." Don't wire a downstream
   consumer to assume `OnFilterConfigChanged` fires per keystroke.
+- **`OnAppliedStateChanged` is per-gesture, not transition-only — don't
+  "optimize" it.** The obvious-looking cleanup is to fire only when the
+  reported value changes. It is wrong, and the failure is silent. The
+  last-committed config is component-instance state that dies on unmount,
+  so a freshly mounted panel has committed nothing; the user's first edit
+  is not a transition from anything *this* panel knows about, and a
+  transition-only event would say nothing. Meanwhile a consumer whose own
+  applied state survived the navigation (BgQuiz's `AppliedFilter`) is
+  still holding a config from the previous mount and gating on it — a
+  stale "clean" belief that only this event can correct. Silent in exactly
+  the state where the consumer is most wrong. Consumers must therefore
+  handle it statelessly and idempotently: assign from the payload, never
+  diff it against a remembered previous one.
+- **Cleanliness is derived from equality, never latched.** The Apply gate
+  and the event payload both read one computed member — the committed
+  config the buffers currently equal. Don't add a `_isDirty` flag beside
+  it: a one-way flag never clears on edit-then-undo, and since Apply is
+  itself disabled on an unchanged selection, the consumer's gate would be
+  stranded with no recovery gesture. (That wedge is why the old
+  payload-less `OnFilterDirty` had to go: both consumers used re-clicking
+  Apply as their implicit recovery, which an equality-derived gate
+  removes.) Equally, don't compare in two places — the gate and the
+  payload disagreeing is the defect the single member exists to prevent.
+- **The last-committed config is never persisted.** The first-render
+  `localStorage` restore *stages* a selection; it does not commit one. So
+  a fresh mount raises neither event and starts with Apply enabled even
+  with every control populated — which is what makes "a new folder
+  re-enables Apply" fall out of a host remount for free. Persisting it, or
+  hoisting it into a holder, would break both properties at once.
 - **The depth facet's clause union is derived in `Build()`, not the panel.**
   The Analysis-depth control writes only raw intent — three per-mode pairs,
-  each a toggle plus its own checked-level set — and calls `MarkDirty()`. The
-  mapping to `AnalysisDepthFilter` clauses (one clause per enabled toggle
+  each a toggle plus its own checked-level set — and calls
+  `ReportAppliedState()`. The mapping to
+  `AnalysisDepthFilter` clauses (one clause per enabled toggle
   carrying its own level list, empty list = any level, all toggles off =
   facet off, inert level lists) lives **only** in `FilterConfig.Build()` — it
   is the single source of truth, and XgFilter_Lib's Pitfalls flag re-encoding
@@ -334,7 +411,8 @@ the rendered names to those constants.
   ("any" / "N selected") already carries that in full, so remembering the
   open state would buy no information at the cost of three more
   localStorage keys and their interop. Each group therefore mounts
-  collapsed, and toggling it is navigation: no `OnFilterDirty`, no write.
+  collapsed, and toggling it is navigation: no `OnAppliedStateChanged`, no
+  write.
 - **Unchecking a mode keeps its checked levels.** The buffer (and the
   emitted config) retain a group's level selections when its toggle goes
   off: the lib guarantees a level list whose toggle is off is inert — no
@@ -346,15 +424,31 @@ the rendered names to those constants.
   `FilterConfig` → `DecisionFilterSet` adapter; a parallel callback
   raising `DecisionFilterSet` would be a redundant encapsulation leak.
   Consumers needing a `DecisionFilterSet` call `cfg.Build()` themselves.
-- **Razor silent-splat on stale bindings.** Razor doesn't error or warn
-  on unrecognized component attributes — it silently splats them as
-  HTML. A consumer that retains a stale binding for a removed
-  `EventCallback` parameter compiles clean and renders, but the dead
-  handler keeps referencing its now-unused C# method while the new
-  wiring never fires. Defense: `[EditorRequired]` on required
-  `EventCallback` parameters catches missing-binding (yields `RZ2012`)
-  but not stale-binding; supplement with bUnit integration tests that
-  fire Apply and assert the consumer's downstream state actually flips.
+- **Razor silent-splat, and where it does and doesn't bite here.** Razor
+  doesn't error or warn at *build* time on an unrecognized component
+  attribute — it emits it like any other, so a consumer retaining a stale
+  binding for a removed `EventCallback` parameter compiles clean while its
+  now-dead handler still looks wired. Where it lands after that depends on
+  the component. `FilterPanel` declares no
+  `[Parameter(CaptureUnmatchedValues = true)]` catch-all, so the renderer
+  rejects the unmatched attribute on the first render —
+  `InvalidOperationException: Object of type '…FilterPanel' does not have
+  a property matching the name '…'` (pinned by
+  `StaleParameterBinding_ThrowsAtRender`). Loud, but only once the page
+  actually renders: a consumer's *build* stays green, which is exactly why
+  a producer-side parameter removal needs each consumer adapted in its own
+  leg before any umbrella pointer bump. Never add a `CaptureUnmatchedValues`
+  catch-all to this panel — it would convert that render-time exception
+  back into the silent splat the whole discipline exists to avoid.
+  For the opposite failure — a binding *missing* rather than stale —
+  `[EditorRequired]` yields `RZ2012` at build. Every `FilterPanel` callback
+  carries it, including `OnAppliedStateChanged`, whose predecessor
+  `OnFilterDirty` was deliberately optional. It is not optional now: it is
+  the only channel telling a consumer its applied state went stale, and an
+  unbound one fails silently at runtime as a gate that never re-opens.
+  Neither attribute nor exception proves the wiring is *right*, so
+  supplement both with bUnit integration tests that fire Apply and assert
+  the consumer's downstream state actually flips.
 - **Facet documentation has one owner: `FilterHelp`.** Consumers embed
   the component and add app-level framing only — a consumer that writes
   its own description of a facet's semantics creates a second encoding
