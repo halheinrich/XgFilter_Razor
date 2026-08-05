@@ -102,11 +102,13 @@
             stored result looked up from XG's opening book).
         </p>
         <p>
-            Check a mode to admit its decisions; each checked mode admits its
-            decisions independently, so checking more always matches more, and
-            with no mode checked the facet is off — every decision passes,
-            including older ones whose analysis depth was never recorded.
-            While the facet is on, those unrecorded decisions are excluded.
+            Check the modes you want to see. A decision passes if it was
+            analyzed in any mode you checked, so checking a second mode shows
+            more decisions, never fewer. Check nothing and this filter does
+            nothing: every decision passes, including older ones whose
+            analysis depth was never recorded. Check any mode and those
+            unrecorded decisions stop passing — there is no recorded mode to
+            match them against.
         </p>
         <p>
             Under each checked mode you can narrow by analysis level. Levels
