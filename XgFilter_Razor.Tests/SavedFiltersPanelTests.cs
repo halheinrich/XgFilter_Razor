@@ -10,6 +10,7 @@ public class SavedFiltersPanelTests : BunitContext
     // assert both "the right callback fired with the right name" and "the
     // other callbacks stayed silent."
     private readonly List<string> _loadRequests = [];
+    private readonly List<string> _rowSaveRequests = [];
     private readonly List<string> _saveRequests = [];
     private readonly List<string> _deleteRequests = [];
 
@@ -20,6 +21,7 @@ public class SavedFiltersPanelTests : BunitContext
         => Render<SavedFiltersPanel>(parameters => parameters
             .Add(p => p.Filters, filters)
             .Add(p => p.OnLoadRequested, (string n) => _loadRequests.Add(n))
+            .Add(p => p.OnSaveRequested, (string n) => _rowSaveRequests.Add(n))
             .Add(p => p.OnSaveAsRequested, (string n) => _saveRequests.Add(n))
             .Add(p => p.OnDeleteRequested, (string n) => _deleteRequests.Add(n))
             .Add(p => p.CanPersist, canPersist)
@@ -107,6 +109,100 @@ public class SavedFiltersPanelTests : BunitContext
         // The normal row affordances are back.
         Assert.NotNull(FindRowButton(cut, "Race", "Load"));
         Assert.NotNull(FindRowButton(cut, "Race", "Delete"));
+    }
+
+    // ── Per-row Save (#38) ──────────────────────────────────────────────────
+    // Each row's Save overwrites that saved filter with the current filters —
+    // the same live-edit-buffers snapshot save-as takes, with the name coming
+    // from the row instead of the input.
+
+    // Save replaces a saved document, so the first click only poses the inline
+    // confirm — and its copy must be distinguishable from the save-as
+    // overwrite prompt ("Overwrite 'Race'?"): this one names what replaces the
+    // filter.
+    [Fact]
+    public async Task RowSave_ShowsConfirmNamingTheCurrentFilters_NoCallbackYet()
+    {
+        var cut = RenderPanel(Collection("Race"));
+
+        await ClickRowButtonAsync(cut, "Race", "Save");
+
+        Assert.Contains("Overwrite 'Race' with the current filters?", cut.Markup);
+        Assert.Empty(_rowSaveRequests);
+        Assert.Empty(_saveRequests);
+    }
+
+    [Fact]
+    public async Task RowSaveConfirm_RaisesOnSaveRequested_WithRowName()
+    {
+        var cut = RenderPanel(Collection("Race", "Blitz"));
+
+        await ClickRowButtonAsync(cut, "Blitz", "Save");
+        await ClickRowButtonAsync(cut, "Blitz", "Overwrite");
+
+        Assert.Equal(["Blitz"], _rowSaveRequests);
+        Assert.Empty(_loadRequests);
+        Assert.Empty(_saveRequests);
+        Assert.Empty(_deleteRequests);
+    }
+
+    [Fact]
+    public async Task RowSaveCancel_RaisesNothing_RestoresRowButtons()
+    {
+        var cut = RenderPanel(Collection("Race"));
+
+        await ClickRowButtonAsync(cut, "Race", "Save");
+        await ClickRowButtonAsync(cut, "Race", "Cancel");
+
+        Assert.Empty(_rowSaveRequests);
+        Assert.DoesNotContain("with the current filters?", cut.Markup);
+        Assert.NotNull(FindRowButton(cut, "Race", "Load"));
+        Assert.NotNull(FindRowButton(cut, "Race", "Save"));
+        Assert.NotNull(FindRowButton(cut, "Race", "Delete"));
+    }
+
+    // A row holds one confirm slot: starting a Save replaces a pending Delete
+    // (and vice versa), so two contradictory prompts can never stand at once.
+    [Fact]
+    public async Task RowSaveRequest_SupersedesAPendingDeleteConfirm()
+    {
+        var cut = RenderPanel(Collection("Race", "Blitz"));
+
+        await ClickRowButtonAsync(cut, "Race", "Delete");
+        Assert.Contains("Delete 'Race'?", cut.Markup);
+
+        await ClickRowButtonAsync(cut, "Blitz", "Save");
+
+        Assert.DoesNotContain("Delete 'Race'?", cut.Markup);
+        Assert.Contains("Overwrite 'Blitz' with the current filters?", cut.Markup);
+    }
+
+    [Fact]
+    public async Task RowDeleteRequest_SupersedesAPendingSaveConfirm()
+    {
+        var cut = RenderPanel(Collection("Race", "Blitz"));
+
+        await ClickRowButtonAsync(cut, "Race", "Save");
+        await ClickRowButtonAsync(cut, "Blitz", "Delete");
+
+        Assert.DoesNotContain("with the current filters?", cut.Markup);
+        Assert.Contains("Delete 'Blitz'?", cut.Markup);
+    }
+
+    // A new Filters instance is the host-acted confirmation channel; a save
+    // confirm posed against the old document must not survive the swap.
+    [Fact]
+    public async Task FiltersParameterSwap_ClearsPendingSaveConfirm()
+    {
+        var cut = RenderPanel(Collection("Race"));
+
+        await ClickRowButtonAsync(cut, "Race", "Save");
+        Assert.Contains("Overwrite 'Race' with the current filters?", cut.Markup);
+
+        cut.Render(parameters => parameters.Add(p => p.Filters, Collection("Race", "Blitz")));
+
+        Assert.DoesNotContain("with the current filters?", cut.Markup);
+        Assert.Empty(_rowSaveRequests);
     }
 
     // The With contract says the caller normalizes the name; the panel is that
@@ -236,8 +332,10 @@ public class SavedFiltersPanelTests : BunitContext
         cut.Find("#saveFilterName").Input("New");
 
         Assert.True(FindSaveButton(cut).HasAttribute("disabled"));
+        Assert.True(FindRowButton(cut, "Race", "Save")!.HasAttribute("disabled"));
         Assert.True(FindRowButton(cut, "Race", "Delete")!.HasAttribute("disabled"));
         Assert.Equal(reason, FindSaveButton(cut).GetAttribute("title"));
+        Assert.Equal(reason, FindRowButton(cut, "Race", "Save")!.GetAttribute("title"));
         Assert.Equal(reason, FindRowButton(cut, "Race", "Delete")!.GetAttribute("title"));
         Assert.Contains(reason, cut.Find(".form-text").TextContent);
 
@@ -245,12 +343,15 @@ public class SavedFiltersPanelTests : BunitContext
         // guards are what pin the contract. Each element is re-found just
         // before its click — every dispatch re-renders, staling old refs.
         await ClickSaveButtonAsync(cut);
+        await ClickRowButtonAsync(cut, "Race", "Save");
         await ClickRowButtonAsync(cut, "Race", "Delete");
         await ClickRowButtonAsync(cut, "Race", "Load");
 
         Assert.Empty(_saveRequests);
+        Assert.Empty(_rowSaveRequests);
         Assert.Empty(_deleteRequests);
         Assert.DoesNotContain("Delete 'Race'?", cut.Markup);
+        Assert.DoesNotContain("with the current filters?", cut.Markup);
         Assert.Equal(["Race"], _loadRequests);
     }
 
@@ -310,9 +411,11 @@ public class SavedFiltersPanelTests : BunitContext
         await button.ClickAsync(new());
     }
 
+    // The save-as button is found by id: since #38 every row carries a Save
+    // button of its own, so text alone no longer identifies the save-as one.
     private static AngleSharp.Dom.IElement FindSaveButton(
         IRenderedComponent<SavedFiltersPanel> cut) =>
-        cut.FindAll("button").Single(b => b.TextContent.Trim() == "Save");
+        cut.Find("#saveFilterButton");
 
     private static Task ClickSaveButtonAsync(IRenderedComponent<SavedFiltersPanel> cut) =>
         FindSaveButton(cut).ClickAsync(new());

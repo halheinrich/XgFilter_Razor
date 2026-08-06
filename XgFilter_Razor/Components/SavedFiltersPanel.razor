@@ -3,17 +3,22 @@
 @* ── SavedFiltersPanel.razor ─────────────────────────────────────────────────
    Persistence-agnostic pick list over a NamedFilterCollection. The panel owns
    no document state and mutates nothing: every gesture is raised as a request
-   (OnLoadRequested / OnSaveAsRequested / OnDeleteRequested) for the host to
-   mediate — the host calls With/Without, persists wherever it persists, and
-   passes the new collection instance back down through Filters. Selection is
-   deliberately stateless: the "current" config lives in FilterPanel's edit
-   buffers and would go stale the moment the user edits there, so a highlighted
-   row would be a second source of truth that lies. Overwrite and delete run
-   through inline confirms here (the lib's With doc assigns overwrite
+   (OnLoadRequested / OnSaveRequested / OnSaveAsRequested / OnDeleteRequested)
+   for the host to mediate — the host calls With/Without, persists wherever it
+   persists, and passes the new collection instance back down through Filters.
+   Selection is deliberately stateless: the "current" config lives in
+   FilterPanel's edit buffers and would go stale the moment the user edits
+   there, so a highlighted row would be a second source of truth that lies.
+   Every destructive gesture runs through an inline confirm here — a row's
+   Save (overwrite this filter with the current filters), a save-as under an
+   existing name, and delete (the lib's With doc assigns overwrite
    confirmation to "the consumer's UI concern"; keeping it in the shared panel
    gives every host identical UX, and Contains keeps the case-insensitive name
-   rule in the lib). Hosts that cannot persist right now (e.g. a missing
-   FS-Access grant) say so via CanPersist — the panel is told, it never knows.
+   rule in the lib). Both save gestures snapshot the same thing — the live
+   edit buffers, exactly as the host's TryGetEditedConfig hands them over —
+   a row Save differs from save-as only in taking its name from the row.
+   Hosts that cannot persist right now (e.g. a missing FS-Access grant) say so
+   via CanPersist — the panel is told, it never knows.
    Location: XgFilter_Razor/Components/SavedFiltersPanel.razor
 ──────────────────────────────────────────────────────────────────────────── *@
 
@@ -50,12 +55,36 @@
                                 </button>
                             </div>
                         }
+                        else if (_pendingSaveName == name)
+                        {
+                            @* Copy deliberately distinguishable from the save-as
+                               overwrite prompt ("Overwrite 'name'?"): a row Save
+                               replaces a filter picked by row, so the prompt says
+                               what replaces it — the current filters. *@
+                            <div class="d-flex gap-2 align-items-center">
+                                <span>Overwrite '@name' with the current filters?</span>
+                                <button class="btn btn-primary btn-sm"
+                                        @onclick="() => ConfirmSaveAsync(name)">
+                                    Overwrite
+                                </button>
+                                <button class="btn btn-outline-secondary btn-sm"
+                                        @onclick="() => _pendingSaveName = null">
+                                    Cancel
+                                </button>
+                            </div>
+                        }
                         else
                         {
                             <div class="d-flex gap-2">
                                 <button class="btn btn-outline-primary btn-sm"
                                         @onclick="() => OnLoadRequested.InvokeAsync(name)">
                                     Load
+                                </button>
+                                <button class="btn btn-outline-primary btn-sm"
+                                        disabled="@(!CanPersist)"
+                                        title="@DisabledTitle"
+                                        @onclick="() => RequestSave(name)">
+                                    Save
                                 </button>
                                 <button class="btn btn-outline-danger btn-sm"
                                         disabled="@(!CanPersist)"
@@ -78,7 +107,7 @@
                        placeholder="Filter name"
                        value="@_saveNameText"
                        @oninput="e => _saveNameText = e.Value?.ToString() ?? string.Empty" />
-                <button class="btn btn-primary btn-sm"
+                <button id="saveFilterButton" class="btn btn-primary btn-sm"
                         disabled="@(!CanPersist || IsSaveNameBlank)"
                         title="@DisabledTitle"
                         @onclick="SaveClickedAsync">
@@ -134,6 +163,21 @@
     public EventCallback<string> OnLoadRequested { get; set; }
 
     /// <summary>
+    /// Raised only after the user confirms a row's inline Save prompt,
+    /// carrying that row's name — "overwrite this saved filter with the
+    /// current filters". Like save-as, the host snapshots the <em>live edit
+    /// buffers</em> (e.g. <c>FilterPanel.TryGetEditedConfig</c>) — unapplied
+    /// edits included — calls <see cref="NamedFilterCollection.With"/>,
+    /// persists, and passes the new collection back down; the two gestures
+    /// differ only in where the name comes from. The panel mutates nothing.
+    /// Required for the same silent-splat reason as
+    /// <see cref="OnLoadRequested"/> — the compile break in existing hosts is
+    /// intended, so each wires the new gesture in its own migration leg.
+    /// </summary>
+    [Parameter, EditorRequired]
+    public EventCallback<string> OnSaveRequested { get; set; }
+
+    /// <summary>
     /// Raised when the user commits save-as — including only <em>after</em>
     /// the inline confirm when the name already exists (case-insensitively,
     /// per <see cref="NamedFilterCollection.Contains"/>) — carrying the
@@ -182,10 +226,13 @@
     // contract says the caller normalizes; the panel is that caller's proxy.
     private string _saveNameText = string.Empty;
 
-    // At most one inline confirm of each kind is pending at a time; starting a
-    // new gesture replaces the old. Both are view-state posed against the
-    // current Filters instance and are cleared when that instance changes.
+    // At most one row confirm (Save or Delete) is pending at a time — they
+    // occupy the same slot in a row, so starting either gesture replaces any
+    // pending row confirm of either kind — and at most one save-as overwrite
+    // confirm besides. All are view-state posed against the current Filters
+    // instance and are cleared when that instance changes.
     private string? _pendingDeleteName;
+    private string? _pendingSaveName;
     private string? _pendingOverwriteName;
 
     // Tracks the previous Filters reference across parameter sets so a
@@ -213,6 +260,7 @@
         {
             _lastSeenFilters = Filters;
             _pendingDeleteName = null;
+            _pendingSaveName = null;
             _pendingOverwriteName = null;
             _saveNameText = string.Empty;
         }
@@ -222,6 +270,7 @@
     {
         if (!CanPersist) return;
         _pendingDeleteName = name;
+        _pendingSaveName = null;
     }
 
     private async Task ConfirmDeleteAsync(string name)
@@ -229,6 +278,24 @@
         if (!CanPersist) return;
         _pendingDeleteName = null;
         await OnDeleteRequested.InvokeAsync(name);
+    }
+
+    private void RequestSave(string name)
+    {
+        if (!CanPersist) return;
+        _pendingSaveName = name;
+        _pendingDeleteName = null;
+    }
+
+    // Clear-then-raise, the delete idiom — unlike save-as there is no typed
+    // name to preserve for a retry, so the prompt does not ride the
+    // confirmation swap. A save the host refuses (invalid pattern) surfaces
+    // through the host's own notice.
+    private async Task ConfirmSaveAsync(string name)
+    {
+        if (!CanPersist) return;
+        _pendingSaveName = null;
+        await OnSaveRequested.InvokeAsync(name);
     }
 
     private Task SaveClickedAsync()

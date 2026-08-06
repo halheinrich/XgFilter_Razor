@@ -215,6 +215,34 @@ public class FilterPanelTests : BunitContext
         Assert.False(Apply(cut).HasAttribute("disabled"));
     }
 
+    // ForgetCommitted is the programmatic stand-in for the remount that makes
+    // "a new folder re-enables Apply" fall out for free: a host (via the
+    // composite) that keeps the panel mounted across a source change drops the
+    // committed config instead. Apply re-arms, the event re-reports through
+    // the normal path — necessarily null, nothing is committed any more — and
+    // the buffers stay exactly as the user left them.
+    [Fact]
+    public async Task ForgetCommitted_ReArmsApply_ReportsNull_LeavesBuffersUntouched()
+    {
+        var reports = new List<FilterConfig?>();
+        var cut = RenderReporting(reports);
+
+        ErrorMin(cut).Input("0.05");
+        await Apply(cut).ClickAsync(new());
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+        Assert.Equal(2, reports.Count); // the edit's null, the commit's config
+
+        await cut.InvokeAsync(() => cut.Instance.ForgetCommitted());
+
+        // One more report, through the normal applied-state path.
+        Assert.Equal(3, reports.Count);
+        Assert.Null(reports[^1]);
+        Assert.False(Apply(cut).HasAttribute("disabled"));
+        Assert.Empty(cut.FindAll("#applyDisabledReason"));
+        // The buffers are untouched — the user's selection stays staged.
+        Assert.Equal("0.05", ErrorMin(cut).GetAttribute("value"));
+    }
+
     // LoadConfig stages, never commits — so staging anything other than the
     // committed config leaves the buffers matching nothing: null reported,
     // Apply re-opened.

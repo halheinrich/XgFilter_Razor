@@ -51,11 +51,22 @@ XgFilter_Razor/
     FilterPanel.razor                — markup + @code state
     SavedFiltersPanel.razor          — saved-filter pick list, host-mediated
     FilterHelp.razor                 — producer-owned facet + storage documentation
+  Model/
+    AppliedFilter.cs                 — applied-config holder, source-stamped
+    FilterSourceToken.cs             — opaque host-minted source identity
+    IFilterDocumentStorage.cs        — host storage-adapter seam
+    FilterStorageException.cs        — the seam's one failure type
+    SavedFiltersDocument.cs          — canonical/legacy file names + migration rule
+    SavedFiltersStatus.cs            — saved-filters context condition
+    SavedFiltersStore.cs             — saved-filters document lifecycle over the seam
   wwwroot/
 XgFilter_Razor.Tests/
   XgFilter_Razor.Tests.csproj
+  AppliedFilterTests.cs              — holder two-lifetime contract
   FilterPanelTests.cs                — bUnit tests for FilterPanel
+  FilterSourceTokenTests.cs          — token equality rules
   SavedFiltersPanelTests.cs          — bUnit tests for SavedFiltersPanel
+  SavedFiltersStoreTests.cs          — store transitions over a fake storage seam
   FilterHelpTests.cs                 — bUnit tests for FilterHelp
 ```
 
@@ -181,7 +192,12 @@ unmount, and is deliberately **never persisted**: the first-render
 fresh mount has committed nothing, raises neither event, and starts with
 Apply enabled. A host that remounts the panel (BgQuiz on a new folder
 pick) therefore gets a re-enabled Apply for free, with no host-side reset
-call.
+call. For a panel kept mounted across a source change, `internal void
+ForgetCommitted()` is the programmatic equivalent: it drops the
+last-committed config — buffers, persisted state, and disclosure all
+untouched — so Apply re-arms and `OnAppliedStateChanged` re-reports
+(necessarily `null`) through the normal path. Internal by design: the
+composite component is its only intended caller (see Pitfalls).
 
 Consumers that want a `DecisionFilterSet` for in-memory filtering call
 `cfg.Build()` themselves; consumers that want to POST the configuration
@@ -200,21 +216,30 @@ clobbered.
 A persistence-agnostic pick list over `XgFilter_Lib`'s
 `NamedFilterCollection`. The panel owns no document state and mutates
 nothing: every gesture is raised as a request — `OnLoadRequested`,
-`OnSaveAsRequested`, `OnDeleteRequested`, each carrying the name — for
+`OnSaveRequested` (per-row Save, #38), `OnSaveAsRequested`,
+`OnDeleteRequested`, each carrying the name — for
 the host to mediate. The host calls `With` / `Without`, persists wherever
 it persists, and passes the **new** collection instance back down through
 `Filters`; the reference change is also the panel's confirmation channel
 (it cancels pending inline confirms and clears the typed save-as name).
 Selection is deliberately stateless — the "current" config lives in
 `FilterPanel`'s edit buffers, so a highlighted row would be a second
-source of truth that lies. Overwrite and delete run through inline
-confirms in the panel; `Contains` keeps the case-insensitive name rule in
-the lib. Hosts that cannot persist right now (e.g. BgQuiz without its
-FS-Access grant) disable Save/Delete via `CanPersist` +
-`PersistDisabledReason`; Load stays enabled — it is read-only over a
-collection already in memory. The typical wiring: `OnLoadRequested` →
-resolve via `TryGetConfig` → `FilterPanel.LoadConfig`; `OnSaveAsRequested`
-→ `FilterPanel.TryGetEditedConfig` → `With` → persist.
+source of truth that lies. Every destructive gesture runs through an
+inline confirm in the panel — a row's Save, a save-as under an existing
+name, and delete; `Contains` keeps the case-insensitive name rule in
+the lib. A row's Save overwrites that saved filter with the current
+filters — the same live-edit-buffers snapshot save-as takes, the name
+coming from the row instead of the input — and its confirm copy says so
+("Overwrite '\<name\>' with the current filters?"), deliberately
+distinguishable from the save-as overwrite prompt ("Overwrite
+'\<name\>'?"). A row holds one confirm slot: requesting Save supersedes a
+pending Delete confirm and vice versa. Hosts that cannot persist right
+now (e.g. BgQuiz without its FS-Access grant) disable Save/Delete via
+`CanPersist` + `PersistDisabledReason`; Load stays enabled — it is
+read-only over a collection already in memory. The typical wiring:
+`OnLoadRequested` → resolve via `TryGetConfig` → `FilterPanel.LoadConfig`;
+`OnSaveRequested` / `OnSaveAsRequested` → `FilterPanel.TryGetEditedConfig`
+→ `With` → persist.
 
 ### `FilterHelp` component
 
@@ -251,6 +276,57 @@ belonging to a host app is that host's to document. A host with its own
 data-ownership copy points *into* this section rather than restating it
 (BgQuiz's Help does that) — the same one-owner rule as the facet prose.
 
+### Non-visual interaction model (`Model/`)
+
+Plain C# beside the components — namespace `XgFilter_Razor` (root), while
+components stay in `XgFilter_Razor.Components`. Hoisted from BgQuiz's
+app-side originals (its `AppliedFilter` / `SavedFiltersStore`) so both
+consumer apps share one encoding of the filter interaction lifecycle
+(umbrella arc #63 / #78 / #38); hosts register these at whatever lifetime
+their gates must survive (BgQuiz: Scoped), and the Step-2 composite drives
+them.
+
+- **`AppliedFilter`** — holder for the config the user deliberately
+  applied, plus the source it was applied against. **Two facts, two
+  lifetimes**: the config is edit-coupled — the panel reporting
+  uncommitted edits must `Clear()` it, re-gating Start-like actions —
+  while the source stamp survives `Clear()` and answers "has this source
+  ever been filtered?" via `WasAppliedFor(token)` (BgQuiz's Apply Mix
+  gate). In-memory only, never persisted.
+- **`FilterSourceToken`** — opaque, equatable identity of "which source",
+  minted by the host via `FromGeneration(int)` / `FromPath(string)` and
+  only ever *compared* by the producer. Value equality over the wrapped
+  string, ordinal and case-sensitive — a host with case-insensitive
+  source identity normalizes before minting. Factory domains are
+  prefixed, so tokens from different factories never collide. "No source
+  yet" is `FilterSourceToken?`.
+- **`SavedFiltersStore`** + **`SavedFiltersStatus`** — the saved-filters
+  document lifecycle over the host's storage adapter: `LoadAsync` /
+  `SaveAsync` / `DeleteAsync` / `Reset` moving through Disabled / Ready /
+  LoadFailed / WriteFailed. Degrade, never block: no member throws for
+  storage trouble; LoadFailed preserves the file untouched and keeps
+  saving dead; WriteFailed keeps the in-memory edit and stops further
+  writes. Round-trip is the document's own
+  (`NamedFilterCollection.ToJson` / `TryFromJson`) — the store owns no
+  serializer options. A null adapter = permanently Disabled, so an
+  adapterless host composes with the same store. An internal load-version
+  guard (the producer edition of BgQuiz's `PickGeneration` discipline)
+  makes a superseded in-flight load discard its outcome. Deliberately
+  hardcoded to the saved-filters document — the queued mix-saves sibling
+  is a new store over its own identity (umbrella ruling).
+- **`IFilterDocumentStorage`** + **`FilterStorageException`** — the host
+  seam: per-document text I/O keyed by file name (`ReadAsync(name)`
+  returning null for absent, `WriteAsync(name, json)`), generalized by
+  document name so the queued sibling needs zero interface change.
+  Adapters wrap every native failure in `FilterStorageException` — the
+  one type the store catches (see Pitfalls).
+- **`SavedFiltersDocument`** — the document identity: public constants
+  `FileName` (`xg-filters.json`) and `LegacyFileName`
+  (`bgquiz-filters.json`), plus the stated two-name migration rule the
+  store implements — read canonical first, fall back to legacy only when
+  canonical is *absent*, write only canonical, never delete the legacy
+  file (see Pitfalls for the corrupt-file rationale).
+
 ### `FilterConfig` provenance
 
 `FilterConfig` lives in `XgFilter_Lib.Filtering`, not here. It is a
@@ -273,7 +349,8 @@ state").
 
 ## Public API
 
-All components live in namespace `XgFilter_Razor.Components`.
+All components live in namespace `XgFilter_Razor.Components`; the
+non-visual model types live in the root `XgFilter_Razor` namespace.
 
 ### `FilterPanel`
 
@@ -311,18 +388,46 @@ saved-filters arc):
   exactly Apply's: fails only on non-blank, unparseable position-pattern
   text.
 
+A third method, `ForgetCommitted()`, is deliberately `internal` — the
+Step-2 composite's source-change rule is its only intended caller, so it
+is not host-facing surface (see Architecture and Pitfalls).
+
 ### `SavedFiltersPanel`
 
 Parameters (all callbacks `[EditorRequired]`, as is `Filters`):
 
 - `NamedFilterCollection Filters` — the immutable document to render;
   the host passes each new instance back down after mediating a change.
-- `EventCallback<string> OnLoadRequested` / `OnSaveAsRequested` /
-  `OnDeleteRequested` — request-only gestures carrying the filter name;
-  the panel mutates nothing.
+- `EventCallback<string> OnLoadRequested` / `OnSaveRequested` /
+  `OnSaveAsRequested` / `OnDeleteRequested` — request-only gestures
+  carrying the filter name; the panel mutates nothing. `OnSaveRequested`
+  is the per-row Save (#38): overwrite that saved filter with the current
+  live edit buffers — the host mediates it exactly as save-as
+  (`TryGetEditedConfig` → `With` → persist), the name coming from the
+  row.
 - `bool CanPersist` (default `true`) + `string? PersistDisabledReason` —
-  gate Save/Delete as one switch when the host cannot persist; Load
-  stays enabled.
+  gate Save/Save-as/Delete as one switch when the host cannot persist;
+  Load stays enabled.
+
+### Non-visual model types
+
+- `AppliedFilter` — `FilterConfig? Config`, `bool IsApplied`,
+  `void Set(FilterConfig, FilterSourceToken)`,
+  `bool WasAppliedFor(FilterSourceToken)`, `void Clear()`. `Clear()`
+  drops the config only; the source stamp survives by contract.
+- `FilterSourceToken` — `readonly record struct`; factories
+  `FromGeneration(int)` / `FromPath(string)`; value-equal, ordinal.
+- `SavedFiltersStore` — ctor `(IFilterDocumentStorage? storage)`;
+  `NamedFilterCollection Filters`, `SavedFiltersStatus Status`,
+  `Task LoadAsync()`, `Task SaveAsync(string, FilterConfig)`,
+  `Task DeleteAsync(string)`, `void Reset()`. Never throws for storage
+  trouble; mutating members no-op unless `Status == Ready`.
+- `IFilterDocumentStorage` — `Task<string?> ReadAsync(string fileName)`
+  (null = absent), `Task WriteAsync(string fileName, string json)`;
+  failures signalled as `FilterStorageException` only.
+- `SavedFiltersDocument` — `const string FileName = "xg-filters.json"`,
+  `const string LegacyFileName = "bgquiz-filters.json"`; public by
+  design (see Pitfalls).
 
 ### `FilterHelp`
 
@@ -502,6 +607,53 @@ the rendered names to those constants.
   way) and no disclosure movement. `LoadConfig` likewise stages values
   without moving the disclosure; visibility changes only on the user's
   toggle.
+- **The saved-filters file names are `public` — deliberately opposite to
+  the internal storage-key rule.** `FilterPanel.ConfigKey` /
+  `DisclosureKey` stay `internal` because no consumer may know or depend
+  on this panel's localStorage keys. `SavedFiltersDocument.FileName` /
+  `LegacyFileName` are the opposite kind of fact: the shared file name is
+  user-facing copy every host must render — help pages, the composite's
+  degrade notices — so one public source is the SSOT move, and each host
+  renders the constant rather than spelling its own copy of the name.
+  Don't "tidy" them internal (it would force each host to hardcode the
+  name), and don't widen the storage keys public by the same argument in
+  reverse.
+- **The two-name migration rule: corrupt does NOT fall back** (ratified
+  ruling, Step-1 review). The store reads `xg-filters.json` first and
+  falls back to `bgquiz-filters.json` only when the canonical file is
+  *absent* — never when it is present but unparseable. Falling back on
+  corrupt would resurrect stale legacy data while newer-but-corrupt data
+  exists; instead `LoadFailed` both reports the trouble and keeps every
+  write dead, so the corrupt file can never be overwritten
+  (preserve-file-on-corrupt is enforced by the store's status gate, not
+  by any host's `CanPersist` courtesy). Writes go only to the canonical
+  name, and the legacy file is never deleted — it stays as the user's own
+  backup, going stale from the first canonical write onward.
+- **Storage adapters must wrap failures in `FilterStorageException`.**
+  The store's degrade-never-block posture rides on a *typed* catch: an
+  adapter that lets its native failure type escape (`JSException`,
+  `IOException`, an HTTP exception) will fault the host's flow instead of
+  degrading to `LoadFailed` / `WriteFailed`. Wrap everything that means
+  "the I/O failed"; let everything that means "the adapter has a bug"
+  propagate. An absent document is `null` from `ReadAsync`, never an
+  exception.
+- **Per-row Save snapshots the live edit buffers — exactly as Save-as
+  does.** Both save gestures capture what `TryGetEditedConfig` hands
+  over, unapplied edits included; a row Save differs only in taking its
+  name from the row. Don't "fix" it to save the last-committed config —
+  saving what the user sees staged is the contract, and the confirm copy
+  ("…with the current filters") says so.
+- **`OnSaveRequested` is `[EditorRequired]` and breaks host builds on
+  purpose.** Both consumers compile-fail (`RZ2012`) until their own
+  migration legs bind the per-row Save — the deliberate alternative to a
+  silently splatted, dead affordance (see the Razor silent-splat entry
+  above).
+- **`ForgetCommitted` stays `internal`.** The Step-2 composite's
+  source-change rule is its only intended caller; a host either remounts
+  the panel (getting the re-arm for free) or hosts the composite, which
+  owns the rule. Widening it public would hand hosts a second,
+  uncoordinated way to move the committed state that the applied-state
+  events were designed around.
 
 ## Subproject-internal next steps
 

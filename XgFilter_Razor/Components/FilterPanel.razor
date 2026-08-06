@@ -646,6 +646,28 @@
         return true;
     }
 
+    /// <summary>
+    /// Drops the last-committed config so Apply re-arms on a still-mounted
+    /// panel — the programmatic equivalent of the remount that "a new folder
+    /// re-enables Apply" falls out of, for hosts that keep the panel mounted
+    /// across a source change. The buffers, the persisted
+    /// <c>localStorage</c> state, and the disclosure are all untouched: the
+    /// user's selection stays on screen, it just no longer counts as
+    /// committed, so <see cref="OnAppliedStateChanged"/> re-reports through
+    /// the normal path (necessarily <see langword="null"/> — the buffers can
+    /// equal no committed config once there is none).
+    /// <c>internal</c> by design: the composite component is the only
+    /// intended caller (tests reach it via <c>InternalsVisibleTo</c>) — a
+    /// host never needs it, because a host either remounts the panel or hosts
+    /// the composite, which owns the source-change rule.
+    /// </summary>
+    internal void ForgetCommitted()
+    {
+        _committedConfig = null;
+        ReportAppliedState();
+        StateHasChanged();
+    }
+
     // The panel's cleanliness truth, computed in one place and consumed by the
     // two surfaces that need it — the Apply gate (CanApply) and the payload of
     // OnAppliedStateChanged — so the button and the event can never disagree.
