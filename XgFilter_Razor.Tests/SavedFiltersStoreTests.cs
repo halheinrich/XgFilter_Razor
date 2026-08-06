@@ -4,41 +4,6 @@ namespace XgFilter_Razor.Tests;
 
 public class SavedFiltersStoreTests
 {
-    /// <summary>
-    /// Recording fake over the storage seam: an in-memory document dictionary,
-    /// a log of every read and write, and switchable failure modes that throw
-    /// the seam's contractual <see cref="FilterStorageException"/>.
-    /// </summary>
-    private sealed class FakeStorage : IFilterDocumentStorage
-    {
-        public Dictionary<string, string> Documents { get; } = new(StringComparer.Ordinal);
-        public List<string> Reads { get; } = [];
-        public List<(string FileName, string Json)> Writes { get; } = [];
-        public bool ThrowOnRead { get; set; }
-        public bool ThrowOnWrite { get; set; }
-
-        // When set, reads resolve through this instead of Documents — the
-        // hook the superseded-load test uses to hold a read in flight.
-        public Func<string, Task<string?>>? ReadOverride { get; set; }
-
-        public Task<string?> ReadAsync(string fileName)
-        {
-            Reads.Add(fileName);
-            if (ThrowOnRead) throw new FilterStorageException("read failed");
-            if (ReadOverride is not null) return ReadOverride(fileName);
-            return Task.FromResult(
-                Documents.TryGetValue(fileName, out var json) ? json : null);
-        }
-
-        public Task WriteAsync(string fileName, string json)
-        {
-            if (ThrowOnWrite) throw new FilterStorageException("write failed");
-            Writes.Add((fileName, json));
-            Documents[fileName] = json;
-            return Task.CompletedTask;
-        }
-    }
-
     private static string CollectionJson(params string[] names)
     {
         var filters = NamedFilterCollection.Empty;
@@ -75,7 +40,7 @@ public class SavedFiltersStoreTests
     [Fact]
     public async Task Load_NeitherFileExists_ReadyOverEmpty()
     {
-        var storage = new FakeStorage();
+        var storage = new FakeFilterDocumentStorage();
         var store = new SavedFiltersStore(storage);
 
         await store.LoadAsync();
@@ -91,7 +56,7 @@ public class SavedFiltersStoreTests
     [Fact]
     public async Task Load_CanonicalParses_Ready_AndLegacyIsNeverRead()
     {
-        var storage = new FakeStorage();
+        var storage = new FakeFilterDocumentStorage();
         storage.Documents[SavedFiltersDocument.FileName] = CollectionJson("Race");
         var store = new SavedFiltersStore(storage);
 
@@ -108,7 +73,7 @@ public class SavedFiltersStoreTests
     [Fact]
     public async Task Load_CanonicalCorrupt_LoadFailed_WithoutLegacyFallback()
     {
-        var storage = new FakeStorage();
+        var storage = new FakeFilterDocumentStorage();
         storage.Documents[SavedFiltersDocument.FileName] = "not a filters document";
         storage.Documents[SavedFiltersDocument.LegacyFileName] = CollectionJson("Race");
         var store = new SavedFiltersStore(storage);
@@ -126,7 +91,7 @@ public class SavedFiltersStoreTests
     [Fact]
     public async Task Save_UnderLoadFailed_NoOps_AndWritesNothing()
     {
-        var storage = new FakeStorage();
+        var storage = new FakeFilterDocumentStorage();
         storage.Documents[SavedFiltersDocument.FileName] = "not a filters document";
         var store = new SavedFiltersStore(storage);
         await store.LoadAsync();
@@ -144,7 +109,7 @@ public class SavedFiltersStoreTests
     [Fact]
     public async Task Load_LegacyFallback_AdoptsLegacy_AndFirstSaveWritesCanonicalOnly()
     {
-        var storage = new FakeStorage();
+        var storage = new FakeFilterDocumentStorage();
         var legacyJson = CollectionJson("Race");
         storage.Documents[SavedFiltersDocument.LegacyFileName] = legacyJson;
         var store = new SavedFiltersStore(storage);
@@ -168,7 +133,7 @@ public class SavedFiltersStoreTests
     [Fact]
     public async Task Load_LegacyCorrupt_LoadFailed()
     {
-        var storage = new FakeStorage();
+        var storage = new FakeFilterDocumentStorage();
         storage.Documents[SavedFiltersDocument.LegacyFileName] = "not a filters document";
         var store = new SavedFiltersStore(storage);
 
@@ -181,13 +146,92 @@ public class SavedFiltersStoreTests
     [Fact]
     public async Task Load_ReadThrowsStorageException_LoadFailed()
     {
-        var storage = new FakeStorage { ThrowOnRead = true };
+        var storage = new FakeFilterDocumentStorage { ThrowOnRead = true };
         var store = new SavedFiltersStore(storage);
 
         await store.LoadAsync();
 
         Assert.Equal(SavedFiltersStatus.LoadFailed, store.Status);
         Assert.Equal(0, store.Filters.Count);
+    }
+
+    // ── LoadFailedFileName: non-null exactly while LoadFailed, naming the
+    // actual file the failed load was about — what the composite's degrade
+    // notice renders, so a legacy-era folder is never told to look for a
+    // canonical file that doesn't exist.
+
+    [Fact]
+    public async Task LoadFailedFileName_NullWhileReady_AndWhileDisabled()
+    {
+        var store = new SavedFiltersStore(new FakeFilterDocumentStorage());
+
+        Assert.Null(store.LoadFailedFileName); // Disabled (initial)
+        await store.LoadAsync();
+        Assert.Null(store.LoadFailedFileName); // Ready
+    }
+
+    [Fact]
+    public async Task LoadFailedFileName_CanonicalCorrupt_NamesCanonical()
+    {
+        var storage = new FakeFilterDocumentStorage();
+        storage.Documents[SavedFiltersDocument.FileName] = "not a filters document";
+        var store = new SavedFiltersStore(storage);
+
+        await store.LoadAsync();
+
+        Assert.Equal(SavedFiltersDocument.FileName, store.LoadFailedFileName);
+    }
+
+    [Fact]
+    public async Task LoadFailedFileName_LegacyCorrupt_NamesLegacy()
+    {
+        var storage = new FakeFilterDocumentStorage();
+        storage.Documents[SavedFiltersDocument.LegacyFileName] = "not a filters document";
+        var store = new SavedFiltersStore(storage);
+
+        await store.LoadAsync();
+
+        Assert.Equal(SavedFiltersDocument.LegacyFileName, store.LoadFailedFileName);
+    }
+
+    [Fact]
+    public async Task LoadFailedFileName_ReadThrows_NamesTheFileBeingRead()
+    {
+        // First read (canonical) throws → the canonical name is the one to report.
+        var storage = new FakeFilterDocumentStorage { ThrowOnRead = true };
+        var store = new SavedFiltersStore(storage);
+        await store.LoadAsync();
+        Assert.Equal(SavedFiltersDocument.FileName, store.LoadFailedFileName);
+
+        // Canonical absent, legacy read throws → the legacy name.
+        var storage2 = new FakeFilterDocumentStorage();
+        storage2.ReadOverride = name =>
+            name == SavedFiltersDocument.FileName
+                ? Task.FromResult<string?>(null)
+                : throw new FilterStorageException("read failed");
+        var store2 = new SavedFiltersStore(storage2);
+        await store2.LoadAsync();
+        Assert.Equal(SavedFiltersDocument.LegacyFileName, store2.LoadFailedFileName);
+    }
+
+    [Fact]
+    public async Task LoadFailedFileName_ClearedByRecoveredReload_AndByReset()
+    {
+        var storage = new FakeFilterDocumentStorage();
+        storage.Documents[SavedFiltersDocument.FileName] = "not a filters document";
+        var store = new SavedFiltersStore(storage);
+        await store.LoadAsync();
+        Assert.NotNull(store.LoadFailedFileName);
+
+        storage.Documents[SavedFiltersDocument.FileName] = CollectionJson("Race");
+        await store.LoadAsync();
+        Assert.Equal(SavedFiltersStatus.Ready, store.Status);
+        Assert.Null(store.LoadFailedFileName);
+
+        storage.Documents[SavedFiltersDocument.FileName] = "not a filters document";
+        await store.LoadAsync();
+        store.Reset();
+        Assert.Null(store.LoadFailedFileName);
     }
 
     // The WriteFailed posture: the in-memory collection keeps the edit (the
@@ -197,7 +241,7 @@ public class SavedFiltersStoreTests
     [Fact]
     public async Task Save_WriteThrows_WriteFailed_KeepsEditInMemory_AndStopsFurtherWrites()
     {
-        var storage = new FakeStorage();
+        var storage = new FakeFilterDocumentStorage();
         var store = new SavedFiltersStore(storage);
         await store.LoadAsync();
 
@@ -218,7 +262,7 @@ public class SavedFiltersStoreTests
     [Fact]
     public async Task Delete_RemovesAndPersists()
     {
-        var storage = new FakeStorage();
+        var storage = new FakeFilterDocumentStorage();
         storage.Documents[SavedFiltersDocument.FileName] = CollectionJson("Race", "Blitz");
         var store = new SavedFiltersStore(storage);
         await store.LoadAsync();
@@ -235,7 +279,7 @@ public class SavedFiltersStoreTests
     [Fact]
     public async Task Reset_ReturnsToDisabledOverEmpty()
     {
-        var storage = new FakeStorage();
+        var storage = new FakeFilterDocumentStorage();
         storage.Documents[SavedFiltersDocument.FileName] = CollectionJson("Race");
         var store = new SavedFiltersStore(storage);
         await store.LoadAsync();
@@ -252,7 +296,7 @@ public class SavedFiltersStoreTests
     [Fact]
     public async Task SupersededLoad_DiscardsItsOutcome()
     {
-        var storage = new FakeStorage();
+        var storage = new FakeFilterDocumentStorage();
         var pendingRead = new TaskCompletionSource<string?>();
         storage.ReadOverride = _ => pendingRead.Task;
         var store = new SavedFiltersStore(storage);
@@ -269,7 +313,7 @@ public class SavedFiltersStoreTests
     [Fact]
     public async Task Save_NullArguments_Throw()
     {
-        var store = new SavedFiltersStore(new FakeStorage());
+        var store = new SavedFiltersStore(new FakeFilterDocumentStorage());
         await store.LoadAsync();
 
         await Assert.ThrowsAsync<ArgumentNullException>(

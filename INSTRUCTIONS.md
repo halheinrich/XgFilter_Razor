@@ -48,8 +48,9 @@ XgFilter_Razor/
   XgFilter_Razor.csproj
   _Imports.razor
   Components/
-    FilterPanel.razor                — markup + @code state
-    SavedFiltersPanel.razor          — saved-filter pick list, host-mediated
+    FilterSurface.razor              — THE consumer surface: panels + wiring
+    FilterPanel.razor                — filter form (.Internal — not consumer surface)
+    SavedFiltersPanel.razor          — saved-filter pick list (.Internal — not consumer surface)
     FilterHelp.razor                 — producer-owned facet + storage documentation
   Model/
     AppliedFilter.cs                 — applied-config holder, source-stamped
@@ -63,8 +64,10 @@ XgFilter_Razor/
 XgFilter_Razor.Tests/
   XgFilter_Razor.Tests.csproj
   AppliedFilterTests.cs              — holder two-lifetime contract
+  FakeFilterDocumentStorage.cs       — shared recording fake over the seam
   FilterPanelTests.cs                — bUnit tests for FilterPanel
   FilterSourceTokenTests.cs          — token equality rules
+  FilterSurfaceTests.cs              — bUnit wire tests for the composite
   SavedFiltersPanelTests.cs          — bUnit tests for SavedFiltersPanel
   SavedFiltersStoreTests.cs          — store transitions over a fake storage seam
   FilterHelpTests.cs                 — bUnit tests for FilterHelp
@@ -81,6 +84,49 @@ the `NamedFilterCollection` document, facet activation
 (`GetActiveFacets`), and enum labels live in the core lib; this project
 only binds those primitives into Blazor components and surfaces the
 resulting `FilterConfig` via an `EventCallback`.
+
+### `FilterSurface` component — the consumer surface
+
+The one component hosts embed (umbrella arc #63/#78 Step 2): it owns
+`FilterPanel` + `SavedFiltersPanel` and the interaction wiring end to end —
+load→stage, save/save-as→snapshot-or-refuse, delete, applied-state
+mediation onto the host's `AppliedFilter` holder, the saved-filters degrade
+notices, and the source-change rule. Hosts bind the holder (host-registered,
+at whatever lifetime their start-gate must survive — a *parameter* by
+necessity, since the composite dies with its page while BgQuiz's gates must
+survive navigation), a `FilterSourceToken?` for the current source, an
+`IFilterDocumentStorage?` adapter (null = no saved-filters context), the
+host's `CanPersist` capability ruling with its host-specific
+`PersistDisabledReason` wording, and the two panel-shaped events
+(`OnFilterConfigChanged` / `OnAppliedStateChanged`), re-raised after
+mediation with the panel's exact names, payloads, and per-gesture contract.
+
+**The source-change rule is composite-owned — "told, never asks."** The
+composite never sees pickers, paths, or capabilities; the host mints tokens
+and the composite only compares them. When the bound token changes, the
+setup ends: the holder's config is cleared (its stamp expires by token
+inequality), the panel forget-commits (Apply re-arms; the host is told
+through the normal event path), the save-refusal notice clears, and the
+saved-filters context reloads through the seam — or resets, on a change to
+null. **The first parameters-set initializes the comparison token and loads
+the context — nothing else** (ruled pin): a remount over an unchanged
+source leaves an already-applied holder untouched and the host's gate
+armed, which is the holder's whole purpose.
+
+The composite owns its `SavedFiltersStore` over the bound adapter (rebuilt
+on an adapter reference change), so a remount re-reads the document — a
+setup-time, degrade-tolerant read. Notice copy is producer-owned so every
+host degrades with identical wording: the save-refusal (position-pattern)
+copy, the LoadFailed notice (which replaces the panel and names the
+*actual* failed file via `SavedFiltersStore.LoadFailedFileName` — canonical
+or legacy), and the WriteFailed notice (beside the still-truthful panel,
+promising **page-lifetime retention only** — the composite-owned store dies
+with the page, so "kept for this session" would over-promise; ruled pin).
+Saved-section visibility: Ready shows the panel unless read-only *and*
+empty (nothing to load, nothing to save — BgQuiz's clutter rule, now
+producer-owned); WriteFailed keeps the panel beside its notice; Disabled
+and LoadFailed render none. No `RenderFragment` slots — verified against
+both hosts: neither interleaves anything between the composite's children.
 
 ### `FilterPanel` component
 
@@ -283,8 +329,7 @@ components stay in `XgFilter_Razor.Components`. Hoisted from BgQuiz's
 app-side originals (its `AppliedFilter` / `SavedFiltersStore`) so both
 consumer apps share one encoding of the filter interaction lifecycle
 (umbrella arc #63 / #78 / #38); hosts register these at whatever lifetime
-their gates must survive (BgQuiz: Scoped), and the Step-2 composite drives
-them.
+their gates must survive (BgQuiz: Scoped), and `FilterSurface` drives them.
 
 - **`AppliedFilter`** — holder for the config the user deliberately
   applied, plus the source it was applied against. **Two facts, two
@@ -349,10 +394,41 @@ state").
 
 ## Public API
 
-All components live in namespace `XgFilter_Razor.Components`; the
-non-visual model types live in the root `XgFilter_Razor` namespace.
+The consumer surface is `FilterSurface` + `FilterHelp` (namespace
+`XgFilter_Razor.Components`) and the non-visual model types (root
+`XgFilter_Razor` namespace). `FilterPanel` and `SavedFiltersPanel` live in
+`XgFilter_Razor.Components.Internal` with `[EditorBrowsable(Never)]` and
+are **not consumer surface** — consuming them from a host is banned
+outright, host tests included (see Pitfalls for the narrowing record).
+Their contracts below remain documented because `FilterSurface` builds on
+them and this repo's tests pin them.
 
-### `FilterPanel`
+### `FilterSurface`
+
+Parameters:
+
+- `AppliedFilter AppliedFilter` `[EditorRequired]` — the host's holder
+  instance, mediated by the composite: commits `Set` it stamped with
+  `Source`, uncommitted-edit reports `Clear` it, clean re-affirms re-`Set`
+  it. Hosts read their gates from the holder (`IsApplied`,
+  `WasAppliedFor`) and re-render off the events below.
+- `FilterSourceToken? Source` — the current source's token; null = none
+  (applies are not recorded). Changing it triggers the composite-owned
+  source-change rule; the first parameters-set only initializes and loads.
+- `IFilterDocumentStorage? Storage` — the saved-filters seam; null = no
+  saved-filters section at all. The composite owns the store over it.
+- `bool CanPersist` (default true) + `string? PersistDisabledReason` — the
+  host's capability half of the persist gate and its wording; ANDed with
+  the store's `Ready` before reaching the panel. The reason is forwarded
+  only while the host's half is false (WriteFailed explains itself with
+  its own notice).
+- `EventCallback<FilterConfig> OnFilterConfigChanged` +
+  `EventCallback<FilterConfig?> OnAppliedStateChanged`, both
+  `[EditorRequired]` — the inner panel's events re-raised after mediation,
+  with identical names, payloads, and contracts (per-gesture, stateless,
+  idempotent — see the `FilterPanel` section below and Pitfalls).
+
+### `FilterPanel` (`.Internal` — via `FilterSurface` only)
 
 Two `EventCallback` parameters, both `[EditorRequired]`:
 
@@ -388,11 +464,11 @@ saved-filters arc):
   exactly Apply's: fails only on non-blank, unparseable position-pattern
   text.
 
-A third method, `ForgetCommitted()`, is deliberately `internal` — the
-Step-2 composite's source-change rule is its only intended caller, so it
+A third method, `ForgetCommitted()`, is deliberately `internal` —
+`FilterSurface`'s source-change rule is its only intended caller, so it
 is not host-facing surface (see Architecture and Pitfalls).
 
-### `SavedFiltersPanel`
+### `SavedFiltersPanel` (`.Internal` — via `FilterSurface` only)
 
 Parameters (all callbacks `[EditorRequired]`, as is `Filters`):
 
@@ -419,9 +495,12 @@ Parameters (all callbacks `[EditorRequired]`, as is `Filters`):
   `FromGeneration(int)` / `FromPath(string)`; value-equal, ordinal.
 - `SavedFiltersStore` — ctor `(IFilterDocumentStorage? storage)`;
   `NamedFilterCollection Filters`, `SavedFiltersStatus Status`,
-  `Task LoadAsync()`, `Task SaveAsync(string, FilterConfig)`,
-  `Task DeleteAsync(string)`, `void Reset()`. Never throws for storage
-  trouble; mutating members no-op unless `Status == Ready`.
+  `string? LoadFailedFileName` (non-null exactly while `LoadFailed`,
+  naming the actual file — canonical or legacy — the failed load was
+  about, so degrade copy never guesses), `Task LoadAsync()`,
+  `Task SaveAsync(string, FilterConfig)`, `Task DeleteAsync(string)`,
+  `void Reset()`. Never throws for storage trouble; mutating members
+  no-op unless `Status == Ready`.
 - `IFilterDocumentStorage` — `Task<string?> ReadAsync(string fileName)`
   (null = absent), `Task WriteAsync(string fileName, string json)`;
   failures signalled as `FilterStorageException` only.
@@ -648,12 +727,51 @@ the rendered names to those constants.
   migration legs bind the per-row Save — the deliberate alternative to a
   silently splatted, dead affordance (see the Razor silent-splat entry
   above).
-- **`ForgetCommitted` stays `internal`.** The Step-2 composite's
-  source-change rule is its only intended caller; a host either remounts
-  the panel (getting the re-arm for free) or hosts the composite, which
-  owns the rule. Widening it public would hand hosts a second,
-  uncoordinated way to move the committed state that the applied-state
-  events were designed around.
+- **`ForgetCommitted` stays `internal`.** `FilterSurface`'s source-change
+  rule is its only intended caller; a host either remounts the panel
+  (getting the re-arm for free) or hosts the composite, which owns the
+  rule. Widening it public would hand hosts a second, uncoordinated way to
+  move the committed state that the applied-state events were designed
+  around.
+- **The panels' narrowing is `.Internal` + `EditorBrowsable(Never)` — the
+  strongest the toolchain allows, and the ban is absolute anyway.** The
+  spike (Step 2, ruled): a true `internal` component draws CS0262 — the
+  Razor generator hardcodes `public partial` on the component class, so a
+  user partial cannot narrow it. The ruled fallback is what stands:
+  `FilterPanel` / `SavedFiltersPanel` live in
+  `XgFilter_Razor.Components.Internal` with `[EditorBrowsable(Never)]`,
+  and consuming them from a host is banned outright — **including host
+  tests: no `FindComponent<FilterPanel>()` carve-out.** Host wire tests
+  drive `FilterSurface`'s rendered DOM with real gestures instead (both
+  hosts' existing tests do reach the panel types today; their migration
+  legs carry that rewrite). If the Razor toolchain ever allows internal
+  components, finish the job then. `FilterHelp` stays public — it is
+  consumer surface.
+- **`FilterSurface` is told, never asks — keep it that way.** It has no
+  parameter or interop path to pickers, paths, folder handles, or
+  capabilities: the host mints `FilterSourceToken`s and rules `CanPersist`;
+  the composite only compares tokens and ANDs the ruling with its store's
+  status. Adding any host-domain knowledge (a path parameter "just for the
+  notice", a capability enum) re-couples what the seam exists to decouple.
+  The same boundary governs copy: degrade-notice and refusal wording is
+  producer-owned here so every host degrades identically; only
+  host-specific *reasons* (FS-Access phrasing) arrive as parameters. A
+  host writing its own copy for these states is the facet-prose drift
+  hazard again.
+- **`FilterSurface`'s first parameters-set is initialization, not a source
+  change** (ruled pin). It sets the comparison token and loads the
+  saved-filters context — no holder clear, no forget-commit, no notice
+  choreography. A remount over an unchanged source (navigate-back) must
+  leave an already-applied holder untouched and the host's gate armed —
+  that survival is the holder's documented purpose, and an end-setup on
+  mount would silently revoke it. The end-setup choreography runs only on
+  an actual token change against the initialized value; pinned by
+  `Mount_OverSameSource_LeavesAppliedHolderUntouched_RaisesNothing`.
+- **The WriteFailed copy promises page-lifetime retention only.** The
+  composite-owned store lives and dies with the page, so a failed edit
+  does not survive navigation — "kept for this session" would over-promise
+  (ruled). If the store's lifetime ever changes, the copy is part of that
+  change.
 
 ## Subproject-internal next steps
 

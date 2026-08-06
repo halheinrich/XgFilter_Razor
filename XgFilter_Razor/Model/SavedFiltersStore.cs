@@ -8,7 +8,7 @@ using XgFilter_Lib.Filtering;
 /// edits, and writes the document back through the host's
 /// <see cref="IFilterDocumentStorage"/> adapter. Generalized from BgQuiz's
 /// app-side original so both consumer apps share one encoding of the
-/// saved-filters lifecycle; the host (or the Step-2 composite) drives every
+/// saved-filters lifecycle; the host (or the FilterSurface composite) drives every
 /// transition through an awaited call, so the page re-renders off
 /// <see cref="Filters"/> / <see cref="Status"/> after each.
 ///
@@ -81,6 +81,17 @@ public sealed class SavedFiltersStore
     public SavedFiltersStatus Status { get; private set; } = SavedFiltersStatus.Disabled;
 
     /// <summary>
+    /// The file the failed load was about — non-null exactly while
+    /// <see cref="Status"/> is <see cref="SavedFiltersStatus.LoadFailed"/>.
+    /// <see cref="SavedFiltersDocument.FileName"/> when the canonical file
+    /// couldn't be read or parsed, <see cref="SavedFiltersDocument.LegacyFileName"/>
+    /// when the failure happened on the legacy fallback — so a degrade notice
+    /// can name the actual file the user should look at, rather than guessing
+    /// the canonical name at a legacy-era folder.
+    /// </summary>
+    public string? LoadFailedFileName { get; private set; }
+
+    /// <summary>
     /// Read the saved-filters document, re-deriving the whole context — called
     /// by the host after its source is (re)established. Applies the two-name
     /// migration rule (<see cref="SavedFiltersDocument"/>) and swallows every
@@ -95,12 +106,16 @@ public sealed class SavedFiltersStore
         {
             _filters = NamedFilterCollection.Empty;
             Status = SavedFiltersStatus.Disabled;
+            LoadFailedFileName = null;
             return;
         }
 
+        // Which file the load is currently about — what LoadFailedFileName
+        // reports if this attempt degrades.
+        var fileName = SavedFiltersDocument.FileName;
         try
         {
-            var json = await _storage.ReadAsync(SavedFiltersDocument.FileName);
+            var json = await _storage.ReadAsync(fileName);
             if (version != _loadVersion) return;
 
             if (json is null)
@@ -109,7 +124,8 @@ public sealed class SavedFiltersStore
                 // legacy name. A present-but-corrupt canonical file must NOT
                 // reach here: falling back would resurrect stale legacy data
                 // over newer-but-corrupt data (see SavedFiltersDocument).
-                json = await _storage.ReadAsync(SavedFiltersDocument.LegacyFileName);
+                fileName = SavedFiltersDocument.LegacyFileName;
+                json = await _storage.ReadAsync(fileName);
                 if (version != _loadVersion) return;
             }
 
@@ -120,20 +136,23 @@ public sealed class SavedFiltersStore
                 // being.
                 _filters = NamedFilterCollection.Empty;
                 Status = SavedFiltersStatus.Ready;
+                LoadFailedFileName = null;
             }
             else if (NamedFilterCollection.TryFromJson(json, out var loaded))
             {
                 _filters = loaded;
                 Status = SavedFiltersStatus.Ready;
+                LoadFailedFileName = null;
             }
             else
             {
                 // A file exists but is corrupt / foreign / newer-schema
                 // (TryFromJson false on non-null input). Preserve it untouched
                 // — never write the empty fallback over the user's file — and
-                // degrade to a notice.
+                // degrade to a notice naming it.
                 _filters = NamedFilterCollection.Empty;
                 Status = SavedFiltersStatus.LoadFailed;
+                LoadFailedFileName = fileName;
             }
         }
         catch (FilterStorageException)
@@ -143,6 +162,7 @@ public sealed class SavedFiltersStore
             // source, the file untouched.
             _filters = NamedFilterCollection.Empty;
             Status = SavedFiltersStatus.LoadFailed;
+            LoadFailedFileName = fileName;
         }
     }
 
@@ -192,6 +212,7 @@ public sealed class SavedFiltersStore
         _loadVersion++;
         _filters = NamedFilterCollection.Empty;
         Status = SavedFiltersStatus.Disabled;
+        LoadFailedFileName = null;
     }
 
     /// <summary>

@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Components;
 using BgDataTypes_Lib;
 using XgFilter_Lib.Enums;
 using XgFilter_Lib.Filtering;
-using XgFilter_Razor.Components;
+using XgFilter_Razor.Components.Internal;
 
 namespace XgFilter_Razor.Tests;
 

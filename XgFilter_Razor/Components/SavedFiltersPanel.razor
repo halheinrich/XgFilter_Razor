@@ -1,6 +1,11 @@
+@namespace XgFilter_Razor.Components.Internal
+@attribute [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
 @using XgFilter_Lib.Filtering
 
 @* ── SavedFiltersPanel.razor ─────────────────────────────────────────────────
+   NOT consumer surface — see FilterPanel's header note: hosts embed
+   FilterSurface, and the .Internal namespace + EditorBrowsable(Never) are the
+   narrowing (true `internal` components draw CS0262).
    Persistence-agnostic pick list over a NamedFilterCollection. The panel owns
    no document state and mutates nothing: every gesture is raised as a request
    (OnLoadRequested / OnSaveRequested / OnSaveAsRequested / OnDeleteRequested)

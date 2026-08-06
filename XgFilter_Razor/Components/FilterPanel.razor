@@ -1,3 +1,5 @@
+@namespace XgFilter_Razor.Components.Internal
+@attribute [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
 @using System.Diagnostics.CodeAnalysis
 @using XgFilter_Lib.Filtering
 @using XgFilter_Lib.Enums
@@ -6,6 +8,12 @@
 @inject IJSRuntime JS
 
 @* ── FilterPanel.razor ───────────────────────────────────────────────────────
+   NOT consumer surface. Hosts embed FilterSurface, which owns this panel and
+   the interaction wiring; the .Internal namespace + EditorBrowsable(Never)
+   are the strongest narrowing the Razor toolchain allows (a true `internal`
+   component draws CS0262 — the generator hardcodes `public partial`; spike
+   result recorded in INSTRUCTIONS Pitfalls). Consuming it from a host is
+   banned outright — including host tests (no FindComponent<FilterPanel>).
    Owns all filter state. Raises OnFilterConfigChanged only when "Apply Filter"
    is clicked (or "Clear filters"). Raises OnAppliedStateChanged after every
    buffer-affecting gesture, carrying the committed config the buffers now
