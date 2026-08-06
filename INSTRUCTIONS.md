@@ -767,6 +767,22 @@ the rendered names to those constants.
   mount would silently revoke it. The end-setup choreography runs only on
   an actual token change against the initialized value; pinned by
   `Mount_OverSameSource_LeavesAppliedHolderUntouched_RaisesNothing`.
+- **A host that gates the composite behind source-existence never fires
+  the in-place source-change rule — and still owes one line of end-setup
+  choreography** (proven in BgQuiz's migration). When `FilterSurface`
+  renders inside an `@if` tied to "a source is held" (BgQuiz's `HasFiles`
+  gate), every source change crosses an unmount: the composite is disposed
+  before it can observe the new token, and the fresh mount's first
+  parameters-set deliberately only initializes the token and loads the
+  saved-filters context (the navigate-back pin above). Remount therefore
+  delivers Apply re-arm, context re-read and notice death for free — but it
+  cannot clear a host-registered `AppliedFilter` holder that outlives the
+  page, so such a host must keep an `AppliedFilter.Clear()` at its
+  setup-ending gesture (BgQuiz's `EndCurrentSetupAsync` is the precedent).
+  An always-mounted host (`ExtractFromXgToCsv`) needs no such line — the
+  in-place rule handles everything. Leave the source-change rule wired in
+  gated hosts regardless: it is harmless defence in depth if render timing
+  ever changes.
 - **The WriteFailed copy promises page-lifetime retention only.** The
   composite-owned store lives and dies with the page, so a failed edit
   does not survive navigation — "kept for this session" would over-promise
