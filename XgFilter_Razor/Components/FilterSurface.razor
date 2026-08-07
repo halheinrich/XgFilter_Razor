@@ -5,8 +5,9 @@
    The one consumer-facing filter component: owns FilterPanel +
    SavedFiltersPanel and the interaction wiring end to end — load→stage,
    save/save-as→snapshot-or-refuse, delete, applied-state mediation onto the
-   host's AppliedFilter holder, the saved-filters degrade notices, and the
-   source-change rule. Hosts embed this and bind:
+   host's AppliedFilter holder, the saved-filters degrade notices, the
+   source-change rule, and the first-mount reconcile that seeds the panel's
+   committed config back from that holder. Hosts embed this and bind:
 
    - the AppliedFilter holder (host-registered, at whatever lifetime its
      start-gate must survive),
@@ -90,6 +91,15 @@
     /// <see cref="AppliedFilter.WasAppliedFor"/>) and re-render off the
     /// events below. Required: an unmediated holder is a gate that never
     /// moves.
+    /// <para>
+    /// It is also read, once, at this component's first render: when it
+    /// already carries a config applied for the current <see cref="Source"/>,
+    /// the panel's committed config is seeded from it, so a remount does not
+    /// re-arm Apply over a selection that is already applied. That seed comes
+    /// from here and never from the panel's <c>localStorage</c> state — the
+    /// holder resets on a browser reload and storage does not, so seeding
+    /// from storage would leave Apply disabled with the gate closed.
+    /// </para>
     /// </summary>
     [Parameter, EditorRequired]
     public AppliedFilter AppliedFilter { get; set; } = default!;
@@ -107,6 +117,12 @@
     /// nothing else, so a remount over an unchanged source leaves an
     /// already-applied holder untouched and the host's gate armed. While
     /// <see langword="null"/>, applies are not recorded on the holder.
+    /// <para>
+    /// This token is also the reconcile's guard: the first render seeds the
+    /// panel's committed config from <see cref="AppliedFilter"/> only while
+    /// this token is non-null and the holder's stamp matches it, so a config
+    /// applied against some other source is never adopted as this one's.
+    /// </para>
     /// </summary>
     [Parameter]
     public FilterSourceToken? Source { get; set; }
@@ -218,6 +234,56 @@
         {
             await ReloadContextAsync();
         }
+    }
+
+    // ── The first-mount reconcile ───────────────────────────────────────────
+    //
+    // The panel's committed config dies with each mount; the host's holder
+    // does not. So a fresh mount over a source the holder says is already
+    // filtered would arm Apply with nothing to do — the panel restores the
+    // applied selection from localStorage as *staged*, sees nothing
+    // committed, and offers a re-apply that would change nothing. Apply is
+    // offered only when there is something to do, so the mount reconciles:
+    // the panel's reference point is seeded from the holder.
+    //
+    // From the holder, NEVER from storage — the rule this reconcile lives or
+    // dies by. localStorage survives a full browser reload; the holder
+    // deliberately does not (it documents that reset-on-reload posture). A
+    // storage-seeded reconcile would therefore, after a reload, disable Apply
+    // while the holder is empty: the host's start gate closed and the only
+    // control that could re-open it greyed out. The holder is the one source
+    // that cannot produce that lock-out, because it is the very state the
+    // gate reads.
+    //
+    // Here rather than in the first OnParametersSetAsync because @ref is null
+    // until after the first render — copying EndSetup's `_filterPanel?.` idiom
+    // into that branch would silently no-op. The panel's own localStorage
+    // restore may still be in flight when this lands; that converges because
+    // the panel's cleanliness is an equality comparison against the live
+    // buffers rather than a latched flag, and the restore's StateHasChanged
+    // re-evaluates it. One more reason never to latch that comparison.
+    //
+    // Silent by design: no OnAppliedStateChanged. ForgetCommitted reports
+    // because it creates news; a reconcile derives from the holder, which
+    // already agrees, so there is nothing to tell the host — and a raise here
+    // would break the ruled mount pin (initialize, never choreograph).
+    //
+    // Guarded on the source stamp, not merely on a config being present: the
+    // holder's stamp survives Clear by contract, so "some config is applied"
+    // and "it was applied to *this* source" are separate questions and both
+    // must answer yes.
+    protected override Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender
+            && _filterPanel is { } panel
+            && Source is { } source
+            && AppliedFilter.Config is { } applied
+            && AppliedFilter.WasAppliedFor(source))
+        {
+            panel.SeedCommitted(applied);
+        }
+
+        return Task.CompletedTask;
     }
 
     // The source changed: nothing selected against the previous source may

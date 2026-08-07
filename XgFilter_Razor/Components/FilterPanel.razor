@@ -525,6 +525,13 @@
     // call. Never persisted and never a holder: the first-render localStorage
     // restore *stages* a selection, it does not commit one, so a fresh mount
     // has no committed config even when it restores a full selection.
+    //
+    // A remount over an *unchanged* source is the one case where dying is the
+    // wrong answer — the selection really is still applied, so Apply would
+    // re-arm with nothing to do. FilterSurface reconciles that at its first
+    // render through SeedCommitted, from the applied holder it mediates and
+    // never from localStorage (see SeedCommitted and the composite's
+    // first-mount reconcile).
     private FilterConfig? _committedConfig;
 
     // True once LoadConfig has staged an externally supplied config. The
@@ -673,6 +680,43 @@
     {
         _committedConfig = null;
         ReportAppliedState();
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Adopts <paramref name="config"/> as the last-committed config — the
+    /// exact mirror of <see cref="ForgetCommitted"/>, for a fresh mount
+    /// resuming a commit an earlier mount made. The committed config dies on
+    /// unmount while the caller's applied state outlives it, so without this
+    /// a remount arms Apply over a selection that is already applied: nothing
+    /// to do, and the disabled-because-nothing-changed explanation missing
+    /// with it. The buffers, the persisted <c>localStorage</c> state, and the
+    /// disclosure are all untouched — this moves the reference point, never
+    /// the selection — and nothing is written: the committed config stays
+    /// unpersisted by contract (see this panel's Pitfalls), derived at mount
+    /// from what the caller already holds.
+    /// <para>
+    /// <b>Silent, unlike <see cref="ForgetCommitted"/> — deliberately.</b>
+    /// Forgetting is news: a gate the consumer believes clean just went
+    /// stale, and only <see cref="OnAppliedStateChanged"/> can say so. A seed
+    /// is by definition no news — the caller seeds from applied state it is
+    /// already holding, so a report would only tell it what it just said.
+    /// The asymmetry is the contract, not an oversight.
+    /// </para>
+    /// <c>internal</c> for exactly <see cref="ForgetCommitted"/>'s reason: the
+    /// composite component is the only intended caller (tests reach it via
+    /// <c>InternalsVisibleTo</c>) — it is the party that mediates the applied
+    /// holder and can therefore say what was committed; a host holds no such
+    /// answer about <em>this</em> panel.
+    /// </summary>
+    /// <param name="config">The config to treat as last-committed.</param>
+    /// <exception cref="ArgumentNullException">
+    /// Thrown when <paramref name="config"/> is <see langword="null"/>.
+    /// </exception>
+    internal void SeedCommitted(FilterConfig config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        _committedConfig = config;
         StateHasChanged();
     }
 

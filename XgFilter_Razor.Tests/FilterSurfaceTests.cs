@@ -49,6 +49,14 @@ public class FilterSurfaceTests : BunitContext
         return filters.ToJson();
     }
 
+    // Stand the inner panel's persisted selection up, so a mount restores it —
+    // the navigate-back starting state, where localStorage still holds what
+    // the previous mount applied. Through FilterPanel.ConfigKey rather than a
+    // repeated literal: the key is incidental plumbing here, not the subject.
+    private void StoredConfig(FilterConfig config) =>
+        JSInterop.Setup<string?>("localStorage.getItem", FilterPanel.ConfigKey)
+                 .SetResult(config.ToJson());
+
     private static FakeFilterDocumentStorage StorageWith(params (string Name, FilterConfig Config)[] entries)
     {
         var storage = new FakeFilterDocumentStorage();
@@ -122,6 +130,64 @@ public class FilterSurfaceTests : BunitContext
         Assert.True(_holder.WasAppliedFor(TokenA));
         Assert.Empty(_reports);
         Assert.Empty(_committed);
+    }
+
+    // ── The first-mount reconcile (#82) ─────────────────────────────────────
+
+    // The navigate-back case the reconcile exists for: the holder outlived the
+    // previous mount still carrying the applied config and this source's
+    // stamp, and the panel restores exactly that selection from storage. The
+    // fresh panel has committed nothing of its own, so without the reconcile
+    // Apply re-arms with nothing to do. Seeding is silent — a reconcile
+    // derives from the holder, which already agrees, so there is no news; the
+    // mount pin above still holds.
+    [Fact]
+    public void Mount_HolderAppliedForThisSource_SeedsCommitted_ApplyDisabled_RaisesNothing()
+    {
+        var applied = new FilterConfig { ErrorMin = 0.1 };
+        _holder.Set(applied, TokenA);
+        StoredConfig(applied);
+
+        var cut = RenderSurface(TokenA, new FakeFilterDocumentStorage());
+
+        cut.WaitForAssertion(() => Assert.True(Apply(cut).HasAttribute("disabled")));
+        Assert.Contains("already applied", cut.Find("#applyDisabledReason").TextContent);
+        Assert.Empty(_reports);
+        Assert.Empty(_committed);
+        Assert.Same(applied, _holder.Config);
+    }
+
+    // The fresh-mount posture the reconcile must not eat, and the test that
+    // fails if anyone ever seeds from localStorage instead of the holder: a
+    // full browser reload keeps the stored selection but resets the holder, so
+    // there IS something to do — applying re-opens the host's gate. Disabling
+    // Apply here would be a lock-out.
+    [Fact]
+    public void Mount_EmptyHolder_WithRestorableStorage_LeavesApplyEnabled()
+    {
+        StoredConfig(new FilterConfig { ErrorMin = 0.1 });
+
+        var cut = RenderSurface(TokenA, new FakeFilterDocumentStorage());
+
+        Assert.False(_holder.IsApplied);
+        cut.WaitForAssertion(() => Assert.Equal("0.1", ErrorMin(cut).GetAttribute("value")));
+        Assert.False(Apply(cut).HasAttribute("disabled"));
+    }
+
+    // Guarded on the stamp, not merely on a config being present: a holder
+    // carrying a config applied against another source has said nothing about
+    // this one, so the reconcile leaves Apply armed.
+    [Fact]
+    public void Mount_HolderStampedForAnotherSource_DoesNotSeed_ApplyStaysEnabled()
+    {
+        var applied = new FilterConfig { ErrorMin = 0.1 };
+        _holder.Set(applied, TokenB);
+        StoredConfig(applied);
+
+        var cut = RenderSurface(TokenA, new FakeFilterDocumentStorage());
+
+        cut.WaitForAssertion(() => Assert.Equal("0.1", ErrorMin(cut).GetAttribute("value")));
+        Assert.False(Apply(cut).HasAttribute("disabled"));
     }
 
     // ── Applied-state mediation ─────────────────────────────────────────────

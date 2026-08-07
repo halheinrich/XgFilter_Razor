@@ -113,6 +113,21 @@ the context — nothing else** (ruled pin): a remount over an unchanged
 source leaves an already-applied holder untouched and the host's gate
 armed, which is the holder's whole purpose.
 
+**The first-mount reconcile** (#82) is the other half of that survival.
+The panel's committed config dies each mount while the holder does not, so
+a remount over an already-filtered source would restore the applied
+selection as merely *staged* and re-arm Apply with nothing to do. At its
+first render the composite seeds the panel's committed config from the
+holder — `SeedCommitted`, the mirror of the source-change rule's
+`ForgetCommitted` — guarded on both facts the holder carries: a config is
+applied *and* its stamp matches the current `Source`. It runs from
+`OnAfterRenderAsync(firstRender: true)`, not the first parameters-set,
+because `@ref` is null until after the first render. The seed is
+**silent** (no `OnAppliedStateChanged`) and comes **from the holder, never
+from `localStorage`** — both non-negotiable; see Pitfalls for the lock-out
+that storage-seeding produces and why the asymmetry with `ForgetCommitted`
+is deliberate.
+
 The composite owns its `SavedFiltersStore` over the bound adapter (rebuilt
 on an adapter reference change), so a remount re-reads the document — a
 setup-time, degrade-tolerant read. Notice copy is producer-owned so every
@@ -235,15 +250,32 @@ itself disabled on an unchanged selection.
 The last-committed config is plain component-instance state that dies on
 unmount, and is deliberately **never persisted**: the first-render
 `localStorage` restore *stages* a selection, it does not commit one, so a
-fresh mount has committed nothing, raises neither event, and starts with
+fresh panel has committed nothing, raises neither event, and starts with
 Apply enabled. A host that remounts the panel (BgQuiz on a new folder
 pick) therefore gets a re-enabled Apply for free, with no host-side reset
-call. For a panel kept mounted across a source change, `internal void
-ForgetCommitted()` is the programmatic equivalent: it drops the
-last-committed config — buffers, persisted state, and disclosure all
-untouched — so Apply re-arms and `OnAppliedStateChanged` re-reports
-(necessarily `null`) through the normal path. Internal by design: the
-composite component is its only intended caller (see Pitfalls).
+call.
+
+Two `internal` methods move that reference point programmatically, and
+they are exact mirrors:
+
+- `void ForgetCommitted()` — for a panel kept mounted across a source
+  change: it drops the last-committed config (buffers, persisted state,
+  and disclosure all untouched) so Apply re-arms and
+  `OnAppliedStateChanged` re-reports (necessarily `null`) through the
+  normal path.
+- `void SeedCommitted(FilterConfig)` — for a fresh mount resuming an
+  earlier mount's commit: it adopts the given config as last-committed, so
+  Apply does not re-arm over a selection that is already applied. Same
+  untouched buffers, same nothing written. **Silent**, unlike its mirror:
+  forgetting is news the consumer can only hear through the event, while a
+  seed derives from applied state the caller already holds. That
+  asymmetry is contract, not oversight.
+
+Both are internal by design — the composite is their only intended caller
+(see Pitfalls). Because of `SeedCommitted`, "a fresh mount starts with
+Apply enabled" is the *panel's* posture in isolation; under the composite
+a remount over an already-filtered source starts with Apply disabled, the
+mount having reconciled from the holder.
 
 Consumers that want a `DecisionFilterSet` for in-memory filtering call
 `cfg.Build()` themselves; consumers that want to POST the configuration
@@ -464,9 +496,11 @@ saved-filters arc):
   exactly Apply's: fails only on non-blank, unparseable position-pattern
   text.
 
-A third method, `ForgetCommitted()`, is deliberately `internal` —
-`FilterSurface`'s source-change rule is its only intended caller, so it
-is not host-facing surface (see Architecture and Pitfalls).
+Two further methods, `ForgetCommitted()` and `SeedCommitted(FilterConfig)`,
+are deliberately `internal` — `FilterSurface` is their only intended
+caller (its source-change rule and its first-mount reconcile
+respectively), so neither is host-facing surface (see Architecture and
+Pitfalls).
 
 ### `SavedFiltersPanel` (`.Internal` — via `FilterSurface` only)
 
@@ -571,10 +605,13 @@ the rendered names to those constants.
   payload disagreeing is the defect the single member exists to prevent.
 - **The last-committed config is never persisted.** The first-render
   `localStorage` restore *stages* a selection; it does not commit one. So
-  a fresh mount raises neither event and starts with Apply enabled even
-  with every control populated — which is what makes "a new folder
+  a fresh panel raises neither event and would start with Apply enabled
+  even with every control populated — which is what makes "a new folder
   re-enables Apply" fall out of a host remount for free. Persisting it, or
-  hoisting it into a holder, would break both properties at once.
+  hoisting it into a holder, would break both properties at once. The
+  composite's first-mount reconcile narrows *when* that re-arm is offered
+  without touching either property: it seeds the panel in memory from the
+  applied holder, writing nothing (next entry).
 - **The depth facet's clause union is derived in `Build()`, not the panel.**
   The Analysis-depth control writes only raw intent — three per-mode pairs,
   each a toggle plus its own checked-level set — and calls
@@ -727,12 +764,14 @@ the rendered names to those constants.
   migration legs bind the per-row Save — the deliberate alternative to a
   silently splatted, dead affordance (see the Razor silent-splat entry
   above).
-- **`ForgetCommitted` stays `internal`.** `FilterSurface`'s source-change
-  rule is its only intended caller; a host either remounts the panel
-  (getting the re-arm for free) or hosts the composite, which owns the
-  rule. Widening it public would hand hosts a second, uncoordinated way to
-  move the committed state that the applied-state events were designed
-  around.
+- **`ForgetCommitted` and `SeedCommitted` stay `internal`.**
+  `FilterSurface` is their only intended caller — its source-change rule
+  and its first-mount reconcile; a host either remounts the panel (getting
+  the re-arm for free) or hosts the composite, which owns both rules. And
+  only the composite mediates the applied holder, so only it can say what
+  a fresh panel was committed to. Widening either public would hand hosts a
+  second, uncoordinated way to move the committed state that the
+  applied-state events were designed around.
 - **The panels' narrowing is `.Internal` + `EditorBrowsable(Never)` — the
   strongest the toolchain allows, and the ban is absolute anyway.** The
   spike (Step 2, ruled): a true `internal` component draws CS0262 — the
@@ -767,6 +806,50 @@ the rendered names to those constants.
   mount would silently revoke it. The end-setup choreography runs only on
   an actual token change against the initialized value; pinned by
   `Mount_OverSameSource_LeavesAppliedHolderUntouched_RaisesNothing`.
+- **The first-mount reconcile seeds from the holder — NEVER from
+  `localStorage`** (ruled, #82). Apply is offered only when there is
+  something to do: a filter change or a source change. A remount over an
+  already-filtered source has neither, so the composite seeds the fresh
+  panel's committed config from `AppliedFilter` at its first render. The
+  tempting shortcut — seed from the restored `localStorage` selection,
+  which the panel already has in hand — is a **lock-out**. That blob
+  survives a full browser reload; the holder deliberately does not. After a
+  reload, storage-seeding would disable Apply while `IsApplied` is false:
+  the host's start gate closed and the one control that could re-open it
+  greyed out. Pinned from the other side by
+  `Mount_EmptyHolder_WithRestorableStorage_LeavesApplyEnabled`, which is
+  exactly the test that fails if anyone ever makes that swap.
+  Three more properties are load-bearing:
+  - **It runs from `OnAfterRenderAsync(firstRender: true)`, not the first
+    parameters-set.** `@ref` is null until after the first render, so
+    copying `EndSetup`'s `_filterPanel?.` idiom into the parameters-set
+    branch compiles, reads correctly, and silently does nothing.
+  - **It is silent** — no `OnAppliedStateChanged`. `ForgetCommitted`
+    reports because it creates news; a reconcile derives from the holder,
+    which already agrees, so there is none. A raise would also break the
+    mount pin above and its named test.
+  - **It guards on the source stamp, not just on a config being present.**
+    The stamp survives `Clear` by contract, so "something is applied" and
+    "it was applied to *this* source" are separate questions; the seed
+    needs both to answer yes.
+  Ordering against the panel's own `localStorage` restore is safe but not
+  accidental: the child's after-render runs first and parks on its interop
+  await, so the seed can land before the buffers hydrate. It converges only
+  because cleanliness is an equality comparison re-evaluated by the
+  restore's `StateHasChanged`, not a latched flag — one more reason that
+  comparison must never become a flag.
+  **Reachability note** (checked when the guard was written, and the reason
+  the stamp guard is defence in depth rather than the load-bearing part):
+  neither host can present a fresh mount with a holder stamped for a
+  *different* source. BgQuiz gates the composite behind `HasFiles`, so
+  every source change crosses an unmount, and `EndCurrentSetupAsync` —
+  which runs at the pick click, not after it — clears the holder first.
+  ExtractFromXgToCsv keeps the composite always-mounted, and its `Source`
+  is null on a fresh mount (mode and folder path are restored in the page's
+  own after-render, which runs *after* the child's), so the reconcile's
+  non-null guard declines and the ensuing null→token change runs the
+  in-place rule instead. Re-check this if either host's mount-time source
+  derivation changes.
 - **A host that gates the composite behind source-existence never fires
   the in-place source-change rule — and still owes one line of end-setup
   choreography** (proven in BgQuiz's migration). When `FilterSurface`
@@ -779,6 +862,11 @@ the rendered names to those constants.
   cannot clear a host-registered `AppliedFilter` holder that outlives the
   page, so such a host must keep an `AppliedFilter.Clear()` at its
   setup-ending gesture (BgQuiz's `EndCurrentSetupAsync` is the precedent).
+  Since #82 that `Clear()` also carries the re-arm: the fresh mount
+  reconciles from the holder, so a holder left applied would keep Apply
+  disabled for the *new* source. It is cleared at the setup-ending gesture
+  in both hosts, which is why the reconcile cannot adopt a stale config —
+  see the reachability note in the reconcile entry above.
   An always-mounted host (`ExtractFromXgToCsv`) needs no such line — the
   in-place rule handles everything. Leave the source-change rule wired in
   gated hosts regardless: it is harmless defence in depth if render timing

@@ -23,6 +23,18 @@ using XgFilter_Lib.Filtering;
 /// </para>
 ///
 /// <para>
+/// <b>The reconcile reads this holder, and only this holder.</b> Because the
+/// panel's committed state dies each mount while this survives, the composite
+/// seeds the remounted panel's committed config from here — so Apply is not
+/// re-armed over a selection this holder still says is applied. That seed must
+/// never come from the panel's persisted <c>localStorage</c> selection: that
+/// blob outlives a browser reload and this holder deliberately does not (see
+/// below), so a storage-seeded reconcile would disable Apply after a reload
+/// while <see cref="IsApplied"/> is false — the host's gate closed with the
+/// one control that could open it greyed out.
+/// </para>
+///
+/// <para>
 /// <b>Two facts, two lifetimes.</b> Beside the config itself this holder
 /// records <i>which source</i> the last Apply was made for, stamped with the
 /// host-minted <see cref="FilterSourceToken"/>. The config is edit-coupled —
