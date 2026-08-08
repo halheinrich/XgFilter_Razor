@@ -806,6 +806,17 @@ the rendered names to those constants.
   mount would silently revoke it. The end-setup choreography runs only on
   an actual token change against the initialized value; pinned by
   `Mount_OverSameSource_LeavesAppliedHolderUntouched_RaisesNothing`.
+  **The host-side half of that pin: publish `null` for `Source` only when
+  you mean *no source exists* — never as *not yet known*.** The composite
+  only compares tokens; it cannot tell a placeholder apart from an answer.
+  A `null` that is later corrected to the real token is therefore read as a
+  genuine source change and ends the setup — holder cleared, commitment
+  forgotten, Apply re-armed — which is exactly wrong when nothing about the
+  source actually changed. A host whose source is derived from facts it
+  restores asynchronously must withhold the composite until that derivation
+  is settled rather than mount it against a placeholder;
+  `ExtractFromXgToCsv`'s `_restoreComplete` gate (#85) is the consumer-side
+  statement of this rule.
 - **The first-mount reconcile seeds from the holder — NEVER from
   `localStorage`** (ruled, #82). Apply is offered only when there is
   something to do: a filter change or a source change. A remount over an
@@ -838,18 +849,28 @@ the rendered names to those constants.
   because cleanliness is an equality comparison re-evaluated by the
   restore's `StateHasChanged`, not a latched flag — one more reason that
   comparison must never become a flag.
-  **Reachability note** (checked when the guard was written, and the reason
-  the stamp guard is defence in depth rather than the load-bearing part):
-  neither host can present a fresh mount with a holder stamped for a
-  *different* source. BgQuiz gates the composite behind `HasFiles`, so
-  every source change crosses an unmount, and `EndCurrentSetupAsync` —
+  **Reachability note** (re-checked after #85, and the reason the stamp
+  guard is defence in depth rather than the load-bearing part): neither
+  host can present a fresh mount with a holder stamped for a *different*
+  source — but each for its own host-side reason, and in neither case
+  because `Source` is null. BgQuiz gates the composite behind `HasFiles`,
+  so every source change crosses an unmount, and `EndCurrentSetupAsync` —
   which runs at the pick click, not after it — clears the holder first.
-  ExtractFromXgToCsv keeps the composite always-mounted, and its `Source`
-  is null on a fresh mount (mode and folder path are restored in the page's
-  own after-render, which runs *after* the child's), so the reconcile's
-  non-null guard declines and the ensuing null→token change runs the
-  in-place rule instead. Re-check this if either host's mount-time source
-  derivation changes.
+  ExtractFromXgToCsv clears the mismatched stamp itself: since #85 its
+  first-render restore calls `AppliedFilter.Clear()` whenever the holder is
+  not stamped for the source it just restored, and that restore completes
+  *before* the page lets the composite mount (`_restoreComplete`). So the
+  holder the composite meets on its first render is already either this
+  source's or empty. Note what this does *not* rest on, since it is the
+  tempting re-derivation: Extract's `Source` is truthful at that first
+  render rather than a placeholder — non-null whenever a source was in
+  fact restored — so over an unchanged folder the reconcile genuinely
+  *fires* there, opening with Apply disabled and the "already applied"
+  notice. That is the reconcile seeding the fresh panel, not a non-null
+  guard declining. (A restored blank path is the other truthful answer:
+  `Source` is null, the reconcile declines, and the host's restore has
+  already cleared the holder on the same condition.)
+  Re-check this if either host's mount-time source derivation changes.
 - **A host that gates the composite behind source-existence never fires
   the in-place source-change rule — and still owes one line of end-setup
   choreography** (proven in BgQuiz's migration). When `FilterSurface`
@@ -864,13 +885,28 @@ the rendered names to those constants.
   setup-ending gesture (BgQuiz's `EndCurrentSetupAsync` is the precedent).
   Since #82 that `Clear()` also carries the re-arm: the fresh mount
   reconciles from the holder, so a holder left applied would keep Apply
-  disabled for the *new* source. It is cleared at the setup-ending gesture
-  in both hosts, which is why the reconcile cannot adopt a stale config —
-  see the reachability note in the reconcile entry above.
-  An always-mounted host (`ExtractFromXgToCsv`) needs no such line — the
-  in-place rule handles everything. Leave the source-change rule wired in
-  gated hosts regardless: it is harmless defence in depth if render timing
-  ever changes.
+  disabled for the *new* source. Both hosts clear a mismatched holder
+  before any fresh mount can see it — at different moments, by different
+  mechanisms — which is why the reconcile cannot adopt a stale config; see
+  the reachability note in the reconcile entry above, and the two gate
+  shapes below.
+  Two gate shapes exist and only one of them is this bullet's subject.
+  BgQuiz's is *ongoing*: the `@if` tracks source existence for the page's
+  whole life, so every source change crosses an unmount. Extract's
+  `_restoreComplete` is *one-shot at page mount*: it withholds the
+  composite until the restore has settled `Source`, then mounts it and
+  leaves it mounted. `Source` going null afterwards — the user blanks the
+  folder path — unmounts nothing, so Extract remains an always-mounted host
+  for every rule in #78 and the in-place source-change rule still owns its
+  source changes. Do not read the one-shot gate as buying remount-for-free.
+  Nor does it excuse the `Clear()`: a DI-scoped holder outlives the page in
+  either host, and nothing else drops a config stamped for a source this
+  visit no longer has, so Extract owes the same line and since #85 carries
+  it inside the restore. Read the pair as gated-ongoing plus `Clear()` at
+  the setup-ending gesture (BgQuiz), or always-mounted plus `Clear()` in
+  the mount-time restore (Extract) — neither host gets to skip it. Leave
+  the source-change rule wired in gated hosts regardless: it is harmless
+  defence in depth if render timing ever changes.
 - **The WriteFailed copy promises page-lifetime retention only.** The
   composite-owned store lives and dies with the page, so a failed edit
   does not survive navigation — "kept for this session" would over-promise
