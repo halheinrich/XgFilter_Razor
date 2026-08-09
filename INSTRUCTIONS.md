@@ -53,7 +53,7 @@ XgFilter_Razor/
     SavedFiltersPanel.razor          — saved-filter pick list (.Internal — not consumer surface)
     FilterHelp.razor                 — producer-owned facet + storage documentation
   Model/
-    AppliedFilter.cs                 — applied-config holder, source-stamped
+    AppliedFilter.cs                 — applied-config holder, keyed to its source
     FilterSourceToken.cs             — opaque host-minted source identity
     IFilterDocumentStorage.cs        — host storage-adapter seam
     FilterStorageException.cs        — the seam's one failure type
@@ -63,7 +63,7 @@ XgFilter_Razor/
   wwwroot/
 XgFilter_Razor.Tests/
   XgFilter_Razor.Tests.csproj
-  AppliedFilterTests.cs              — holder two-lifetime contract
+  AppliedFilterTests.cs              — holder source-keyed applied contract
   FakeFilterDocumentStorage.cs       — shared recording fake over the seam
   FilterPanelTests.cs                — bUnit tests for FilterPanel
   FilterSourceTokenTests.cs          — token equality rules
@@ -104,8 +104,8 @@ mediation with the panel's exact names, payloads, and per-gesture contract.
 **The source-change rule is composite-owned — "told, never asks."** The
 composite never sees pickers, paths, or capabilities; the host mints tokens
 and the composite only compares them. When the bound token changes, the
-setup ends: the holder's config is cleared (its stamp expires by token
-inequality), the panel forget-commits (Apply re-arms; the host is told
+setup ends: the holder is cleared (the applied state drops entirely — no
+residue survives), the panel forget-commits (Apply re-arms; the host is told
 through the normal event path), the save-refusal notice clears, and the
 saved-filters context reloads through the seam — or resets, on a change to
 null. **The first parameters-set initializes the comparison token and loads
@@ -119,8 +119,9 @@ a remount over an already-filtered source would restore the applied
 selection as merely *staged* and re-arm Apply with nothing to do. At its
 first render the composite seeds the panel's committed config from the
 holder — `SeedCommitted`, the mirror of the source-change rule's
-`ForgetCommitted` — guarded on both facts the holder carries: a config is
-applied *and* its stamp matches the current `Source`. It runs from
+`ForgetCommitted` — via the keyed lookup `ConfigFor(Source)`, which yields
+a config exactly when one is applied *and* it belongs to the current
+`Source`. It runs from
 `OnAfterRenderAsync(firstRender: true)`, not the first parameters-set,
 because `@ref` is null until after the first render. The seed is
 **silent** (no `OnAppliedStateChanged`) and comes **from the holder, never
@@ -364,12 +365,16 @@ consumer apps share one encoding of the filter interaction lifecycle
 their gates must survive (BgQuiz: Scoped), and `FilterSurface` drives them.
 
 - **`AppliedFilter`** — holder for the config the user deliberately
-  applied, plus the source it was applied against. **Two facts, two
-  lifetimes**: the config is edit-coupled — the panel reporting
-  uncommitted edits must `Clear()` it, re-gating Start-like actions —
-  while the source stamp survives `Clear()` and answers "has this source
-  ever been filtered?" via `WasAppliedFor(token)` (BgQuiz's Apply Mix
-  gate). In-memory only, never persisted.
+  applied, **keyed to the source it was applied against**: one nullable
+  (config, source) pair with one lifetime, read only through the
+  source-relative lookup `ConfigFor(token)` — there is deliberately no
+  bare "what is applied?" accessor, so a config applied against some
+  other source can never read as applied (spec §3: the need is
+  ownership, not history; nothing anywhere answers "has this source ever
+  been filtered"). Edit-coupled: the panel reporting uncommitted edits
+  must `Clear()` it, re-gating Start-like actions, and `Clear()` drops
+  the pair entirely — no residue survives. In-memory only, never
+  persisted.
 - **`FilterSourceToken`** — opaque, equatable identity of "which source",
   minted by the host via `FromGeneration(int)` / `FromPath(string)` and
   only ever *compared* by the producer. Value equality over the wrapped
@@ -440,10 +445,10 @@ them and this repo's tests pin them.
 Parameters:
 
 - `AppliedFilter AppliedFilter` `[EditorRequired]` — the host's holder
-  instance, mediated by the composite: commits `Set` it stamped with
+  instance, mediated by the composite: commits `Set` it keyed to
   `Source`, uncommitted-edit reports `Clear` it, clean re-affirms re-`Set`
-  it. Hosts read their gates from the holder (`IsApplied`,
-  `WasAppliedFor`) and re-render off the events below.
+  it. Hosts read their gates from the holder (`ConfigFor` against their
+  own current token) and re-render off the events below.
 - `FilterSourceToken? Source` — the current source's token; null = none
   (applies are not recorded). Changing it triggers the composite-owned
   source-change rule; the first parameters-set only initializes and loads.
@@ -521,10 +526,10 @@ Parameters (all callbacks `[EditorRequired]`, as is `Filters`):
 
 ### Non-visual model types
 
-- `AppliedFilter` — `FilterConfig? Config`, `bool IsApplied`,
-  `void Set(FilterConfig, FilterSourceToken)`,
-  `bool WasAppliedFor(FilterSourceToken)`, `void Clear()`. `Clear()`
-  drops the config only; the source stamp survives by contract.
+- `AppliedFilter` — `FilterConfig? ConfigFor(FilterSourceToken)`,
+  `void Set(FilterConfig, FilterSourceToken)`, `void Clear()`. The
+  surface is source-relative only — no bare `Config` / `IsApplied` — and
+  `Clear()` drops the applied state entirely.
 - `FilterSourceToken` — `readonly record struct`; factories
   `FromGeneration(int)` / `FromPath(string)`; value-equal, ordinal.
 - `SavedFiltersStore` — ctor `(IFilterDocumentStorage? storage)`;
@@ -825,7 +830,7 @@ the rendered names to those constants.
   tempting shortcut — seed from the restored `localStorage` selection,
   which the panel already has in hand — is a **lock-out**. That blob
   survives a full browser reload; the holder deliberately does not. After a
-  reload, storage-seeding would disable Apply while `IsApplied` is false:
+  reload, storage-seeding would disable Apply while nothing is applied:
   the host's start gate closed and the one control that could re-open it
   greyed out. Pinned from the other side by
   `Mount_EmptyHolder_WithRestorableStorage_LeavesApplyEnabled`, which is
@@ -839,29 +844,30 @@ the rendered names to those constants.
     reports because it creates news; a reconcile derives from the holder,
     which already agrees, so there is none. A raise would also break the
     mount pin above and its named test.
-  - **It guards on the source stamp, not just on a config being present.**
-    The stamp survives `Clear` by contract, so "something is applied" and
-    "it was applied to *this* source" are separate questions; the seed
-    needs both to answer yes.
+  - **It asks the holder source-relatively — `ConfigFor(Source)` — the
+    only way the holder answers.** "Something is applied" and "it was
+    applied to *this* source" are one question under the keyed surface: a
+    config applied against another source reads as nothing applied, and
+    the seed correctly declines.
   Ordering against the panel's own `localStorage` restore is safe but not
   accidental: the child's after-render runs first and parks on its interop
   await, so the seed can land before the buffers hydrate. It converges only
   because cleanliness is an equality comparison re-evaluated by the
   restore's `StateHasChanged`, not a latched flag — one more reason that
   comparison must never become a flag.
-  **Reachability note** (re-checked after #85, and the reason the stamp
-  guard is defence in depth rather than the load-bearing part): neither
-  host can present a fresh mount with a holder stamped for a *different*
-  source — but each for its own host-side reason, and in neither case
-  because `Source` is null. BgQuiz gates the composite behind `HasFiles`,
-  so every source change crosses an unmount, and `EndCurrentSetupAsync` —
-  which runs at the pick click, not after it — clears the holder first.
-  ExtractFromXgToCsv clears the mismatched stamp itself: since #85 its
-  first-render restore calls `AppliedFilter.Clear()` whenever the holder is
-  not stamped for the source it just restored, and that restore completes
-  *before* the page lets the composite mount (`_restoreComplete`). So the
-  holder the composite meets on its first render is already either this
-  source's or empty. Note what this does *not* rest on, since it is the
+  **Reachability note** (re-checked after #85, and the reason the keyed
+  lookup's decline path is defence in depth rather than the load-bearing
+  part): neither host can present a fresh mount with a holder keyed to a
+  *different* source — but each for its own host-side reason, and in
+  neither case because `Source` is null. BgQuiz gates the composite behind
+  `HasFiles`, so every source change crosses an unmount, and
+  `EndCurrentSetupAsync` — which runs at the pick click, not after it —
+  clears the holder first. ExtractFromXgToCsv clears the mismatched holder
+  itself: since #85 its first-render restore calls `AppliedFilter.Clear()`
+  whenever the holder carries nothing keyed to the source it just restored,
+  and that restore completes *before* the page lets the composite mount
+  (`_restoreComplete`). So the holder the composite meets on its first
+  render is already either this source's or empty. Note what this does *not* rest on, since it is the
   tempting re-derivation: Extract's `Source` is truthful at that first
   render rather than a placeholder — non-null whenever a source was in
   fact restored — so over an unchanged folder the reconcile genuinely
@@ -900,7 +906,7 @@ the rendered names to those constants.
   for every rule in #78 and the in-place source-change rule still owns its
   source changes. Do not read the one-shot gate as buying remount-for-free.
   Nor does it excuse the `Clear()`: a DI-scoped holder outlives the page in
-  either host, and nothing else drops a config stamped for a source this
+  either host, and nothing else drops a config keyed to a source this
   visit no longer has, so Extract owes the same line and since #85 carries
   it inside the restore. Read the pair as gated-ongoing plus `Clear()` at
   the setup-ending gesture (BgQuiz), or always-mounted plus `Clear()` in

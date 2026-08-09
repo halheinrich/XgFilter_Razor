@@ -81,16 +81,15 @@
 @code {
     /// <summary>
     /// The host's applied-filter holder, mediated by this component: a commit
-    /// (Apply / Clear filters) <see cref="AppliedFilter.Set"/>s it stamped
-    /// with <see cref="Source"/>; an uncommitted-edits report
+    /// (Apply / Clear filters) <see cref="AppliedFilter.Set"/>s it keyed to
+    /// <see cref="Source"/>; an uncommitted-edits report
     /// <see cref="AppliedFilter.Clear"/>s it; a clean re-affirm re-Sets it. A
     /// <em>parameter</em>, not internal state, by necessity: the host's
     /// start/run gates must survive whatever navigation the host allows, and
     /// only a host-registered holder outlives this component. Hosts read
-    /// their gates from the holder (<see cref="AppliedFilter.IsApplied"/>,
-    /// <see cref="AppliedFilter.WasAppliedFor"/>) and re-render off the
-    /// events below. Required: an unmediated holder is a gate that never
-    /// moves.
+    /// their gates from the holder (<see cref="AppliedFilter.ConfigFor"/>
+    /// against their own current token) and re-render off the events below.
+    /// Required: an unmediated holder is a gate that never moves.
     /// <para>
     /// It is also read, once, at this component's first render: when it
     /// already carries a config applied for the current <see cref="Source"/>,
@@ -108,8 +107,8 @@
     /// The host's token for the current source, or <see langword="null"/>
     /// while there is none. <b>The source-change rule is this component's</b>:
     /// when the bound token changes (against the token seen at mount), the
-    /// setup ends — the holder's config is cleared (its source stamp expires
-    /// by token inequality), the panel forget-commits so Apply re-arms and
+    /// setup ends — the holder is cleared, the panel forget-commits so Apply
+    /// re-arms and
     /// re-reports through the normal path, the save-refusal notice clears,
     /// and the saved-filters context reloads through the seam (or resets, on
     /// a change to <see langword="null"/>). The first parameters-set
@@ -118,10 +117,11 @@
     /// already-applied holder untouched and the host's gate armed. While
     /// <see langword="null"/>, applies are not recorded on the holder.
     /// <para>
-    /// This token is also the reconcile's guard: the first render seeds the
+    /// This token is also the reconcile's key: the first render seeds the
     /// panel's committed config from <see cref="AppliedFilter"/> only while
-    /// this token is non-null and the holder's stamp matches it, so a config
-    /// applied against some other source is never adopted as this one's.
+    /// this token is non-null and the holder carries a config keyed to it, so
+    /// a config applied against some other source is never adopted as this
+    /// one's.
     /// </para>
     /// </summary>
     [Parameter]
@@ -268,17 +268,16 @@
     // already agrees, so there is nothing to tell the host — and a raise here
     // would break the ruled mount pin (initialize, never choreograph).
     //
-    // Guarded on the source stamp, not merely on a config being present: the
-    // holder's stamp survives Clear by contract, so "some config is applied"
-    // and "it was applied to *this* source" are separate questions and both
-    // must answer yes.
+    // Asked source-relatively, the only way the holder answers: ConfigFor
+    // yields a config exactly when one is applied *and* it belongs to this
+    // Source, so a config applied against some other source reads as nothing
+    // applied and the seed correctly declines.
     protected override Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender
             && _filterPanel is { } panel
             && Source is { } source
-            && AppliedFilter.Config is { } applied
-            && AppliedFilter.WasAppliedFor(source))
+            && AppliedFilter.ConfigFor(source) is { } applied)
         {
             panel.SeedCommitted(applied);
         }
@@ -287,11 +286,11 @@
     }
 
     // The source changed: nothing selected against the previous source may
-    // stay in force. Clear the holder's config (the stamp expires by token
-    // inequality — no reset to call, none to forget), re-arm Apply on the
-    // still-mounted panel (which re-reports null through the normal event
-    // path, correcting the host's gate), and drop any refusal notice posed
-    // against the outgoing context.
+    // stay in force. Clear the holder (the applied state drops entirely — no
+    // residue survives a setup's end), re-arm Apply on the still-mounted
+    // panel (which re-reports null through the normal event path, correcting
+    // the host's gate), and drop any refusal notice posed against the
+    // outgoing context.
     private void EndSetup()
     {
         AppliedFilter.Clear();
@@ -311,11 +310,11 @@
 
     private async Task HandleFilterConfigChanged(FilterConfig cfg)
     {
-        // Record the deliberate applied state before the host hears about it:
-        // "a commit applies the filter" must not depend on the re-affirming
-        // report that follows. With no source there is nothing to apply
-        // against, so the holder stays untouched (the host still gets the
-        // event verbatim).
+        // Record the deliberate applied state — keyed to the source it was
+        // applied against — before the host hears about it: "a commit applies
+        // the filter" must not depend on the re-affirming report that
+        // follows. With no source there is nothing to apply against, so the
+        // holder stays untouched (the host still gets the event verbatim).
         if (Source is { } source)
         {
             AppliedFilter.Set(cfg, source);

@@ -125,9 +125,7 @@ public class FilterSurfaceTests : BunitContext
 
         RenderSurface(TokenA, StorageWith(("Race", new FilterConfig())));
 
-        Assert.True(_holder.IsApplied);
-        Assert.Same(appliedConfig, _holder.Config);
-        Assert.True(_holder.WasAppliedFor(TokenA));
+        Assert.Same(appliedConfig, _holder.ConfigFor(TokenA));
         Assert.Empty(_reports);
         Assert.Empty(_committed);
     }
@@ -135,8 +133,8 @@ public class FilterSurfaceTests : BunitContext
     // ── The first-mount reconcile (#82) ─────────────────────────────────────
 
     // The navigate-back case the reconcile exists for: the holder outlived the
-    // previous mount still carrying the applied config and this source's
-    // stamp, and the panel restores exactly that selection from storage. The
+    // previous mount still carrying the config applied for this source, and
+    // the panel restores exactly that selection from storage. The
     // fresh panel has committed nothing of its own, so without the reconcile
     // Apply re-arms with nothing to do. Seeding is silent — a reconcile
     // derives from the holder, which already agrees, so there is no news; the
@@ -154,7 +152,7 @@ public class FilterSurfaceTests : BunitContext
         Assert.Contains("already applied", cut.Find("#applyDisabledReason").TextContent);
         Assert.Empty(_reports);
         Assert.Empty(_committed);
-        Assert.Same(applied, _holder.Config);
+        Assert.Same(applied, _holder.ConfigFor(TokenA));
     }
 
     // The fresh-mount posture the reconcile must not eat, and the test that
@@ -169,16 +167,16 @@ public class FilterSurfaceTests : BunitContext
 
         var cut = RenderSurface(TokenA, new FakeFilterDocumentStorage());
 
-        Assert.False(_holder.IsApplied);
+        Assert.Null(_holder.ConfigFor(TokenA));
         cut.WaitForAssertion(() => Assert.Equal("0.1", ErrorMin(cut).GetAttribute("value")));
         Assert.False(Apply(cut).HasAttribute("disabled"));
     }
 
-    // Guarded on the stamp, not merely on a config being present: a holder
-    // carrying a config applied against another source has said nothing about
-    // this one, so the reconcile leaves Apply armed.
+    // The keyed lookup answers source-relatively: a holder carrying a config
+    // applied against another source has said nothing about this one, so the
+    // reconcile leaves Apply armed.
     [Fact]
-    public void Mount_HolderStampedForAnotherSource_DoesNotSeed_ApplyStaysEnabled()
+    public void Mount_HolderKeyedToAnotherSource_DoesNotSeed_ApplyStaysEnabled()
     {
         var applied = new FilterConfig { ErrorMin = 0.1 };
         _holder.Set(applied, TokenB);
@@ -193,35 +191,35 @@ public class FilterSurfaceTests : BunitContext
     // ── Applied-state mediation ─────────────────────────────────────────────
 
     [Fact]
-    public async Task Apply_StampsHolderWithSource_AndRaisesBothEvents()
+    public async Task Apply_KeysHolderToSource_AndRaisesBothEvents()
     {
         var cut = RenderSurface(TokenA, new FakeFilterDocumentStorage());
 
         ErrorMin(cut).Input("0.05");
         await Apply(cut).ClickAsync(new());
 
-        Assert.True(_holder.IsApplied);
-        Assert.True(_holder.WasAppliedFor(TokenA));
-        Assert.False(_holder.WasAppliedFor(TokenB));
         var committed = Assert.Single(_committed);
-        Assert.Same(committed, _holder.Config);
+        Assert.Same(committed, _holder.ConfigFor(TokenA));
+        Assert.Null(_holder.ConfigFor(TokenB));
         // The edit's null report, then the commit's clean re-affirm.
         Assert.Equal(2, _reports.Count);
         Assert.Null(_reports[0]);
         Assert.Same(committed, _reports[1]);
     }
 
+    // An edit drops the applied state entirely — nothing survives it for any
+    // source (halheinrich/backgammon#92, spec §3: only present ownership
+    // exists; no behaviour may answer from filter history).
     [Fact]
-    public async Task EditAfterApply_ClearsHolderConfig_KeepsStamp_ReportsNull()
+    public async Task EditAfterApply_DropsTheAppliedState_ReportsNull()
     {
         var cut = RenderSurface(TokenA, new FakeFilterDocumentStorage());
         await Apply(cut).ClickAsync(new());
-        Assert.True(_holder.IsApplied);
+        Assert.NotNull(_holder.ConfigFor(TokenA));
 
         ErrorMin(cut).Input("0.05");
 
-        Assert.False(_holder.IsApplied);
-        Assert.True(_holder.WasAppliedFor(TokenA)); // the stamp survives the edit
+        Assert.Null(_holder.ConfigFor(TokenA));
         Assert.Null(_reports[^1]);
     }
 
@@ -232,7 +230,7 @@ public class FilterSurfaceTests : BunitContext
 
         await Apply(cut).ClickAsync(new());
 
-        Assert.False(_holder.IsApplied);
+        Assert.Null(_holder.ConfigFor(TokenA));
         Assert.Single(_committed);
         Assert.Single(_reports);
     }
@@ -251,12 +249,10 @@ public class FilterSurfaceTests : BunitContext
 
         cut.Render(parameters => parameters.Add(p => p.Source, TokenB));
 
-        // The holder's config is cleared; the stamp expires by token
-        // inequality, not by a reset — WasAppliedFor(TokenA) still answers
-        // for the old source, and the new source has never been filtered.
-        Assert.False(_holder.IsApplied);
-        Assert.True(_holder.WasAppliedFor(TokenA));
-        Assert.False(_holder.WasAppliedFor(TokenB));
+        // The setup ended: the applied state dropped entirely — nothing stays
+        // in force for the old source or the new one.
+        Assert.Null(_holder.ConfigFor(TokenA));
+        Assert.Null(_holder.ConfigFor(TokenB));
         // Apply re-armed on the still-mounted panel, and the host was told
         // through the normal path.
         Assert.False(Apply(cut).HasAttribute("disabled"));
@@ -290,9 +286,9 @@ public class FilterSurfaceTests : BunitContext
         await ClickRowButtonAsync(cut, "Race", "Load");
 
         Assert.Equal("0.25", ErrorMin(cut).GetAttribute("value"));
-        Assert.Empty(_committed);           // staged, not committed
-        Assert.False(_holder.IsApplied);    // the holder only moves on commit
-        Assert.Null(_reports[^1]);          // staging reported as uncommitted
+        Assert.Empty(_committed);                 // staged, not committed
+        Assert.Null(_holder.ConfigFor(TokenA));   // the holder only moves on commit
+        Assert.Null(_reports[^1]);                // staging reported as uncommitted
     }
 
     [Fact]

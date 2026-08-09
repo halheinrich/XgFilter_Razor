@@ -8,27 +8,24 @@ public class AppliedFilterTests
     private static readonly FilterSourceToken SourceB = FilterSourceToken.FromGeneration(2);
 
     [Fact]
-    public void FreshInstance_NothingApplied_ForAnySource()
+    public void FreshInstance_NothingAppliedForAnySource()
     {
         var holder = new AppliedFilter();
 
-        Assert.False(holder.IsApplied);
-        Assert.Null(holder.Config);
-        Assert.False(holder.WasAppliedFor(SourceA));
+        Assert.Null(holder.ConfigFor(SourceA));
+        Assert.Null(holder.ConfigFor(SourceB));
     }
 
     [Fact]
-    public void Set_RecordsConfig_AndStampsTheSource()
+    public void Set_KeysTheConfigToItsSource()
     {
         var holder = new AppliedFilter();
         var config = new FilterConfig();
 
         holder.Set(config, SourceA);
 
-        Assert.True(holder.IsApplied);
-        Assert.Same(config, holder.Config);
-        Assert.True(holder.WasAppliedFor(SourceA));
-        Assert.False(holder.WasAppliedFor(SourceB));
+        Assert.Same(config, holder.ConfigFor(SourceA));
+        Assert.Null(holder.ConfigFor(SourceB));
     }
 
     [Fact]
@@ -39,32 +36,32 @@ public class AppliedFilterTests
         Assert.Throws<ArgumentNullException>(() => holder.Set(null!, SourceA));
     }
 
-    // The two-lifetime contract: an edit clears the *config* (the start-like
-    // gate re-closes) but the source stamp survives — "this source has been
-    // filtered at least once" is not un-answered by a half-typed edit, so
-    // gestures gated on the stamp (BgQuiz's Apply Mix) stay open.
+    // The one-lifetime contract (halheinrich/backgammon#92): Clear drops the
+    // applied state entirely — config and source key together, no residue for
+    // any source. This pins the spec's §3 ruling that nothing may answer from
+    // filter history: only present ownership exists, and Clear ends it.
     [Fact]
-    public void Clear_DropsConfig_ButTheSourceStampSurvives()
+    public void Clear_DropsTheAppliedState_NothingSurvivesForAnySource()
     {
         var holder = new AppliedFilter();
         holder.Set(new FilterConfig(), SourceA);
 
         holder.Clear();
 
-        Assert.False(holder.IsApplied);
-        Assert.Null(holder.Config);
-        Assert.True(holder.WasAppliedFor(SourceA));
+        Assert.Null(holder.ConfigFor(SourceA));
+        Assert.Null(holder.ConfigFor(SourceB));
     }
 
     [Fact]
-    public void ReSet_ForANewSource_MovesTheStamp()
+    public void ReSet_ForANewSource_MovesTheKey()
     {
         var holder = new AppliedFilter();
         holder.Set(new FilterConfig(), SourceA);
+        var reapplied = new FilterConfig();
 
-        holder.Set(new FilterConfig(), SourceB);
+        holder.Set(reapplied, SourceB);
 
-        Assert.True(holder.WasAppliedFor(SourceB));
-        Assert.False(holder.WasAppliedFor(SourceA));
+        Assert.Same(reapplied, holder.ConfigFor(SourceB));
+        Assert.Null(holder.ConfigFor(SourceA));
     }
 }
