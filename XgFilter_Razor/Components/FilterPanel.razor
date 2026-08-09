@@ -39,6 +39,23 @@
     </div>
     <div class="card-body">
 
+        @* ── Restored-selection notice (§4 legibility) ───────────────────────
+           A reload ends the setup: selections are restored, applied-ness is
+           not, Apply re-arms — correct by rule, but indistinguishable from a
+           bug unless the screen says what happened. Shown while the
+           app-scoped RestoreNotice is armed (this boot's restore staged a
+           stored selection and no gesture has superseded it); it survives
+           navigation with the state it describes and dies at the first
+           buffer-affecting gesture or commit. A polite outcome, not an
+           error: role="status", the LoadFailed idiom. *@
+        @if (RestoreNotice.IsVisible)
+        {
+            <div id="filterRestoredNotice" class="alert alert-info mb-3" role="status">
+                This filter was restored from a previous session — it isn't in
+                effect until you press <strong>Apply Filter</strong>.
+            </div>
+        }
+
         @* ── Error range ──────────────────────────────────────────────────────
            First and always visible: dogfooding showed it is the panel's
            most-used control, so it never rides behind the disclosure. *@
@@ -422,6 +439,19 @@
     [Parameter, EditorRequired] public EventCallback<FilterConfig?> OnAppliedStateChanged { get; set; }
 
     /// <summary>
+    /// The restored-filter notice's state (see <see cref="FilterRestoreNotice"/>),
+    /// armed by this panel's first-render restore when it stages a stored
+    /// selection and dismissed at the first buffer-affecting gesture or
+    /// commit. The composite forwards the host's app-scoped instance — the
+    /// lifetime that lets the notice survive navigation and die on reload by
+    /// construction. The default is a fresh, panel-scoped instance so the
+    /// panel is coherent in isolation (tests render it bare); only the
+    /// composite's forwarding makes it §4-correct across remounts, and the
+    /// composite's trap pin fails if that forwarding is ever dropped.
+    /// </summary>
+    [Parameter] public FilterRestoreNotice RestoreNotice { get; set; } = new();
+
+    /// <summary>
     /// Single <c>localStorage</c> key holding the whole filter state as one serialized
     /// <see cref="FilterConfig"/> blob. The lib owns the JSON shape (<c>ToJson</c> /
     /// <c>TryFromJson</c>); this component never touches a JSON serializer directly.
@@ -589,8 +619,17 @@
         if (_externalConfigLoaded) return;
 
         // Tolerant restore: a missing key, the literal null token, or corrupt
-        // JSON all yield a fresh default config — no try/catch here.
-        FilterConfig.TryFromJson(stored, out var cfg);
+        // JSON all yield a fresh default config — no try/catch here. Only a
+        // genuine parse arms the restored-selection notice: nothing stored
+        // (or nothing readable) means nothing was restored, and the notice
+        // must not claim otherwise over a defaults screen. An empty stored
+        // config does arm it — the empty filter is still a filter and still
+        // a choice the previous session made.
+        if (FilterConfig.TryFromJson(stored, out var cfg))
+        {
+            RestoreNotice.Arm();
+        }
+
         HydrateFrom(cfg);
 
         StateHasChanged();
@@ -678,8 +717,14 @@
     /// </summary>
     internal void ForgetCommitted()
     {
+        // RaiseAppliedState, not ReportAppliedState: this is source-change
+        // choreography, not a user gesture, so it must not dismiss the
+        // restored-selection notice — a host whose source change crosses an
+        // unmount runs no panel code at all, and the notice's fate cannot
+        // differ by host mechanics. The restored selections survive a source
+        // change untouched, so the notice's statement still holds.
         _committedConfig = null;
-        ReportAppliedState();
+        RaiseAppliedState();
         StateHasChanged();
     }
 
@@ -755,8 +800,20 @@
 
     // Report what the buffers now equal, after a gesture that touched them.
     // Fire-and-forget like the edit handlers that call it: the panel has nothing
-    // to await on the consumer's reaction.
-    private void ReportAppliedState() => OnAppliedStateChanged.InvokeAsync(MatchedCommittedConfig);
+    // to await on the consumer's reaction. Every caller is a buffer-affecting
+    // gesture — a control edit or LoadConfig staging — so this is also where
+    // the restored selection stops being "the restored selection" and the
+    // notice dies. Choreography that raises the event without a gesture
+    // (ForgetCommitted) calls RaiseAppliedState directly.
+    private void ReportAppliedState()
+    {
+        RestoreNotice.Dismiss();
+        RaiseAppliedState();
+    }
+
+    // The raw raise, shared by the gesture path above and non-gesture
+    // choreography.
+    private void RaiseAppliedState() => OnAppliedStateChanged.InvokeAsync(MatchedCommittedConfig);
 
     // Guarded as well as visually disabled, matching SavedFiltersPanel's
     // handler-side gates: programmatic event dispatch ignores the disabled
@@ -778,9 +835,13 @@
     }
 
     // The single commit point — Apply and Clear filters both land here, and it
-    // is the only place _committedConfig moves.
+    // is the only place _committedConfig moves. A commit is the other gesture
+    // that makes the selection the user's own, so the restored-selection
+    // notice dies here too (Apply is additionally the very consent the
+    // notice asks for).
     private async Task PersistAndRaiseAsync(FilterConfig cfg)
     {
+        RestoreNotice.Dismiss();
         _committedConfig = cfg;
         await JS.InvokeVoidAsync("localStorage.setItem", ConfigKey, cfg.ToJson());
         await OnFilterConfigChanged.InvokeAsync(cfg);

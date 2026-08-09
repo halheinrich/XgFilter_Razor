@@ -54,6 +54,7 @@ XgFilter_Razor/
     FilterHelp.razor                 — producer-owned facet + storage documentation
   Model/
     AppliedFilter.cs                 — applied-config holder, keyed to its source
+    FilterRestoreNotice.cs           — restored-selection notice state, app-scoped
     FilterSourceToken.cs             — opaque host-minted source identity
     IFilterDocumentStorage.cs        — host storage-adapter seam
     FilterStorageException.cs        — the seam's one failure type
@@ -94,7 +95,9 @@ mediation onto the host's `AppliedFilter` holder, the saved-filters degrade
 notices, and the source-change rule. Hosts bind the holder (host-registered,
 at whatever lifetime their start-gate must survive — a *parameter* by
 necessity, since the composite dies with its page while BgQuiz's gates must
-survive navigation), a `FilterSourceToken?` for the current source, an
+survive navigation), the `FilterRestoreNotice` (host-registered, app-scoped
+— the restored-selection notice's state; see the panel section and
+Pitfalls), a `FilterSourceToken?` for the current source, an
 `IFilterDocumentStorage?` adapter (null = no saved-filters context), the
 host's `CanPersist` capability ruling with its host-specific
 `PersistDisabledReason` wording, and the two panel-shaped events
@@ -290,6 +293,24 @@ once on first render — the disclosure choice, then the config — and calls
 user toggle or a host `LoadConfig` landing mid-interop is never
 clobbered.
 
+**The restored-selection notice (§4's legibility law).** A reload ends the
+setup: the config restore stages the previous session's selection with
+nothing applied and Apply re-armed — correct by rule, and exactly what a
+defect would look like, so the panel says what happened
+(`#filterRestoredNotice`: restored from a previous session, not in effect
+until Apply). The state behind it is the app-scoped `FilterRestoreNotice`
+(host-registered, forwarded through the composite): the panel *arms* it
+when the first-render restore genuinely parses a stored config (nothing
+stored or unreadable = nothing restored = no claim; an *empty* stored
+config does arm it — the empty filter is still a choice), and *dismisses*
+it at the first gesture that makes the selection the user's own — any
+buffer-affecting gesture (edit, `LoadConfig` staging, Clear filters) or a
+commit. Dismissal is one-way for the app lifetime, which is what makes a
+remount within a setup quiet after an edit while an untouched remount
+re-shows the same notice (navigation changes nothing, in both directions).
+Disclosure toggles are navigation and keep it; `ForgetCommitted` is
+choreography and keeps it (see Pitfalls).
+
 ### `SavedFiltersPanel` component
 
 A persistence-agnostic pick list over `XgFilter_Lib`'s
@@ -375,6 +396,15 @@ their gates must survive (BgQuiz: Scoped), and `FilterSurface` drives them.
   must `Clear()` it, re-gating Start-like actions, and `Clear()` drops
   the pair entirely — no residue survives. In-memory only, never
   persisted.
+- **`FilterRestoreNotice`** — app-scoped state for the restored-selection
+  notice (§4): armed by the panel's first-render restore of a stored
+  selection, dismissed one-way at the first buffer-affecting gesture or
+  commit. The *instance lifetime* is the trigger fact: a reload constructs
+  a fresh one, a remount within a setup reuses the boot's — which is what
+  the mount-time condition alone cannot distinguish (see Pitfalls). Hosts
+  register and bind it, nothing more: the movers (`Arm`/`Dismiss`) and the
+  read (`IsVisible`) are producer-internal. In-memory only, never
+  persisted.
 - **`FilterSourceToken`** — opaque, equatable identity of "which source",
   minted by the host via `FromGeneration(int)` / `FromPath(string)` and
   only ever *compared* by the producer. Value equality over the wrapped
@@ -449,6 +479,10 @@ Parameters:
   `Source`, uncommitted-edit reports `Clear` it, clean re-affirms re-`Set`
   it. Hosts read their gates from the holder (`ConfigFor` against their
   own current token) and re-render off the events below.
+- `FilterRestoreNotice RestoreNotice` `[EditorRequired]` — the host's
+  app-scoped notice-state instance, forwarded to the inner panel, which
+  owns arming and dismissal. Hosts register and bind it only — its members
+  are producer-internal, so no host can move or read it.
 - `FilterSourceToken? Source` — the current source's token; null = none
   (applies are not recorded). Changing it triggers the composite-owned
   source-change rule; the first parameters-set only initializes and loads.
@@ -530,6 +564,11 @@ Parameters (all callbacks `[EditorRequired]`, as is `Filters`):
   `void Set(FilterConfig, FilterSourceToken)`, `void Clear()`. The
   surface is source-relative only — no bare `Config` / `IsApplied` — and
   `Clear()` drops the applied state entirely.
+- `FilterRestoreNotice` — public type, deliberately opaque to hosts: a
+  public parameterless ctor for DI registration and nothing else callable
+  from outside the producer (`Arm` / `Dismiss` / `IsVisible` are
+  `internal`; tests reach them via `InternalsVisibleTo`). A host's whole
+  contract is register at app scope, bind to `FilterSurface`.
 - `FilterSourceToken` — `readonly record struct`; factories
   `FromGeneration(int)` / `FromPath(string)`; value-equal, ordinal.
 - `SavedFiltersStore` — ctor `(IFilterDocumentStorage? storage)`;
@@ -913,6 +952,38 @@ the rendered names to those constants.
   the mount-time restore (Extract) — neither host gets to skip it. Leave
   the source-change rule wired in gated hosts regardless: it is harmless
   defence in depth if render timing ever changes.
+- **The restored-selection notice cannot be derived at mount time — its
+  app-scoped instance IS the trigger.** The tempting condition — "a stored
+  selection was restored AND nothing is applied for the current source" —
+  is also true of a navigate-back with unapplied edits: same setup, the
+  panel remounts, restores, and finds the holder empty (the edit cleared
+  it). §1 rules that navigation changes nothing, including no new notice,
+  so that condition misfires exactly where the user is mid-work. The
+  distinguishing fact is app-boot identity, and it is carried by lifetime,
+  not by a recorded flag: a reload constructs a fresh
+  `FilterRestoreNotice`, a remount reuses the boot's already-dismissed
+  one. Three properties are load-bearing:
+  - **Dismissal is one-way per app lifetime and rides on user gestures
+    only** — buffer edits, `LoadConfig` staging, and commits dismiss;
+    disclosure toggles (navigation) and `ForgetCommitted` (source-change
+    choreography) do not. The `ForgetCommitted` half matters for host
+    symmetry: a gated host's source change crosses an unmount and runs no
+    panel code, so if the in-place rule dismissed, the notice's fate would
+    differ by host mechanics. Hence the panel's
+    `ReportAppliedState` (gesture: dismiss + raise) /
+    `RaiseAppliedState` (raw raise) split — route new callers
+    deliberately.
+  - **This is not a history fact.** §3 bans behaviour from depending on
+    what has ever happened; this records a *pending* present-tense state
+    (this boot's restored selection, not yet the user's own), moves only
+    toward death within a boot, resets solely by instance death, and
+    gates nothing but its own copy. No behaviour may branch on it.
+  - **The composite's forwarding is load-bearing.** `FilterPanel`'s
+    parameter defaults to a fresh panel-scoped instance so the panel is
+    coherent bare (tests); only the forwarded app-scoped instance makes
+    remounts quiet after an edit. Dropping the forwarding is silent at
+    compile time and pinned by
+    `Remount_WithinSetup_AfterAnEdit_DoesNotResurrectTheNotice`.
 - **The WriteFailed copy promises page-lifetime retention only.** The
   composite-owned store lives and dies with the page, so a failed edit
   does not survive navigation — "kept for this session" would over-promise

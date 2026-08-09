@@ -20,10 +20,13 @@ public class FilterSurfaceTests : BunitContext
     private static readonly FilterSourceToken TokenA = FilterSourceToken.FromGeneration(1);
     private static readonly FilterSourceToken TokenB = FilterSourceToken.FromGeneration(2);
 
-    // Host-side captures: the holder the composite mediates, and the two
-    // re-raised event channels (lists — per-gesture counts are part of the
-    // contract).
+    // Host-side captures: the holder and restore notice the composite
+    // mediates (both app-scoped in a real host — one instance across every
+    // render in a test, like one instance across every mount in an app), and
+    // the two re-raised event channels (lists — per-gesture counts are part
+    // of the contract).
     private readonly AppliedFilter _holder = new();
+    private readonly FilterRestoreNotice _notice = new();
     private readonly List<FilterConfig> _committed = [];
     private readonly List<FilterConfig?> _reports = [];
 
@@ -34,6 +37,7 @@ public class FilterSurfaceTests : BunitContext
         string? persistDisabledReason = null)
         => Render<FilterSurface>(parameters => parameters
             .Add(p => p.AppliedFilter, _holder)
+            .Add(p => p.RestoreNotice, _notice)
             .Add(p => p.Source, source)
             .Add(p => p.Storage, storage)
             .Add(p => p.CanPersist, canPersist)
@@ -142,8 +146,13 @@ public class FilterSurfaceTests : BunitContext
     [Fact]
     public void Mount_HolderAppliedForThisSource_SeedsCommitted_ApplyDisabled_RaisesNothing()
     {
+        // Navigate-back after Apply: the holder still carries the applied
+        // config, and the Apply that set it also spent the restore notice —
+        // an applied holder and a pending notice cannot coexist in a real
+        // boot, so the simulated history says so.
         var applied = new FilterConfig { ErrorMin = 0.1 };
         _holder.Set(applied, TokenA);
+        _notice.Dismiss();
         StoredConfig(applied);
 
         var cut = RenderSurface(TokenA, new FakeFilterDocumentStorage());
@@ -186,6 +195,128 @@ public class FilterSurfaceTests : BunitContext
 
         cut.WaitForAssertion(() => Assert.Equal("0.1", ErrorMin(cut).GetAttribute("value")));
         Assert.False(Apply(cut).HasAttribute("disabled"));
+    }
+
+    // ── The restored-selection notice (§4) ──────────────────────────────────
+    //
+    // A reload ends the setup: selections restored, applied-ness dropped,
+    // Apply re-armed — correct by rule, indistinguishable from a bug unless
+    // the screen says so. The notice's app-scoped state (one _notice per
+    // test class, like one per app boot) is what distinguishes a fresh boot
+    // from a remount within a setup; these pins drive both sides of that
+    // line and the notice's death at the first owning gesture.
+
+    [Fact]
+    public void FreshBoot_RestoredSelection_ShowsTheNotice_ApplyStaysArmed()
+    {
+        StoredConfig(new FilterConfig { ErrorMin = 0.1 });
+
+        var cut = RenderSurface(TokenA, new FakeFilterDocumentStorage());
+
+        cut.WaitForAssertion(() => Assert.Contains(
+            "previous session", cut.Find("#filterRestoredNotice").TextContent));
+        Assert.False(Apply(cut).HasAttribute("disabled"));
+    }
+
+    [Fact]
+    public void Mount_NothingStored_NoNotice()
+    {
+        // Nothing in storage (the loose JS default): nothing was restored,
+        // so the notice must not claim otherwise over a defaults screen.
+        var cut = RenderSurface(TokenA, new FakeFilterDocumentStorage());
+
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("#filterRestoredNotice")));
+    }
+
+    [Fact]
+    public void Notice_DiesAtTheFirstEdit()
+    {
+        StoredConfig(new FilterConfig { ErrorMin = 0.1 });
+        var cut = RenderSurface(TokenA, new FakeFilterDocumentStorage());
+        cut.WaitForAssertion(() => cut.Find("#filterRestoredNotice"));
+
+        ErrorMin(cut).Input("0.2");
+
+        Assert.Empty(cut.FindAll("#filterRestoredNotice"));
+    }
+
+    [Fact]
+    public async Task Notice_DiesAtApply()
+    {
+        StoredConfig(new FilterConfig { ErrorMin = 0.1 });
+        var cut = RenderSurface(TokenA, new FakeFilterDocumentStorage());
+        cut.WaitForAssertion(() => cut.Find("#filterRestoredNotice"));
+
+        await Apply(cut).ClickAsync(new());
+
+        Assert.Empty(cut.FindAll("#filterRestoredNotice"));
+    }
+
+    [Fact]
+    public void Notice_SurvivesTheDisclosureToggle()
+    {
+        // Toggling the disclosure is navigation, not an edit — the restored
+        // selection is still not the user's own, so the notice holds.
+        StoredConfig(new FilterConfig { ErrorMin = 0.1 });
+        var cut = RenderSurface(TokenA, new FakeFilterDocumentStorage());
+        cut.WaitForAssertion(() => cut.Find("#filterRestoredNotice"));
+
+        cut.Find("#moreFiltersToggle").Click();
+
+        Assert.NotNull(cut.Find("#filterRestoredNotice"));
+    }
+
+    // The trap the app-scoped state exists for: navigate-back with unapplied
+    // edits looks exactly like a fresh boot at mount time — same restore,
+    // same empty holder — and §1 rules that navigation changes nothing,
+    // including no new notice. The edit spent this boot's notice, so the
+    // remount's restore must not resurrect it.
+    [Fact]
+    public void Remount_WithinSetup_AfterAnEdit_DoesNotResurrectTheNotice()
+    {
+        StoredConfig(new FilterConfig { ErrorMin = 0.1 });
+        var first = RenderSurface(TokenA, new FakeFilterDocumentStorage());
+        first.WaitForAssertion(() => first.Find("#filterRestoredNotice"));
+        ErrorMin(first).Input("0.2");
+
+        var second = RenderSurface(TokenA, new FakeFilterDocumentStorage());
+
+        second.WaitForAssertion(() =>
+            Assert.Equal("0.1", ErrorMin(second).GetAttribute("value")));
+        Assert.Empty(second.FindAll("#filterRestoredNotice"));
+    }
+
+    // The other side of that line: navigation changes nothing, so a remount
+    // over a still-untouched restored selection re-shows the same notice.
+    [Fact]
+    public void Remount_WithinSetup_Untouched_KeepsTheNotice()
+    {
+        StoredConfig(new FilterConfig { ErrorMin = 0.1 });
+        var first = RenderSurface(TokenA, new FakeFilterDocumentStorage());
+        first.WaitForAssertion(() => first.Find("#filterRestoredNotice"));
+
+        var second = RenderSurface(TokenA, new FakeFilterDocumentStorage());
+
+        second.WaitForAssertion(() => second.Find("#filterRestoredNotice"));
+    }
+
+    // A source change is choreography, not a user gesture: ForgetCommitted
+    // re-arms Apply without dismissing the notice, whose statement — these
+    // selections came from a previous session and are not in effect — is
+    // still true against the new source. (A gated host's source change
+    // crosses an unmount and runs no panel code at all; the in-place rule
+    // must not treat the notice differently.)
+    [Fact]
+    public void Notice_SurvivesAnInPlaceSourceChange()
+    {
+        StoredConfig(new FilterConfig { ErrorMin = 0.1 });
+        var cut = RenderSurface(TokenA, new FakeFilterDocumentStorage());
+        cut.WaitForAssertion(() => cut.Find("#filterRestoredNotice"));
+
+        cut.Render(parameters => parameters.Add(p => p.Source, TokenB));
+
+        Assert.NotNull(cut.Find("#filterRestoredNotice"));
+        Assert.Null(_reports[^1]);
     }
 
     // ── Applied-state mediation ─────────────────────────────────────────────

@@ -11,6 +11,9 @@
 
    - the AppliedFilter holder (host-registered, at whatever lifetime its
      start-gate must survive),
+   - the FilterRestoreNotice (host-registered, app-scoped: the state behind
+     the restored-from-a-previous-session notice, which must survive
+     navigation and die on reload),
    - a FilterSourceToken? for "which source is current" (told, never asks:
      this component never sees pickers, paths, or capabilities — the host
      mints tokens and the composite only compares them),
@@ -75,6 +78,7 @@
 }
 
 <FilterPanel @ref="_filterPanel"
+             RestoreNotice="RestoreNotice"
              OnFilterConfigChanged="HandleFilterConfigChanged"
              OnAppliedStateChanged="HandleAppliedStateChanged" />
 
@@ -126,6 +130,25 @@
     /// </summary>
     [Parameter]
     public FilterSourceToken? Source { get; set; }
+
+    /// <summary>
+    /// The host's restored-filter-notice state, forwarded to the inner panel
+    /// which arms it (first-render restore of a stored selection) and
+    /// dismisses it (first buffer-affecting gesture or commit). A
+    /// <em>parameter</em> for <see cref="AppliedFilter"/>'s reason: the
+    /// notice must survive whatever navigation the host allows and die on a
+    /// reload, and only a host-registered, app-scoped instance has that
+    /// lifetime by construction — a fresh instance per boot is the very fact
+    /// that distinguishes a reload from a remount within a setup. Hosts
+    /// register it and bind it; they never read or move it (the movers are
+    /// producer-internal), so the notice behaves identically in every host.
+    /// Required: an unbound notice would silently fall back to the panel's
+    /// own per-mount instance, which re-announces the restore on every
+    /// navigate-back — exactly the misfire the app-scoped lifetime exists to
+    /// prevent.
+    /// </summary>
+    [Parameter, EditorRequired]
+    public FilterRestoreNotice RestoreNotice { get; set; } = default!;
 
     /// <summary>
     /// The host's storage adapter for the saved-filters document, or
