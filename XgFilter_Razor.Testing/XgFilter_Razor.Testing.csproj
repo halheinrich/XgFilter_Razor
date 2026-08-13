@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Framework, nullable, implicit usings, warnings-as-errors, and doc-file
+       generation are repo-wide policy — see ..\Directory.Build.props. This
+       assembly keeps the doc-file default rather than opting out as the test
+       project does: it ships a public surface that host suites compile
+       against, so its members carry XML docs from birth like any other.
+       Only per-project decisions live here. -->
+  <PropertyGroup>
+    <!-- Test support, never product. This assembly exists so host test suites
+         can state a producer fact ("a stored selection exists") without
+         repeating a producer literal; it is not packed and never ships beside
+         the component library. Nothing in the app graph may reference it —
+         only test projects. -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- bUnit is a first-class dependency here, not an accident of the test
+         stack: the thing being seeded IS a bUnit JSInterop fake. A seam that
+         avoided the reference would have to hand the storage key back to the
+         caller, which is precisely the coupling this assembly removes. -->
+    <PackageReference Include="bunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\XgFilter_Razor\XgFilter_Razor.csproj" />
+    <!-- Direct reference: this project compiles against FilterConfig, so the
+         dependency is declared rather than taken transitively through the
+         component library — same rule the test project follows for AngleSharp
+         (rationale in Directory.Packages.props). -->
+    <ProjectReference Include="..\..\XgFilter_Lib\XgFilter_Lib\XgFilter_Lib.csproj" />
+  </ItemGroup>
+
+</Project>

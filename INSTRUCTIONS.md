@@ -62,11 +62,15 @@ XgFilter_Razor/
     SavedFiltersStatus.cs            — saved-filters context condition
     SavedFiltersStore.cs             — saved-filters document lifecycle over the seam
   wwwroot/
+XgFilter_Razor.Testing/
+  XgFilter_Razor.Testing.csproj
+  FilterPanelTestState.cs            — stored-selection seeding for host test suites
 XgFilter_Razor.Tests/
   XgFilter_Razor.Tests.csproj
   AppliedFilterTests.cs              — holder source-keyed applied contract
   FakeFilterDocumentStorage.cs       — shared recording fake over the seam
   FilterPanelTests.cs                — bUnit tests for FilterPanel
+  FilterPanelTestStateTests.cs       — the seeding seam, pinned against a real render
   FilterSourceTokenTests.cs          — token equality rules
   FilterSurfaceTests.cs              — bUnit wire tests for the composite
   SavedFiltersPanelTests.cs          — bUnit tests for SavedFiltersPanel
@@ -466,6 +470,32 @@ bUnit + xUnit, targets .NET 10. `BunitContext` with
 `localStorage.getItem` calls return `default` (treated as "no persisted
 state").
 
+### Test-support assembly (`XgFilter_Razor.Testing`)
+
+Producer-owned arrangement helpers for **host** test suites, referenced by
+their test projects only — `IsPackable=false`, and no app-graph project
+may reference it. Today it holds one member:
+`FilterPanelTestState.SeedStoredSelection(BunitJSInterop, FilterConfig)`,
+which arranges "a previous visit left a stored selection behind".
+
+Why it exists: the panel's `localStorage` keys are deliberately not
+consumer surface, but a host test arranging navigate-back or reload
+genuinely needs that state, and the only way to get it was to repeat the
+key as a literal in the host's suite. Keeping the constant `internal`
+never prevented that dependency — it only made it untyped, so a
+producer-side rename would leave the literal behind and the host's test
+would keep passing for the wrong reason, arranging nothing and asserting
+the "no stored selection" path. The fact therefore moves to where it can
+be kept true: hosts state intent, the producer supplies mechanism, and
+the key never leaves this repo. This repo's own
+`FilterPanelTestStateTests` uses the seam exactly as a host does — never
+naming a key — so a rename that missed the seeder fails here.
+
+The bUnit dependency is first-class, not incidental: the thing being
+seeded *is* a bUnit JSInterop fake, and any seam avoiding the reference
+would have to hand the key back to the caller — the coupling the assembly
+exists to remove.
+
 ## Public API
 
 The consumer surface is `FilterSurface` + `FilterHelp` (namespace
@@ -606,7 +636,10 @@ storage-assurance section a host's data-ownership copy points at.
 public: the copy naming them lives here, in the producer, so a consumer
 never sees or depends on this panel's key names. Test-only
 `InternalsVisibleTo("XgFilter_Razor.Tests")` lets the wiring test pin
-the rendered names to those constants.
+the rendered names to those constants, and
+`InternalsVisibleTo("XgFilter_Razor.Testing")` lets the test-support
+assembly seed the config key on a host suite's behalf — both grants are
+producer-side, so neither widens what consumers can see.
 
 ## Pitfalls
 

@@ -15,6 +15,12 @@
          that copy to the constant needs the same access. Grants nothing to
          consumers — the keys stay invisible outside this repo by design. -->
     <InternalsVisibleTo Include="XgFilter_Razor.Tests" />
+    <!-- Producer-owned test support (XgFilter_Razor.Testing). It seeds the
+         stored selection for host suites from the same ConfigKey constant, so
+         the key stays invisible outside this repo while hosts stop repeating
+         it as a literal. Also producer-side: the grant does not widen what
+         consumers can see. -->
+    <InternalsVisibleTo Include="XgFilter_Razor.Testing" />
   </ItemGroup>
 
   <ItemGroup>
