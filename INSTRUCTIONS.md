@@ -408,10 +408,17 @@ their gates must survive (BgQuiz: Scoped), and `FilterSurface` drives them.
 - **`FilterSourceToken`** — opaque, equatable identity of "which source",
   minted by the host via `FromGeneration(int)` / `FromPath(string)` and
   only ever *compared* by the producer. Value equality over the wrapped
-  string, ordinal and case-sensitive — a host with case-insensitive
-  source identity normalizes before minting. Factory domains are
-  prefixed, so tokens from different factories never collide. "No source
-  yet" is `FilterSourceToken?`.
+  string, so each factory owns identity in its domain by owning what it
+  wraps: `FromPath` **normalizes the path itself** — upper-invariant
+  case-fold, trailing `\` / `/` insignificant — so a host passes the
+  spelling it holds and cannot mint a token that misses its own previous
+  visit's. The trim is hand-rolled rather than
+  `Path.TrimEndingDirectorySeparator` because this runs in WebAssembly,
+  where .NET's Unix path semantics do not recognize a backslash at all;
+  it also trims a root's separator, which is harmless for an identity
+  string nothing reconstitutes into a path. `FromGeneration` wraps its
+  counter as-is. Factory domains are prefixed, so tokens from different
+  factories never collide. "No source yet" is `FilterSourceToken?`.
 - **`SavedFiltersStore`** + **`SavedFiltersStatus`** — the saved-filters
   document lifecycle over the host's storage adapter: `LoadAsync` /
   `SaveAsync` / `DeleteAsync` / `Reset` moving through Disabled / Ready /
@@ -570,7 +577,8 @@ Parameters (all callbacks `[EditorRequired]`, as is `Filters`):
   `internal`; tests reach them via `InternalsVisibleTo`). A host's whole
   contract is register at app scope, bind to `FilterSurface`.
 - `FilterSourceToken` — `readonly record struct`; factories
-  `FromGeneration(int)` / `FromPath(string)`; value-equal, ordinal.
+  `FromGeneration(int)` / `FromPath(string)`; value-equal, with
+  `FromPath` normalizing path identity itself (case, trailing separator).
 - `SavedFiltersStore` — ctor `(IFilterDocumentStorage? storage)`;
   `NamedFilterCollection Filters`, `SavedFiltersStatus Status`,
   `string? LoadFailedFileName` (non-null exactly while `LoadFailed`,

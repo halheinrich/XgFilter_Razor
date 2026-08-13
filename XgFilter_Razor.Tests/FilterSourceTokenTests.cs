@@ -22,16 +22,72 @@ public class FilterSourceTokenTests
             FilterSourceToken.FromPath(@"D:\xg\matches"));
     }
 
-    // Equality is ordinal and case-sensitive by contract: the token is opaque,
-    // so a host with case-insensitive source identity (a Windows path)
-    // normalizes BEFORE minting. This pins that the token itself never folds
-    // case on the host's behalf.
+    // Path identity is the FACTORY's, not the host's: FromPath folds case
+    // itself, so a host that passes the path in whatever spelling it holds
+    // cannot mint a token that fails to match its own previous visit's. This
+    // pin is the inverse of the one it replaced — the contract flipped.
     [Fact]
-    public void FromPath_DifferentCase_TokensDiffer()
+    public void FromPath_DifferentCase_TokensAreEqual()
     {
-        Assert.NotEqual(
+        Assert.Equal(
             FilterSourceToken.FromPath(@"D:\XG"),
             FilterSourceToken.FromPath(@"d:\xg"));
+    }
+
+    // The other half of the rule: a trailing separator is insignificant, in
+    // either spelling and however many. Hand-rolled rather than
+    // Path.TrimEndingDirectorySeparator because this runs in WebAssembly, where
+    // that call would not recognize the backslash at all — so the backslash
+    // case here is the one that would regress if the BCL call ever crept back.
+    [Theory]
+    [InlineData(@"D:\xg\matches", @"D:\xg\matches\")]
+    [InlineData(@"D:\xg\matches", @"D:\xg\matches\\")]
+    [InlineData("D:/xg/matches", "D:/xg/matches/")]
+    public void FromPath_TrailingSeparator_IsInsignificant(string bare, string trailing)
+    {
+        Assert.Equal(FilterSourceToken.FromPath(bare), FilterSourceToken.FromPath(trailing));
+    }
+
+    // The trim's deliberate limit: a trailing separator is insignificant, but
+    // the separator CHARACTER is not normalized — `/` and `\` are not asserted
+    // to be the same character, because that sameness is false wherever `\` is
+    // a legal filename character. Pinned so the rule cannot quietly widen.
+    [Fact]
+    public void FromPath_SeparatorSpelling_IsNotUnified()
+    {
+        Assert.NotEqual(
+            FilterSourceToken.FromPath(@"D:\xg\matches"),
+            FilterSourceToken.FromPath("D:/xg/matches"));
+    }
+
+    // Both halves at once, which is how a real host respelling arrives.
+    [Fact]
+    public void FromPath_CaseAndTrailingSeparatorTogether_TokensAreEqual()
+    {
+        Assert.Equal(
+            FilterSourceToken.FromPath(@"D:\XG\Matches"),
+            FilterSourceToken.FromPath(@"d:\xg\matches\"));
+    }
+
+    // Normalization folds spellings together; it must not fold sources
+    // together. Two genuinely different folders stay two sources — including
+    // the sibling case that a careless "trim everything" rule would collapse.
+    [Theory]
+    [InlineData(@"D:\xg\matches", @"D:\xg\sessions")]
+    [InlineData(@"D:\xg\matches", @"E:\xg\matches")]
+    [InlineData(@"D:\xg\matches", @"D:\xg\matches\archive")]
+    public void FromPath_DistinctPaths_TokensDiffer(string left, string right)
+    {
+        Assert.NotEqual(FilterSourceToken.FromPath(left), FilterSourceToken.FromPath(right));
+    }
+
+    // FromGeneration is untouched by the path rule: it wraps its counter as-is,
+    // so its identity remains exactly "same number, same token".
+    [Fact]
+    public void FromGeneration_IsUnaffectedByThePathNormalizationRule()
+    {
+        Assert.Equal(FilterSourceToken.FromGeneration(12), FilterSourceToken.FromGeneration(12));
+        Assert.NotEqual(FilterSourceToken.FromGeneration(12), FilterSourceToken.FromGeneration(13));
     }
 
     // The factories prefix their domain onto the wrapped value, so tokens from
