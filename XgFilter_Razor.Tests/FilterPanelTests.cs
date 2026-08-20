@@ -63,6 +63,9 @@ public class FilterPanelTests : BunitContext
     private static IElement ErrorMin(IRenderedComponent<FilterPanel> cut) =>
         cut.Find("input[type='number'][placeholder='Min']");
 
+    private static IElement ErrorMax(IRenderedComponent<FilterPanel> cut) =>
+        cut.Find("input[type='number'][placeholder='Max']");
+
     private static IElement Apply(IRenderedComponent<FilterPanel> cut) =>
         cut.Find("button.btn-primary");
 
@@ -1263,6 +1266,170 @@ public class FilterPanelTests : BunitContext
 
         Assert.True(cut.Instance.TryGetEditedConfig(out var cfg));
         Assert.Contains("not-a-score", cfg!.MatchScores);
+    }
+
+    // ── Error-bound validity ───────────────────────────────────────────────
+    //
+    // The rule itself lives in XgFilter_Lib (bounds non-negative, min ≤ max,
+    // NaN rejected) and is asked through FilterConfig.GetInvalidFields(); these
+    // pins are about the panel's half — that it asks, that it marks the field
+    // the lib names and no other, and that Apply and save both refuse while any
+    // field is named. They deliberately assert no message text: the wording is
+    // the panel's to change, the rule is not.
+
+    // The always-visible facet's first gate: a negative lower bound is one the
+    // lib names, so the Min box reds and Apply closes — the is-invalid +
+    // invalid-feedback + disabled-Apply idiom the position-pattern field
+    // established, now over a field whose rule the panel does not own.
+    [Fact]
+    public void NegativeErrorMin_MarksMinField_AndGatesApply()
+    {
+        var cut = Render<FilterPanel>();
+
+        ErrorMin(cut).Input("-1");
+
+        Assert.Contains("is-invalid", ErrorMin(cut).GetAttribute("class"));
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+        Assert.NotNull(cut.Find("#errorRangeFeedback"));
+    }
+
+    // Attribution is per field, and the panel must not blur it: a negative Max
+    // beside a perfectly good Min reds only the Max. This is what proves the
+    // styling keys on the lib's per-FilterField verdict rather than reding the
+    // whole facet the moment anything is wrong in it.
+    [Fact]
+    public void NegativeErrorMax_MarksOnlyTheMaxField()
+    {
+        var cut = Render<FilterPanel>();
+
+        ErrorMin(cut).Input("1");
+        ErrorMax(cut).Input("-2");
+
+        Assert.DoesNotContain("is-invalid", ErrorMin(cut).GetAttribute("class"));
+        Assert.Contains("is-invalid", ErrorMax(cut).GetAttribute("class"));
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+    }
+
+    // The other half of the attribution rule: min > max is a fault of the pair
+    // with neither bound wrong on its own, so both fields carry the mark and
+    // the user picks which end to move.
+    [Fact]
+    public void MisorderedErrorBounds_MarkBothFields()
+    {
+        var cut = Render<FilterPanel>();
+
+        ErrorMin(cut).Input("5");
+        ErrorMax(cut).Input("2");
+
+        Assert.Contains("is-invalid", ErrorMin(cut).GetAttribute("class"));
+        Assert.Contains("is-invalid", ErrorMax(cut).GetAttribute("class"));
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+    }
+
+    // double.TryParse accepts the literal "NaN", so a text-entry panel really
+    // can hand the lib one — and the lib rejects it. Pinned because the
+    // feedback line's "a number, zero or greater" is worded to stay true for
+    // exactly this input.
+    [Fact]
+    public void NaNErrorBound_MarksField_AndGatesApply()
+    {
+        var cut = Render<FilterPanel>();
+
+        ErrorMin(cut).Input("NaN");
+
+        Assert.Contains("is-invalid", ErrorMin(cut).GetAttribute("class"));
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+        Assert.NotNull(cut.Find("#errorRangeFeedback"));
+    }
+
+    // Gate composition, first direction: the two validity rules are
+    // independent, so a committable position pattern does not rescue a bad
+    // bound. The pattern field stays unmarked — one wrong value marks one
+    // field — and no disabled-reason line appears, since an invalid value
+    // explains itself where it sits.
+    [Fact]
+    public void InvalidErrorBound_DisablesApply_EvenWithValidPattern()
+    {
+        var cut = RenderExpanded();
+
+        cut.Find("#positionPattern").Input("[6,2,]");
+        Assert.False(Apply(cut).HasAttribute("disabled"));
+
+        ErrorMin(cut).Input("-1");
+
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+        Assert.DoesNotContain("is-invalid", cut.Find("#positionPattern").GetAttribute("class"));
+        Assert.Empty(cut.FindAll("#applyDisabledReason"));
+    }
+
+    // Gate composition, other direction: good bounds do not rescue an
+    // unparseable pattern, and the error-range feedback stays absent — the
+    // panel never volunteers an explanation for a rule that is not broken.
+    [Fact]
+    public void InvalidPositionPattern_DisablesApply_EvenWithValidErrorBounds()
+    {
+        var cut = RenderExpanded();
+
+        ErrorMin(cut).Input("1");
+        ErrorMax(cut).Input("2");
+        Assert.False(Apply(cut).HasAttribute("disabled"));
+
+        cut.Find("#positionPattern").Input("[6,2");
+
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+        Assert.Empty(cut.FindAll("#errorRangeFeedback"));
+    }
+
+    // Recovery: the mark and the gate are both derived, never latched, so
+    // correcting the value restores the panel without any other gesture.
+    [Fact]
+    public void FixingInvalidErrorBound_ClearsMark_AndReEnablesApply()
+    {
+        var cut = Render<FilterPanel>();
+
+        ErrorMin(cut).Input("-1");
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+
+        ErrorMin(cut).Input("1");
+
+        Assert.DoesNotContain("is-invalid", ErrorMin(cut).GetAttribute("class"));
+        Assert.Empty(cut.FindAll("#errorRangeFeedback"));
+        Assert.False(Apply(cut).HasAttribute("disabled"));
+    }
+
+    // The lib's documented posture, pinned end to end at the panel: a stored
+    // selection whose bound a rule outlaws still loads, still shows the values
+    // it holds, marks the offending one, and is refused a commit. Never
+    // silently repaired (which would change the user's filter behind their
+    // back) and never silently dropped.
+    [Fact]
+    public void StoredConfigWithInvalidBound_LoadsAndShowsInvalid_WithApplyGated()
+    {
+        JSInterop.Setup<string?>("localStorage.getItem", ConfigKey)
+            .SetResult(new FilterConfig { ErrorMin = -1, ErrorMax = 2 }.ToJson());
+
+        var cut = Render<FilterPanel>();
+
+        Assert.Equal("-1", ErrorMin(cut).GetAttribute("value"));
+        Assert.Equal("2", ErrorMax(cut).GetAttribute("value"));
+        Assert.Contains("is-invalid", ErrorMin(cut).GetAttribute("class"));
+        Assert.DoesNotContain("is-invalid", ErrorMax(cut).GetAttribute("class"));
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+    }
+
+    // The save gate is Apply's validity gate, whole: an invalid bound refuses
+    // the snapshot exactly as an unparseable pattern does, so a saved document
+    // can never be minted from a selection Apply would itself have refused.
+    [Fact]
+    public void TryGetEditedConfig_InvalidErrorBound_ReturnsFalseNull()
+    {
+        var cut = Render<FilterPanel>();
+
+        ErrorMin(cut).Input("5");
+        ErrorMax(cut).Input("2");
+
+        Assert.False(cut.Instance.TryGetEditedConfig(out var cfg));
+        Assert.Null(cfg);
     }
 
     // ── Disclosure ─────────────────────────────────────────────────────────

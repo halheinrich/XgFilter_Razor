@@ -139,8 +139,9 @@ is deliberate.
 The composite owns its `SavedFiltersStore` over the bound adapter (rebuilt
 on an adapter reference change), so a remount re-reads the document — a
 setup-time, degrade-tolerant read. Notice copy is producer-owned so every
-host degrades with identical wording: the save-refusal (position-pattern)
-copy, the LoadFailed notice (which replaces the panel and names the
+host degrades with identical wording: the save-refusal copy (field-agnostic
+by design — it names no rule, because the offending value is already
+marked, with its own explanation, in the panel below), the LoadFailed notice (which replaces the panel and names the
 *actual* failed file via `SavedFiltersStore.LoadFailedFileName` — canonical
 or legacy), and the WriteFailed notice (beside the still-truthful panel,
 promising **page-lifetime retention only** — the composite-owned store dies
@@ -183,6 +184,27 @@ groups have been hidden since the FilterPanel hide pass, while the
 `XgFilter_Lib` machinery behind them (`FilterConfig.PositionTypes` /
 `PlayTypes`, the filters, the enums) stays intact. State is held in private
 fields on the component instance.
+
+**Validity is the lib's ruling; the panel marks it and words it.** Two
+rules compose into one `IsCommittable` member — the position-pattern text
+must parse (`BoardPattern.TryParse`, this panel's own field) and
+`FilterConfig.GetInvalidFields()` must name no field (non-negative error
+bounds, `min ≤ max`, `NaN` rejected — the lib's rule, asked through the
+same `BuildConfig()` path Apply commits through, so what the panel reds and
+what `Build()` would throw on are one answer). The error-range inputs style
+themselves independently off `FilterField.ErrorMin` / `ErrorMax`
+membership, so the lib's attribution rules carry straight to the screen: a
+negative Max never reds a Min the user got right, while a misordered pair
+blames both and leaves the user to pick an end. The message is the panel's
+alone — the lib returns no strings by design — and covers both violations
+in one line, worded to stay true for the literal `NaN` that
+`double.TryParse` accepts and the lib rejects. Rendered only while it
+applies (the `#applyDisabledReason` idiom) rather than left in the DOM for
+Bootstrap's sibling selector, which cannot reach the inputs one level down
+inside the flex row. A stored selection whose bound a rule outlaws still
+loads, shows its values, marks the offender, and is refused a commit —
+never silently repaired, never dropped (the lib's documented posture,
+pinned).
 
 **Information hierarchy** (dogfooding-driven): the error-range section is
 first and always visible — it is the panel's most-used control. The other
@@ -235,14 +257,16 @@ when they equal none. Two surfaces consume that one computation and can
 therefore never disagree:
 
 - **The Apply gate.** Apply is offered only when the selection differs
-  from the last-committed config *and* the position pattern is
-  committable. `ApplyAsync` guards on the same condition it renders
+  from the last-committed config *and* the selection is **committable** —
+  the position-pattern text parses *and* `FilterConfig.GetInvalidFields()`
+  names no field. `ApplyAsync` guards on the same condition it renders
   `disabled` from, so programmatic dispatch cannot re-commit either.
   While Apply is disabled *because nothing changed*, the panel says so —
   a `title` plus a muted hint line, the `SavedFiltersPanel`
   disabled-reason idiom, except that here the panel knows its own reason
-  rather than being told it by the host. The invalid-pattern case gets no
-  hint line: the field's own `invalid-feedback` already explains it.
+  rather than being told it by the host. Neither invalid-value case gets a
+  hint line: the offending field's own `invalid-feedback` already explains
+  it.
 - **`OnAppliedStateChanged`**, raised after every buffer-affecting
   gesture — a control edit, `LoadConfig` staging, Apply, Clear filters —
   carrying that same value. Toggling either disclosure tier is
@@ -569,8 +593,11 @@ saved-filters arc):
   clobbered. Never moves the disclosure.
 - `bool TryGetEditedConfig(out FilterConfig?)` — snapshots the live
   buffers (including unapplied edits) for host-driven save-as. Gate is
-  exactly Apply's: fails only on non-blank, unparseable position-pattern
-  text.
+  exactly Apply's validity gate (`IsCommittable`): fails on non-blank,
+  unparseable position-pattern text and on any field
+  `FilterConfig.GetInvalidFields()` names. No stricter either — match-score
+  tokens ride raw through both paths — so a saved document is never minted
+  from a selection Apply would itself have refused.
 
 Two further methods, `ForgetCommitted()` and `SeedCommitted(FilterConfig)`,
 are deliberately `internal` — `FilterSurface` is their only intended
@@ -838,6 +865,26 @@ producer-side, so neither widens what consumers can see.
   "the I/O failed"; let everything that means "the adapter has a bug"
   propagate. An absent document is `null` from `ReadAsync`, never an
   exception.
+- **Never restate a lib validity rule in the panel — ask it.** The error
+  bounds' rule (non-negative, `min ≤ max`, `NaN` rejected) lives in
+  `XgFilter_Lib` and is asked through `FilterConfig.GetInvalidFields()` on
+  the same `BuildConfig()` output Apply commits. A local
+  `if (min < 0)` here would be a second encoding of a rule `Build()` also
+  enforces, and the two would drift the day the lib's rule moves — the
+  depth-facet scenario again, one tier down. The same applies to
+  attribution: which *field* to mark is the lib's answer (`FilterField`
+  membership), not a facet-wide red. What the panel does own is the
+  wording: `GetInvalidFields` deliberately returns no message strings, the
+  same division of labour as `BoardPattern.TryParse`.
+- **`TryGetEditedConfig` is Apply's validity gate, and must stay exactly
+  that.** Both directions matter. Stricter, and save-as refuses a
+  selection the user could apply; looser, and a saved document is minted
+  from a selection Apply refuses — a permanent trap, since loading it
+  reproduces the invalid state with Apply disabled. When a validity rule is
+  added, it goes into the one `IsCommittable` member both read; the
+  composite's refusal copy stays field-agnostic for the same reason (the
+  offending field is already marked, with its own explanation, in the
+  panel).
 - **Per-row Save snapshots the live edit buffers — exactly as Save-as
   does.** Both save gestures capture what `TryGetEditedConfig` hands
   over, unapplied edits included; a row Save differs only in taking its

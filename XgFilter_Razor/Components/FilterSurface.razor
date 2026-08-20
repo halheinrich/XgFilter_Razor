@@ -40,10 +40,14 @@
                        PersistDisabledReason="@EffectivePersistDisabledReason" />
 }
 
-@* Save refusal: the current filter's position pattern is unparseable, so
-   TryGetEditedConfig refused (the one state Apply also refuses). The panel's
+@* Save refusal: the current filter holds a value the panel cannot commit — an
+   unparseable position pattern or an error bound the lib rules invalid — so
+   TryGetEditedConfig refused (exactly the states Apply also refuses). The panel's
    confirm/name affordances have already reacted, so a silent no-op would read
-   as a lost save — say why. Assertive, like a failed user action. *@
+   as a lost save — say why. The copy names no particular field: the offending
+   one is already marked in the panel with its own explanation, and a second
+   naming here would be a second encoding of which rule failed. Assertive, like
+   a failed user action. *@
 @if (_saveRefusalNotice is not null)
 {
     <div id="filterSaveError" class="alert alert-danger mb-4" style="max-width:800px" role="alert">
@@ -349,7 +353,7 @@
     private async Task HandleAppliedStateChanged(FilterConfig? config)
     {
         // Any panel gesture moots a stale save refusal — fixing the offending
-        // position pattern is itself one, and so is committing.
+        // value is itself one, and so is committing.
         _saveRefusalNotice = null;
 
         // Stateless, idempotent mirror of the payload onto the holder — the
@@ -395,8 +399,8 @@
         else
         {
             _saveRefusalNotice =
-                "The current filter's position pattern is invalid, so it can't "
-                + "be saved — fix it in the filters below, then save.";
+                "The current filter has an invalid value, so it can't be saved "
+                + "— fix it in the filters below, then save.";
         }
     }
 

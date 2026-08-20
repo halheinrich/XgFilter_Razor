@@ -468,11 +468,37 @@ public class FilterSurfaceTests : BunitContext
         await ClickRowButtonAsync(cut, "Race", "Save");
         await ClickRowButtonAsync(cut, "Race", "Overwrite");
 
-        Assert.Contains("position pattern is invalid", cut.Find("#filterSaveError").TextContent);
+        Assert.Contains("can't be saved", cut.Find("#filterSaveError").TextContent);
         Assert.Empty(storage.Writes);
 
         // Any panel gesture moots the refusal — fixing the pattern is one.
         cut.Find("#positionPattern").Input(string.Empty);
+
+        Assert.Empty(cut.FindAll("#filterSaveError"));
+    }
+
+    // The refusal is the panel's validity gate, not one particular rule of it:
+    // an error bound the lib rules invalid refuses the snapshot exactly as an
+    // unparseable pattern does, and the composite says so with the same
+    // field-agnostic copy — the offending value is already marked, with its own
+    // explanation, in the panel below.
+    [Fact]
+    public async Task Save_InvalidErrorBound_RefusalNotice_NoWrite()
+    {
+        var storage = StorageWith(("Race", new FilterConfig()));
+        var cut = RenderSurface(TokenA, storage);
+
+        // Min above Max — always-visible facet, so no disclosure gesture needed.
+        cut.Find("input[type='number'][placeholder='Min']").Input("5");
+        cut.Find("input[type='number'][placeholder='Max']").Input("2");
+        await ClickRowButtonAsync(cut, "Race", "Save");
+        await ClickRowButtonAsync(cut, "Race", "Overwrite");
+
+        Assert.Contains("can't be saved", cut.Find("#filterSaveError").TextContent);
+        Assert.Empty(storage.Writes);
+
+        // Fixing the bound is a panel gesture, so it moots the refusal.
+        cut.Find("input[type='number'][placeholder='Max']").Input("9");
 
         Assert.Empty(cut.FindAll("#filterSaveError"));
     }

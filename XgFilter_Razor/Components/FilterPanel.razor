@@ -58,23 +58,53 @@
 
         @* ── Error range ──────────────────────────────────────────────────────
            First and always visible: dogfooding showed it is the panel's
-           most-used control, so it never rides behind the disclosure. *@
+           most-used control, so it never rides behind the disclosure.
+
+           Validity is the lib's ruling, not this panel's: GetInvalidFields()
+           names the offending bounds (non-negative, min ≤ max, NaN rejected)
+           and each input reds itself on its own FilterField, so a wrong max
+           never marks a min the user got right — the lib's attribution rules
+           decide that, and a misordered pair blames both by design. Hoisted
+           into a local like the hidden-active signal below: the two inputs and
+           the feedback line read one evaluation, and the Apply gate reads the
+           same rule through CanApply. The panel writes no rule of its own here
+           — only the words for it. *@
+        @{ var invalidFields = InvalidFields; }
         <div class="mb-3">
             <label class="form-label">
                 Error range
                 <small class="text-muted">(inclusive; blank = no bound)</small>
             </label>
             <div class="d-flex gap-2 align-items-center">
-                <input class="form-control" style="max-width:140px"
+                <input class="form-control @(invalidFields.Contains(FilterField.ErrorMin) ? "is-invalid" : string.Empty)"
+                       style="max-width:140px"
                        type="number" step="0.001" placeholder="Min"
                        value="@_errorMinText"
                        @oninput="e => { _errorMinText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
                 <span>–</span>
-                <input class="form-control" style="max-width:140px"
+                <input class="form-control @(invalidFields.Contains(FilterField.ErrorMax) ? "is-invalid" : string.Empty)"
+                       style="max-width:140px"
                        type="number" step="0.001" placeholder="Max"
                        value="@_errorMaxText"
                        @oninput="e => { _errorMaxText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
             </div>
+            @* Rendered only while it applies, the #applyDisabledReason idiom,
+               rather than left in the DOM for Bootstrap's sibling selector to
+               reveal as the position-pattern field's feedback is: the inputs
+               sit one level down inside the flex row, so `.is-invalid ~
+               .invalid-feedback` cannot reach across — hence the explicit
+               d-block and the @if. One line for both violations, because the
+               user fixes them at the same two boxes: "a number, zero or
+               greater" is also the true verdict on the literal NaN that
+               double.TryParse accepts and the lib rejects. *@
+            @if (invalidFields.Count > 0)
+            {
+                <div id="errorRangeFeedback" class="invalid-feedback d-block">
+                    Each bound must be a number, zero or greater, and Min can't be
+                    above Max — fix it to apply, or clear a bound for no limit on
+                    that side.
+                </div>
+            }
         </div>
 
         @* ── Disclosure toggle ────────────────────────────────────────────────
@@ -672,13 +702,15 @@
     /// <summary>
     /// Snapshots the current edit buffers — including unapplied edits — into a
     /// <see cref="FilterConfig"/>, for host-driven save-as while the panel is
-    /// dirty. The gate is exactly Apply's, single-sourced through the same
-    /// build path: this fails only when the position-pattern text is non-blank
-    /// and unparseable, the one state in which Apply is disabled. It is
-    /// deliberately no stricter than Apply — match-score tokens ride raw here
-    /// as on the Apply path, validated downstream by
-    /// <see cref="FilterConfig.Build"/> — so save-as can capture exactly what
-    /// Apply could produce.
+    /// dirty. The gate is exactly Apply's validity gate, single-sourced through
+    /// the same build path: this fails when the position-pattern text is
+    /// non-blank and unparseable, and when
+    /// <see cref="FilterConfig.GetInvalidFields"/> names any field — together,
+    /// the states in which Apply refuses to commit. It is deliberately no
+    /// stricter than Apply either — match-score tokens ride raw here as on the
+    /// Apply path, validated downstream by <see cref="FilterConfig.Build"/> —
+    /// so save-as captures exactly what Apply could produce, and no saved
+    /// document is minted from a selection Apply would have refused.
     /// </summary>
     /// <param name="config">
     /// The snapshot when this returns <see langword="true"/>; otherwise
@@ -690,7 +722,7 @@
     /// </returns>
     public bool TryGetEditedConfig([NotNullWhen(true)] out FilterConfig? config)
     {
-        if (!IsPositionPatternValid)
+        if (!IsCommittable)
         {
             config = null;
             return false;
@@ -782,19 +814,19 @@
             ? _committedConfig
             : null;
 
-    // Apply's gate: the selection must be committable (a parseable position
-    // pattern) and must differ from what was last committed.
-    private bool CanApply => IsPositionPatternValid && MatchedCommittedConfig is null;
+    // Apply's gate: the selection must be committable and must differ from what
+    // was last committed.
+    private bool CanApply => IsCommittable && MatchedCommittedConfig is null;
 
     // Why Apply is disabled — the SavedFiltersPanel disabled-reason idiom
     // (button title plus a muted hint line), except that here the panel knows
     // its own reason instead of being told it by the host. Covers only the
-    // nothing-to-apply case: the invalid-pattern case already explains itself in
-    // the pattern field's invalid-feedback line, and re-stating it here would be
-    // a second encoding of the same rule. Null while Apply is enabled, so no
-    // stale explanation lingers.
+    // nothing-to-apply case: an invalid value already explains itself in its own
+    // field's invalid-feedback line, and re-stating it here would be a second
+    // encoding of the same rule. Null while Apply is enabled, so no stale
+    // explanation lingers.
     private string? ApplyDisabledReason =>
-        IsPositionPatternValid && MatchedCommittedConfig is not null
+        IsCommittable && MatchedCommittedConfig is not null
             ? "No changes to apply — this filter is already applied."
             : null;
 
@@ -923,6 +955,22 @@
     private bool IsPositionPatternValid =>
         string.IsNullOrWhiteSpace(_positionPatternText)
         || BoardPattern.TryParse(_positionPatternText, out _);
+
+    // The lib's verdict on the values it owns rules for, asked of the same
+    // build path Apply commits through — so what the panel reds and what
+    // Build() would throw on are one answer, not two encodings of it. Safe on
+    // every render: GetInvalidFields never throws, judging a value not being
+    // using it. Recomputed per render like the hidden-active signal, at the
+    // same accepted cost (a buffer flush plus a predicate sweep).
+    private IReadOnlySet<FilterField> InvalidFields => BuildConfig().GetInvalidFields();
+
+    // The panel's whole validity truth, in one place: the position-pattern text
+    // must parse (BoardPattern owns what parses) and the lib must name no
+    // invalid field (it owns the rest). Both surfaces that must refuse an
+    // uncommittable selection read this one member — the Apply gate and
+    // TryGetEditedConfig — so a save can never capture a selection Apply itself
+    // would refuse.
+    private bool IsCommittable => IsPositionPatternValid && InvalidFields.Count == 0;
 
     // Buffer → PositionPattern. A blank buffer is no filter (null); otherwise
     // the parsed pattern. TryParse can only fail here for invalid text, which
