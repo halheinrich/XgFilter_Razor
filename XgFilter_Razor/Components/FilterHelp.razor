@@ -1,31 +1,36 @@
+@using System.Globalization
 @using XgFilter_Lib.Enums
 @using XgFilter_Razor.Components.Internal
 
 @* ── FilterHelp.razor ────────────────────────────────────────────────────────
-   Producer-owned documentation for every facet FilterPanel offers, in
-   user-level language — behavior only, never FilterConfig internals or field
-   names. It lives beside the panel that renders the facets so the prose has
-   one owner: consumers embed this component (BgQuiz's Help adds only
-   app-level framing around it) and must never write their own facet prose —
-   a second description of a facet's semantics is a second encoding that
-   silently drifts.
+   Producer-owned documentation for everything FilterPanel offers — every
+   facet, and the panel chrome that governs them all — in user-level
+   language, behavior only, never FilterConfig internals or field names. It
+   lives beside the panel it documents so the prose has one owner: consumers
+   embed this component (BgQuiz's Help adds only app-level framing around it)
+   and must never write their own facet or chrome prose — a second
+   description of the panel's semantics is a second encoding that silently
+   drifts.
 
-   Render-only and parameterless: it issues no JS interop and touches no
-   storage or state of its own. It does *document* what FilterPanel persists
-   (the "what the panel remembers" section) — but only by rendering the
-   panel's own key constants, never by reading or writing them.
+   Render-only: it issues no JS interop and touches no storage or state of its
+   own. It does *document* what FilterPanel persists (the "what the panel
+   remembers" section) — but only by rendering the panel's own key constants,
+   never by reading or writing them.
 
-   Structured for embedding — one section per facet, each heading carrying a
-   stable fh-* anchor id, headings from the lib's FilterFacet [Description]s
-   via ToLabel() so help titles, panel section headings, and the
-   hidden-active signal all name a facet identically. The shelved facets
+   Structured for embedding — one section per topic, each heading carrying a
+   stable fh-* anchor id, facet headings from the lib's FilterFacet
+   [Description]s via ToLabel() so help titles, panel section headings, and
+   the hidden-active signal all name a facet identically. The shelved facets
    (Position types / Play types) are documented only when their UI returns.
+   Heading depth is the host's to state (HeadingLevel): only the host knows
+   what outline this block is being embedded into, and a hard-coded pair
+   silently malforms it — see the parameter's docs.
    Location: XgFilter_Razor/Components/FilterHelp.razor
 ──────────────────────────────────────────────────────────────────────────── *@
 
 <div class="filter-help">
 
-    <h4 id="fh-filters">Filters</h4>
+    @Heading(HeadingLevel, "fh-filters", "Filters")
     <p>
         Filters select which analyzed decisions are admitted. Every filter you
         set must agree for a decision to pass — the facets combine with AND.
@@ -35,18 +40,59 @@
         decision.
     </p>
 
+    @* Panel chrome — the controls that govern every facet rather than
+       describing one. Producer-owned for the same reason the facet prose is:
+       the disclosure's hidden-active signal, the Apply gate and its two
+       disabled states are the panel's behavior, so a host restating them
+       would be a second encoding that drifts. Placed before the facets: it is
+       the frame a reader needs in order to find and commit any of them. *@
     <section>
-        <h5 id="fh-error-range">@FilterFacet.ErrorRange.ToLabel()</h5>
+        @Heading(SectionLevel, "fh-using-the-panel", "Setting and applying filters")
+        <p>
+            Only <em>Error range</em> is shown at first — it is the one most
+            people reach for. <em>Show more filters</em> opens the rest. While
+            it is closed, a badge on it counts the hidden sections that
+            currently hold a filter and names them, so a filter you set earlier
+            can never be quietly out of sight.
+        </p>
+        <p>
+            Nothing you type or check takes effect until you press <em>Apply
+            Filter</em>. Apply is unavailable when there is nothing to apply —
+            you have not changed anything since you last applied, and the panel
+            says so under the button — and when some value is not usable as a
+            filter. In that second case the offending box is marked and says
+            what is wrong with it, right where you typed it; fix or clear it
+            and Apply comes back. Nothing is guessed at or quietly ignored, so
+            a filter you meant to set can never be silently dropped.
+        </p>
+        <p>
+            <em>Clear filters</em> empties every filter and applies that
+            immediately, giving you the unfiltered set back in one gesture. It
+            changes only the filters — whether <em>Show more filters</em> is
+            open is left exactly as you had it.
+        </p>
+    </section>
+
+    <section>
+        @Heading(SectionLevel, "fh-error-range", FilterFacet.ErrorRange.ToLabel())
         <p>
             Admits decisions whose error size falls between the two bounds,
             inclusive. Leave a bound blank for no limit on that side. While an
             error range is set, decisions without a measured error are
             excluded.
         </p>
+        <p>
+            An error is a size, never a direction, so each bound must be a
+            number of zero or more — zero itself is allowed, and means an
+            exactly-perfect play. The lower bound also cannot be above the
+            upper. Either mistake describes a range nothing could ever fall
+            into, so it is refused outright rather than applied as a filter
+            that silently admits nothing.
+        </p>
     </section>
 
     <section>
-        <h5 id="fh-players">@FilterFacet.Players.ToLabel()</h5>
+        @Heading(SectionLevel, "fh-players", FilterFacet.Players.ToLabel())
         <p>
             Admits decisions made by any of the listed players
             (comma-separated). Blank means all players. A match involving none
@@ -55,7 +101,7 @@
     </section>
 
     <section>
-        <h5 id="fh-decision-type">@FilterFacet.DecisionType.ToLabel()</h5>
+        @Heading(SectionLevel, "fh-decision-type", FilterFacet.DecisionType.ToLabel())
         <p>
             Restricts to checker plays only, cube decisions only, or admits
             both.
@@ -63,7 +109,7 @@
     </section>
 
     <section>
-        <h5 id="fh-match-scores">@FilterFacet.MatchScores.ToLabel()</h5>
+        @Heading(SectionLevel, "fh-match-scores", FilterFacet.MatchScores.ToLabel())
         <p>
             Admits decisions taken at any of the listed scores
             (comma-separated). Scores are written <em>MaNa</em> and are
@@ -76,7 +122,7 @@
     </section>
 
     <section>
-        <h5 id="fh-move-number-range">@FilterFacet.MoveNumberRange.ToLabel()</h5>
+        @Heading(SectionLevel, "fh-move-number-range", FilterFacet.MoveNumberRange.ToLabel())
         <p>
             Admits decisions by their move number within the game, between the
             two bounds, inclusive. Leave a bound blank for no limit on that
@@ -86,7 +132,7 @@
     </section>
 
     <section>
-        <h5 id="fh-contact-type">@FilterFacet.ContactTypes.ToLabel()</h5>
+        @Heading(SectionLevel, "fh-contact-type", FilterFacet.ContactTypes.ToLabel())
         <p>
             Admits decisions by the character of the position — contact or
             race. Nothing checked means all types.
@@ -94,7 +140,7 @@
     </section>
 
     <section>
-        <h5 id="fh-analysis-depth">@FilterFacet.AnalysisDepth.ToLabel()</h5>
+        @Heading(SectionLevel, "fh-analysis-depth", FilterFacet.AnalysisDepth.ToLabel())
         <p>
             Admits decisions by how they were analyzed. There are three modes:
             an <strong>evaluation</strong> (XG's neural-net judgment at some
@@ -121,10 +167,20 @@
             is the inner level from the opening-book entry, when the book
             recorded one.
         </p>
+        <p>
+            Each checked mode keeps its levels behind its own <em>Analysis
+            level</em> link, closed until you open it. The badge on that link
+            says what is inside without your having to open it:
+            <strong>any</strong> when no level is checked — that mode is not
+            narrowed at all — or <strong>N selected</strong> when it is.
+            Unchecking a mode hides its levels but keeps them: levels under an
+            unchecked mode do nothing whatever, so checking the mode again
+            brings your selection back rather than making you rebuild it.
+        </p>
     </section>
 
     <section>
-        <h5 id="fh-dice-rolls">@FilterFacet.DiceRolls.ToLabel()</h5>
+        @Heading(SectionLevel, "fh-dice-rolls", FilterFacet.DiceRolls.ToLabel())
         <p>
             Admits checker plays made with any of the checked rolls. Dice
             order does not matter — 31 covers 3-1 and 1-3 alike. Nothing
@@ -134,7 +190,7 @@
     </section>
 
     <section>
-        <h5 id="fh-position-pattern">@FilterFacet.PositionPattern.ToLabel()</h5>
+        @Heading(SectionLevel, "fh-position-pattern", FilterFacet.PositionPattern.ToLabel())
         <p>
             Admits decisions whose position matches a set of per-location
             checker-count ranges, written as a bracket list —
@@ -154,7 +210,7 @@
        writes. Scope is exactly what FilterPanel itself persists: a sibling key
        belonging to a host app is that host's to document, not this panel's. *@
     <section>
-        <h5 id="fh-what-is-remembered">What the panel remembers</h5>
+        @Heading(SectionLevel, "fh-what-is-remembered", "What the panel remembers")
         <p>
             The panel remembers your filter settings so they are still there
             next time. It saves them in your own browser, on this machine, and
@@ -188,3 +244,71 @@
     </section>
 
 </div>
+
+@code {
+    /// <summary>
+    /// The heading level of this block's lead heading ("Filters"); every
+    /// section below it renders one level deeper. Valid values are 1 through
+    /// 5 — a lead at <c>h6</c> would leave its sections nowhere to go.
+    /// <para>
+    /// A parameter because only the host knows the outline this block is
+    /// embedded into, and only the host can keep that outline well-formed: a
+    /// help page whose own sections are <c>h2</c> needs an <c>h3</c> lead
+    /// here, while one embedded a tier deeper needs <c>h4</c>. The
+    /// hard-coded <c>h4</c>/<c>h5</c> pair this replaced was right for
+    /// nobody in particular — it skipped a level under the one host that
+    /// existed, silently, because a skipped level is invisible on screen and
+    /// shows up only in a screen reader's outline or an audit.
+    /// </para>
+    /// <para>
+    /// Required, deliberately: a default would be a level this component
+    /// cannot know is right, quietly wrong in every host whose outline
+    /// differs from whichever one the default was chosen for.
+    /// <see cref="EditorRequiredAttribute"/> makes an unstated level an
+    /// <c>RZ2012</c> build error in the host, the same posture every other
+    /// required parameter in this library takes — see the silent-splat entry
+    /// in this subproject's Pitfalls. The range check below is the belt to
+    /// that brace, covering the paths <c>RZ2012</c> cannot see (reflection,
+    /// dynamic rendering, a test harness).
+    /// </para>
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown when the bound value is outside 1–5, including the unset
+    /// default of zero.
+    /// </exception>
+    [Parameter, EditorRequired] public int HeadingLevel { get; set; }
+
+    // The admissible lead levels. The upper bound is structural, not
+    // stylistic: sections render at HeadingLevel + 1, and HTML has no h7.
+    private const int MinHeadingLevel = 1;
+    private const int MaxHeadingLevel = 5;
+
+    // Every section heading sits exactly one level below the lead, so the
+    // block contributes a well-formed two-tier outline wherever it lands.
+    private int SectionLevel => HeadingLevel + 1;
+
+    protected override void OnParametersSet()
+    {
+        if (HeadingLevel is < MinHeadingLevel or > MaxHeadingLevel)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(HeadingLevel), HeadingLevel,
+                $"Heading level must be between {MinHeadingLevel} and {MaxHeadingLevel}: "
+                + "this block renders a lead heading with its sections one level below, "
+                + "so a lead at h6 would leave them nowhere to go.");
+        }
+    }
+
+    // A heading whose tag is chosen at render time. Razor has no syntax for a
+    // computed element name, and the alternative — emitting the tag through a
+    // MarkupString — would hand raw markup to the renderer for text that is
+    // otherwise escaped; building the frames keeps the id and the text
+    // escaped exactly as literal markup would.
+    private static RenderFragment Heading(int level, string id, string text) => builder =>
+    {
+        builder.OpenElement(0, "h" + level.ToString(CultureInfo.InvariantCulture));
+        builder.AddAttribute(1, "id", id);
+        builder.AddContent(2, text);
+        builder.CloseElement();
+    };
+}

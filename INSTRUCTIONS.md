@@ -371,24 +371,49 @@ read-only over a collection already in memory. The typical wiring:
 
 ### `FilterHelp` component
 
-Producer-owned documentation for every facet the panel offers, in
-user-level language — behavior only, never `FilterConfig` internals or
-field names. It lives beside the panel that renders the facets so the
-prose has one owner: consumers embed this component and add only
-app-level framing (BgQuiz's Help does exactly that); they must never
-write their own facet prose — a second description of a facet's
-semantics is a second encoding that silently drifts. Render-only and
-parameterless: it issues no JS interop and touches no storage or state
-of its own — it *documents* what `FilterPanel` persists without
+Producer-owned documentation for everything the panel offers — every
+facet, and the chrome that governs them all — in user-level language,
+behavior only, never `FilterConfig` internals or field names. It lives
+beside the panel it documents so the prose has one owner: consumers embed
+this component and add only app-level framing (BgQuiz's Help does exactly
+that); they must never write their own facet or chrome prose — a second
+description of the panel's semantics is a second encoding that silently
+drifts. Render-only: it issues no JS interop and touches no storage or
+state of its own — it *documents* what `FilterPanel` persists without
 participating in it. Structured for embedding: one
-`<section>` per facet, each heading carrying a stable `fh-*` anchor id,
-heading text from the lib's `FilterFacet` `[Description]`s via
+`<section>` per topic, each heading carrying a stable `fh-*` anchor id,
+facet heading text from the lib's `FilterFacet` `[Description]`s via
 `ToLabel()` — so help titles, panel section headings, and the
 hidden-active signal all name a facet identically. The depth section
 explains the union semantics (each checked mode admits its decisions;
-more checked = more matched; nothing checked = facet off) and the
-inner-level distinction per mode. The shelved facets (Position types /
-Play types) are deliberately undocumented until their UI returns.
+more checked = more matched; nothing checked = facet off), the
+inner-level distinction per mode, and the per-mode **Analysis level**
+disclosure: what its `any` / `N selected` badge says without opening it,
+and that levels under an unchecked mode are kept but inert. The shelved
+facets (Position types / Play types) are deliberately undocumented until
+their UI returns.
+
+The chrome section, **Setting and applying filters**
+(`fh-using-the-panel`), sits before the facets — it is the frame a reader
+needs in order to find and commit any of them. It documents the
+disclosure and its hidden-active signal (a filter set earlier is never
+quietly out of sight), Apply as the only commit and both of its disabled
+states (nothing changed, which the panel says under the button; and a
+value that is not usable as a filter, which the offending box marks and
+explains where it was typed), and Clear filters as the one-gesture return
+to the unfiltered set that leaves the disclosure alone. The
+reject-and-explain posture is documented as behavior — *nothing is
+guessed at or quietly ignored* — while each rule stays with its facet:
+the error facet's own section carries the non-negative / ordered-bounds
+rule and why an impossible range is refused rather than applied.
+
+**Heading depth is the host's to state**, via the required `HeadingLevel`
+parameter: the lead heading renders at that level and every section one
+below, so the block contributes a well-formed two-tier outline wherever it
+lands. Only the host knows the outline it is embedding into — see Pitfalls
+for why the parameter is `[EditorRequired]` rather than defaulted, and
+for the migration it forces. The `fh-*` anchor ids are unaffected by the
+level and stay the embedding contract (pinned).
 
 A final non-facet section, **What the panel remembers**
 (`fh-what-is-remembered`), is the storage-assurance copy: it states in
@@ -653,11 +678,21 @@ Parameters (all callbacks `[EditorRequired]`, as is `Filters`):
 
 ### `FilterHelp`
 
-No parameters, no callbacks, no host-facing methods — embed it where the
-host's help lives and add app-level framing around it. Stable `fh-*`
-anchor ids on every heading are the embedding surface for hosts that
-want to deep-link a section — including `fh-what-is-remembered`, the
-storage-assurance section a host's data-ownership copy points at.
+One parameter, no callbacks, no host-facing methods — embed it where the
+host's help lives and add app-level framing around it.
+
+- `int HeadingLevel` `[EditorRequired]` — the level of the block's lead
+  heading; every section renders one below. Valid 1–5 (a lead at `h6`
+  would leave its sections nowhere to go); anything else, including the
+  unset default of zero, throws `ArgumentOutOfRangeException` at
+  parameters-set. Required because only the host knows the outline it is
+  embedding into — see Pitfalls.
+
+Stable `fh-*` anchor ids on every heading are the embedding surface for
+hosts that want to deep-link a section — including `fh-using-the-panel`
+(the chrome section) and `fh-what-is-remembered`, the storage-assurance
+section a host's data-ownership copy points at. The ids do not move with
+`HeadingLevel`.
 
 `FilterPanel`'s two `localStorage` key constants are `internal`, not
 public: the copy naming them lives here, in the producer, so a consumer
@@ -782,7 +817,23 @@ producer-side, so neither widens what consumers can see.
   Neither attribute nor exception proves the wiring is *right*, so
   supplement both with bUnit integration tests that fire Apply and assert
   the consumer's downstream state actually flips.
-- **Facet documentation has one owner: `FilterHelp`.** Consumers embed
+- **`FilterHelp.HeadingLevel` is `[EditorRequired]` and breaks host
+  builds on purpose** — the `OnSaveRequested` precedent, for the same
+  reason. A default would be a level the component cannot know is right:
+  the hard-coded `h4`/`h5` pair it replaced was right for nobody in
+  particular, and the only host in tree (BgQuiz's Help, whose sections are
+  `h2`) had been skipping a level under it the whole time. That is the
+  failure mode a default preserves — invisible on screen, visible only in
+  a screen reader's outline or an audit, and silently wrong again in the
+  next host. `RZ2012` at build makes each host state its own level in its
+  own migration leg instead; the 1–5 range check is the belt for the paths
+  `RZ2012` cannot see (reflection, dynamic rendering, a test harness), and
+  it refuses rather than clamps — silently emitting an `h0` would defeat
+  the point of making the level explicit. Sections are always lead + 1:
+  don't add a second parameter for them, and don't let a host set them
+  independently. The `fh-*` anchor ids never move with the level (pinned)
+  — they are the embedding contract, and hosts may already link to them.
+- **Panel documentation has one owner: `FilterHelp`.** Consumers embed
   the component and add app-level framing only — a consumer that writes
   its own description of a facet's semantics creates a second encoding
   of lib behavior that silently drifts when the lib's rules change
@@ -791,7 +842,12 @@ producer-side, so neither widens what consumers can see.
   write it host-side. That rule is why the storage-assurance copy for
   the panel's own keys is producer-owned too — a host states its own
   data ownership and points into `fh-what-is-remembered` for the panel's
-  half.
+  half. **It covers the chrome as well as the facets**: the disclosure
+  and its hidden-active signal, Apply's two disabled states, Clear
+  filters. Those are the panel's behavior, not the app's, so a host
+  describing them is the same drift hazard one tier up — app-level
+  framing means *where the panel sits in this app and what pressing Apply
+  unlocks here*, never what the controls do.
 - **The storage keys are a documented surface now — `internal`, and no
   wider.** `ConfigKey` / `DisclosureKey` on `FilterPanel` are `internal`
   solely so `FilterHelp` can render the names it tells users to look for

@@ -6,11 +6,19 @@ using XgFilter_Razor.Components.Internal;
 namespace XgFilter_Razor.Tests;
 
 // Deliberately minimal pins — FilterHelp is prose that will evolve, so these
-// assert structure (it renders, every offered facet has an anchored heading),
-// not copy. No Loose JSInterop needed: the component is render-only with no
-// interop by contract.
+// assert structure (it renders, every documented topic has an anchored
+// heading, the outline the host asked for is the outline it gets), not copy.
+// No Loose JSInterop needed: the component is render-only with no interop by
+// contract.
 public class FilterHelpTests : BunitContext
 {
+    // The heading level these tests embed at, when the level itself is not
+    // what is under test. Arbitrary — that is the point of the parameter.
+    private const int TestHeadingLevel = 3;
+
+    private IRenderedComponent<FilterHelp> RenderHelp(int headingLevel = TestHeadingLevel) =>
+        Render<FilterHelp>(parameters => parameters.Add(p => p.HeadingLevel, headingLevel));
+
     // The facets the panel offers, as (facet, anchor id) pairs — the shelved
     // Position types / Play types are absent by design and pinned so below.
     private static readonly (FilterFacet Facet, string AnchorId)[] DocumentedFacets =
@@ -27,9 +35,9 @@ public class FilterHelpTests : BunitContext
     ];
 
     [Fact]
-    public void Render_Parameterless_Succeeds()
+    public void Render_Succeeds()
     {
-        var cut = Render<FilterHelp>();
+        var cut = RenderHelp();
 
         Assert.NotNull(cut.Find(".filter-help"));
         Assert.NotNull(cut.Find("#fh-filters"));
@@ -42,7 +50,7 @@ public class FilterHelpTests : BunitContext
     [Fact]
     public void EveryOfferedFacet_HasAnchoredHeadingWithLibLabel()
     {
-        var cut = Render<FilterHelp>();
+        var cut = RenderHelp();
 
         foreach (var (facet, anchorId) in DocumentedFacets)
             Assert.Equal(facet.ToLabel(), cut.Find($"#{anchorId}").TextContent.Trim());
@@ -53,7 +61,7 @@ public class FilterHelpTests : BunitContext
     [Fact]
     public void ShelvedFacets_AreNotDocumented()
     {
-        var cut = Render<FilterHelp>();
+        var cut = RenderHelp();
 
         Assert.DoesNotContain(FilterFacet.PositionTypes.ToLabel(), cut.Markup);
         Assert.DoesNotContain(FilterFacet.PlayTypes.ToLabel(), cut.Markup);
@@ -66,7 +74,7 @@ public class FilterHelpTests : BunitContext
     [Fact]
     public void Render_IssuesNoJsInterop()
     {
-        var cut = Render<FilterHelp>();
+        var cut = RenderHelp();
 
         Assert.Empty(JSInterop.Invocations);
         Assert.NotNull(cut.Find("#fh-analysis-depth"));
@@ -82,7 +90,7 @@ public class FilterHelpTests : BunitContext
     [Fact]
     public void WhatIsRemembered_NamesTheKeysFromFilterPanelsConstants()
     {
-        var cut = Render<FilterHelp>();
+        var cut = RenderHelp();
 
         var keys = cut.FindAll("#fh-what-is-remembered ~ ul code")
                       .Select(e => e.TextContent.Trim())
@@ -91,15 +99,96 @@ public class FilterHelpTests : BunitContext
         Assert.Equal(new[] { FilterPanel.ConfigKey, FilterPanel.DisclosureKey }, keys);
     }
 
-    // The section carries a stable anchor id on a heading, like every facet
-    // section here — that anchor is the embedding surface a host's own
-    // data-ownership copy points at instead of restating what the panel
-    // persists. Structure only: the wording is the e2e suite's to pin.
-    [Fact]
-    public void WhatIsRemembered_HasAnchoredHeading()
+    // The two non-facet sections carry stable anchor ids on headings, like
+    // every facet section here — those anchors are the embedding surface a
+    // host deep-links into instead of restating what they document. Structure
+    // only: the wording is the e2e suite's to pin.
+    [Theory]
+    [InlineData("fh-using-the-panel")]
+    [InlineData("fh-what-is-remembered")]
+    public void NonFacetSection_HasAnchoredHeading(string anchorId)
     {
-        var cut = Render<FilterHelp>();
+        var cut = RenderHelp();
 
-        Assert.NotNull(cut.Find(".filter-help section h5#fh-what-is-remembered"));
+        Assert.NotNull(cut.Find($".filter-help section h{TestHeadingLevel + 1}#{anchorId}"));
+    }
+
+    // ── Heading level ──────────────────────────────────────────────────────
+
+    // The outline is the host's to state and this block's to honor exactly:
+    // the lead heading renders at the level given, every section one below.
+    // Both levels move together — a host embedding a tier deeper must not end
+    // up with sections that outrank their own lead.
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    public void HeadingLevel_PutsLeadAtThatLevel_AndSectionsOneBelow(int level)
+    {
+        var cut = RenderHelp(level);
+
+        Assert.Equal($"H{level}", cut.Find("#fh-filters").TagName);
+
+        foreach (var (_, anchorId) in DocumentedFacets)
+            Assert.Equal($"H{level + 1}", cut.Find($"#{anchorId}").TagName);
+    }
+
+    // The anchor ids are the embedding contract — hosts may already link to
+    // them — so they must survive the levels moving underneath them.
+    [Fact]
+    public void HeadingLevel_DoesNotDisturbTheAnchorIds()
+    {
+        var shallow = RenderHelp(2);
+        var deep = RenderHelp(5);
+
+        foreach (var (_, anchorId) in DocumentedFacets)
+        {
+            Assert.NotNull(shallow.Find($"#{anchorId}"));
+            Assert.NotNull(deep.Find($"#{anchorId}"));
+        }
+    }
+
+    // A level change on a live instance re-tags every heading. Worth pinning
+    // rather than assuming: the headings are built as render fragments with
+    // computed element names, and an element-name change is the one edit a
+    // render-tree diff must handle by replacing the node rather than patching
+    // it.
+    [Fact]
+    public void HeadingLevel_ChangedOnALiveInstance_ReTagsEveryHeading()
+    {
+        var cut = RenderHelp(2);
+
+        cut.Render(parameters => parameters.Add(p => p.HeadingLevel, 4));
+
+        Assert.Equal("H4", cut.Find("#fh-filters").TagName);
+        Assert.Equal("H5", cut.Find("#fh-error-range").TagName);
+        Assert.Equal("H5", cut.Find("#fh-what-is-remembered").TagName);
+    }
+
+    // Out of range is refused, not clamped and not rendered: an h0 or an h6
+    // lead with h7 sections is malformed markup, and silently emitting it
+    // would defeat the whole point of making the level explicit. Zero is the
+    // unset default, which is the case EditorRequired catches at build time in
+    // a host — this is the belt for the paths RZ2012 cannot see.
+    [Theory]
+    [InlineData(0)]
+    [InlineData(6)]
+    [InlineData(-1)]
+    public void HeadingLevel_OutOfRange_Throws(int level)
+    {
+        var ex = Assert.Throws<ArgumentOutOfRangeException>(() => RenderHelp(level));
+
+        Assert.Equal(nameof(FilterHelp.HeadingLevel), ex.ParamName);
+    }
+
+    // Unbound is out of range by construction (the default is zero), so a host
+    // that ignores the RZ2012 — or a caller that never sees it — fails loudly
+    // rather than rendering somebody else's outline.
+    [Fact]
+    public void HeadingLevel_Unbound_Throws()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => Render<FilterHelp>());
     }
 }
