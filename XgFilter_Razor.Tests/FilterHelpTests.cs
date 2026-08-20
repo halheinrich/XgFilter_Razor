@@ -21,17 +21,24 @@ public class FilterHelpTests : BunitContext
 
     // The facets the panel offers, as (facet, anchor id) pairs — the shelved
     // Position types / Play types are absent by design and pinned so below.
+    // The ids come from FilterHelp's own constants (internal, visible here via
+    // InternalsVisibleTo). An anchor id is structure, not copy, so per the
+    // copy-pin SSOT ruling these assertions are wiring — each section renders
+    // under the identity the component names — and a second literal here would
+    // only be a spare copy of a value the component now has one of. The
+    // independent-literal oracle for what a reader can actually link to lives
+    // in the e2e suite.
     private static readonly (FilterFacet Facet, string AnchorId)[] DocumentedFacets =
     [
-        (FilterFacet.ErrorRange, "fh-error-range"),
-        (FilterFacet.Players, "fh-players"),
-        (FilterFacet.DecisionType, "fh-decision-type"),
-        (FilterFacet.MatchScores, "fh-match-scores"),
-        (FilterFacet.MoveNumberRange, "fh-move-number-range"),
-        (FilterFacet.ContactTypes, "fh-contact-type"),
-        (FilterFacet.AnalysisDepth, "fh-analysis-depth"),
-        (FilterFacet.DiceRolls, "fh-dice-rolls"),
-        (FilterFacet.PositionPattern, "fh-position-pattern"),
+        (FilterFacet.ErrorRange, FilterHelp.ErrorRangeAnchorId),
+        (FilterFacet.Players, FilterHelp.PlayersAnchorId),
+        (FilterFacet.DecisionType, FilterHelp.DecisionTypeAnchorId),
+        (FilterFacet.MatchScores, FilterHelp.MatchScoresAnchorId),
+        (FilterFacet.MoveNumberRange, FilterHelp.MoveNumberRangeAnchorId),
+        (FilterFacet.ContactTypes, FilterHelp.ContactTypesAnchorId),
+        (FilterFacet.AnalysisDepth, FilterHelp.AnalysisDepthAnchorId),
+        (FilterFacet.DiceRolls, FilterHelp.DiceRollsAnchorId),
+        (FilterFacet.PositionPattern, FilterHelp.PositionPatternAnchorId),
     ];
 
     [Fact]
@@ -40,7 +47,7 @@ public class FilterHelpTests : BunitContext
         var cut = RenderHelp();
 
         Assert.NotNull(cut.Find(".filter-help"));
-        Assert.NotNull(cut.Find("#fh-filters"));
+        Assert.NotNull(cut.Find($"#{FilterHelp.LeadAnchorId}"));
     }
 
     // Every facet the panel offers gets a heading whose text is the lib's
@@ -77,7 +84,7 @@ public class FilterHelpTests : BunitContext
         var cut = RenderHelp();
 
         Assert.Empty(JSInterop.Invocations);
-        Assert.NotNull(cut.Find("#fh-analysis-depth"));
+        Assert.NotNull(cut.Find($"#{FilterHelp.AnalysisDepthAnchorId}"));
     }
 
     // Wiring, not content. Per the copy-pin SSOT ruling, an independent literal
@@ -92,7 +99,7 @@ public class FilterHelpTests : BunitContext
     {
         var cut = RenderHelp();
 
-        var keys = cut.FindAll("#fh-what-is-remembered ~ ul code")
+        var keys = cut.FindAll($"#{FilterHelp.StorageSectionAnchorId} ~ ul code")
                       .Select(e => e.TextContent.Trim())
                       .ToArray();
 
@@ -104,13 +111,31 @@ public class FilterHelpTests : BunitContext
     // host deep-links into instead of restating what they document. Structure
     // only: the wording is the e2e suite's to pin.
     [Theory]
-    [InlineData("fh-using-the-panel")]
-    [InlineData("fh-what-is-remembered")]
+    [InlineData(FilterHelp.ChromeSectionAnchorId)]
+    [InlineData(FilterHelp.StorageSectionAnchorId)]
     public void NonFacetSection_HasAnchoredHeading(string anchorId)
     {
         var cut = RenderHelp();
 
         Assert.NotNull(cut.Find($".filter-help section h{TestHeadingLevel + 1}#{anchorId}"));
+    }
+
+    // The one exported section identity, pinned to the DOM it names. Wiring,
+    // not copy: a host links to StorageSectionAnchorId and writes
+    // StorageSectionHeading into its own sentence, so the export is worthless
+    // unless the heading the reader lands on is rendered from that same pair.
+    // Re-typing either value into the markup — or renaming a constant without
+    // the markup following — breaks this, which is the whole point of the
+    // promotion: the id/heading contract is the compiler's and this test's to
+    // keep, no longer prose's.
+    [Fact]
+    public void StorageSection_RendersItsHeadingFromTheExportedConstants()
+    {
+        var cut = RenderHelp();
+
+        var heading = cut.Find($".filter-help section > #{FilterHelp.StorageSectionAnchorId}");
+
+        Assert.Equal(FilterHelp.StorageSectionHeading, heading.TextContent.Trim());
     }
 
     // ── Heading level ──────────────────────────────────────────────────────
@@ -129,7 +154,7 @@ public class FilterHelpTests : BunitContext
     {
         var cut = RenderHelp(level);
 
-        Assert.Equal($"H{level}", cut.Find("#fh-filters").TagName);
+        Assert.Equal($"H{level}", cut.Find($"#{FilterHelp.LeadAnchorId}").TagName);
 
         foreach (var (_, anchorId) in DocumentedFacets)
             Assert.Equal($"H{level + 1}", cut.Find($"#{anchorId}").TagName);
@@ -148,6 +173,11 @@ public class FilterHelpTests : BunitContext
             Assert.NotNull(shallow.Find($"#{anchorId}"));
             Assert.NotNull(deep.Find($"#{anchorId}"));
         }
+
+        // The exported one especially: its docs promise hosts a link that
+        // survives whatever level the host embeds at.
+        Assert.NotNull(shallow.Find($"#{FilterHelp.StorageSectionAnchorId}"));
+        Assert.NotNull(deep.Find($"#{FilterHelp.StorageSectionAnchorId}"));
     }
 
     // A level change on a live instance re-tags every heading. Worth pinning
@@ -162,9 +192,9 @@ public class FilterHelpTests : BunitContext
 
         cut.Render(parameters => parameters.Add(p => p.HeadingLevel, 4));
 
-        Assert.Equal("H4", cut.Find("#fh-filters").TagName);
-        Assert.Equal("H5", cut.Find("#fh-error-range").TagName);
-        Assert.Equal("H5", cut.Find("#fh-what-is-remembered").TagName);
+        Assert.Equal("H4", cut.Find($"#{FilterHelp.LeadAnchorId}").TagName);
+        Assert.Equal("H5", cut.Find($"#{FilterHelp.ErrorRangeAnchorId}").TagName);
+        Assert.Equal("H5", cut.Find($"#{FilterHelp.StorageSectionAnchorId}").TagName);
     }
 
     // Out of range is refused, not clamped and not rendered: an h0 or an h6

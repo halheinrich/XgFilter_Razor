@@ -18,10 +18,14 @@
    never by reading or writing them.
 
    Structured for embedding — one section per topic, each heading carrying a
-   stable fh-* anchor id, facet headings from the lib's FilterFacet
+   stable fh-* anchor id rendered from the named constants below (never a
+   re-typed literal), facet headings from the lib's FilterFacet
    [Description]s via ToLabel() so help titles, panel section headings, and
    the hidden-active signal all name a facet identically. The shelved facets
    (Position types / Play types) are documented only when their UI returns.
+   One section's identity is a consumer contract rather than internal
+   structure: the storage section's id and heading text are public, because a
+   host's data-ownership copy links into it — see their docs.
    Heading depth is the host's to state (HeadingLevel): only the host knows
    what outline this block is being embedded into, and a hard-coded pair
    silently malforms it — see the parameter's docs.
@@ -30,7 +34,7 @@
 
 <div class="filter-help">
 
-    @Heading(HeadingLevel, "fh-filters", "Filters")
+    @Heading(HeadingLevel, LeadAnchorId, "Filters")
     <p>
         Filters select which analyzed decisions are admitted. Every filter you
         set must agree for a decision to pass — the facets combine with AND.
@@ -47,7 +51,7 @@
        would be a second encoding that drifts. Placed before the facets: it is
        the frame a reader needs in order to find and commit any of them. *@
     <section>
-        @Heading(SectionLevel, "fh-using-the-panel", "Setting and applying filters")
+        @Heading(SectionLevel, ChromeSectionAnchorId, "Setting and applying filters")
         <p>
             Only <em>Error range</em> is shown at first — it is the one most
             people reach for. <em>Show more filters</em> opens the rest. While
@@ -74,7 +78,7 @@
     </section>
 
     <section>
-        @Heading(SectionLevel, "fh-error-range", FilterFacet.ErrorRange.ToLabel())
+        @Heading(SectionLevel, ErrorRangeAnchorId, FilterFacet.ErrorRange.ToLabel())
         <p>
             Admits decisions whose error size falls between the two bounds,
             inclusive. Leave a bound blank for no limit on that side. While an
@@ -92,7 +96,7 @@
     </section>
 
     <section>
-        @Heading(SectionLevel, "fh-players", FilterFacet.Players.ToLabel())
+        @Heading(SectionLevel, PlayersAnchorId, FilterFacet.Players.ToLabel())
         <p>
             Admits decisions made by any of the listed players
             (comma-separated). Blank means all players. A match involving none
@@ -101,7 +105,7 @@
     </section>
 
     <section>
-        @Heading(SectionLevel, "fh-decision-type", FilterFacet.DecisionType.ToLabel())
+        @Heading(SectionLevel, DecisionTypeAnchorId, FilterFacet.DecisionType.ToLabel())
         <p>
             Restricts to checker plays only, cube decisions only, or admits
             both.
@@ -109,7 +113,7 @@
     </section>
 
     <section>
-        @Heading(SectionLevel, "fh-match-scores", FilterFacet.MatchScores.ToLabel())
+        @Heading(SectionLevel, MatchScoresAnchorId, FilterFacet.MatchScores.ToLabel())
         <p>
             Admits decisions taken at any of the listed scores
             (comma-separated). Scores are written <em>MaNa</em> and are
@@ -122,7 +126,7 @@
     </section>
 
     <section>
-        @Heading(SectionLevel, "fh-move-number-range", FilterFacet.MoveNumberRange.ToLabel())
+        @Heading(SectionLevel, MoveNumberRangeAnchorId, FilterFacet.MoveNumberRange.ToLabel())
         <p>
             Admits decisions by their move number within the game, between the
             two bounds, inclusive. Leave a bound blank for no limit on that
@@ -132,7 +136,7 @@
     </section>
 
     <section>
-        @Heading(SectionLevel, "fh-contact-type", FilterFacet.ContactTypes.ToLabel())
+        @Heading(SectionLevel, ContactTypesAnchorId, FilterFacet.ContactTypes.ToLabel())
         <p>
             Admits decisions by the character of the position — contact or
             race. Nothing checked means all types.
@@ -140,7 +144,7 @@
     </section>
 
     <section>
-        @Heading(SectionLevel, "fh-analysis-depth", FilterFacet.AnalysisDepth.ToLabel())
+        @Heading(SectionLevel, AnalysisDepthAnchorId, FilterFacet.AnalysisDepth.ToLabel())
         <p>
             Admits decisions by how they were analyzed. There are three modes:
             an <strong>evaluation</strong> (XG's neural-net judgment at some
@@ -180,7 +184,7 @@
     </section>
 
     <section>
-        @Heading(SectionLevel, "fh-dice-rolls", FilterFacet.DiceRolls.ToLabel())
+        @Heading(SectionLevel, DiceRollsAnchorId, FilterFacet.DiceRolls.ToLabel())
         <p>
             Admits checker plays made with any of the checked rolls. Dice
             order does not matter — 31 covers 3-1 and 1-3 alike. Nothing
@@ -190,7 +194,7 @@
     </section>
 
     <section>
-        @Heading(SectionLevel, "fh-position-pattern", FilterFacet.PositionPattern.ToLabel())
+        @Heading(SectionLevel, PositionPatternAnchorId, FilterFacet.PositionPattern.ToLabel())
         <p>
             Admits decisions whose position matches a set of per-location
             checker-count ranges, written as a bracket list —
@@ -210,7 +214,7 @@
        writes. Scope is exactly what FilterPanel itself persists: a sibling key
        belonging to a host app is that host's to document, not this panel's. *@
     <section>
-        @Heading(SectionLevel, "fh-what-is-remembered", "What the panel remembers")
+        @Heading(SectionLevel, StorageSectionAnchorId, StorageSectionHeading)
         <p>
             The panel remembers your filter settings so they are still there
             next time. It saves them in your own browser, on this machine, and
@@ -246,6 +250,75 @@
 </div>
 
 @code {
+    // ── Section identities ────────────────────────────────────────────────
+    // Every heading's anchor id, named once here and rendered from these
+    // constants below — the markup never re-types an fh-* literal, so a
+    // section's id has one source and cannot drift between the markup, the
+    // pins, and anything that links to it.
+    //
+    // Eleven of the twelve are internal: they are the block's own internal
+    // structure, and freezing all of it as a consumer contract would make
+    // splitting or resequencing a section a breaking change for hosts that
+    // never linked to it. The storage section's pair is the exception and is
+    // public — see its docs.
+
+    // The block's lead heading ("Filters"), the one at HeadingLevel.
+    internal const string LeadAnchorId = "fh-filters";
+
+    // The chrome section — the controls that govern every facet.
+    internal const string ChromeSectionAnchorId = "fh-using-the-panel";
+
+    // One per offered facet, named for the FilterFacet member whose ToLabel()
+    // supplies the heading text. The shelved facets have none: they are
+    // undocumented until their UI returns.
+    internal const string ErrorRangeAnchorId = "fh-error-range";
+    internal const string PlayersAnchorId = "fh-players";
+    internal const string DecisionTypeAnchorId = "fh-decision-type";
+    internal const string MatchScoresAnchorId = "fh-match-scores";
+    internal const string MoveNumberRangeAnchorId = "fh-move-number-range";
+    internal const string ContactTypesAnchorId = "fh-contact-type";
+    internal const string AnalysisDepthAnchorId = "fh-analysis-depth";
+    internal const string DiceRollsAnchorId = "fh-dice-rolls";
+    internal const string PositionPatternAnchorId = "fh-position-pattern";
+
+    /// <summary>
+    /// The anchor id of the storage-assurance section — the block's
+    /// <b>host deep-link surface</b>, and the only section identity this
+    /// component exports.
+    /// <para>
+    /// A host with its own data-ownership copy states what <i>it</i> owns and
+    /// points here for the panel's half rather than restating it (the
+    /// one-owner rule the whole component exists for). That promise used to
+    /// live only in prose, which left the host spelling <c>fh-*</c> as a
+    /// literal and a rename here breaking it silently; rendered from this
+    /// constant and consumed from it, the link and the heading it lands on
+    /// cannot drift apart.
+    /// </para>
+    /// <para>
+    /// Stable across <see cref="HeadingLevel"/> — the level moves the tag,
+    /// never the id — and renamed only as a deliberate breaking change to
+    /// every host that links here, exactly like the file names on
+    /// <see cref="SavedFiltersDocument"/>. The other eleven ids stay
+    /// <c>internal</c>: no host links to them, and exporting them would
+    /// freeze structure nobody depends on.
+    /// </para>
+    /// </summary>
+    public const string StorageSectionAnchorId = "fh-what-is-remembered";
+
+    /// <summary>
+    /// The storage-assurance section's heading text, for a host composing its
+    /// own sentence around a link to <see cref="StorageSectionAnchorId"/> —
+    /// the producer owns the phrase, the host owns the sentence it sits in
+    /// (the <c>FolderPickDisplay.DeadPickVerdict</c> shape).
+    /// <para>
+    /// Exported beside the id rather than as a composed link so host phrasing
+    /// stays the host's and no markup ends up inside a constant. The heading
+    /// renders from this constant, so a reader following the link arrives at
+    /// the words the link promised — and a reword is one edit, not two.
+    /// </para>
+    /// </summary>
+    public const string StorageSectionHeading = "What the panel remembers";
+
     /// <summary>
     /// The heading level of this block's lead heading ("Filters"); every
     /// section below it renders one level deeper. Valid values are 1 through

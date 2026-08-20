@@ -381,10 +381,11 @@ description of the panel's semantics is a second encoding that silently
 drifts. Render-only: it issues no JS interop and touches no storage or
 state of its own — it *documents* what `FilterPanel` persists without
 participating in it. Structured for embedding: one
-`<section>` per topic, each heading carrying a stable `fh-*` anchor id,
-facet heading text from the lib's `FilterFacet` `[Description]`s via
-`ToLabel()` — so help titles, panel section headings, and the
-hidden-active signal all name a facet identically. The depth section
+`<section>` per topic, each heading carrying a stable `fh-*` anchor id —
+rendered from a named constant on the component, never a re-typed
+literal — facet heading text from the lib's `FilterFacet`
+`[Description]`s via `ToLabel()`, so help titles, panel section headings,
+and the hidden-active signal all name a facet identically. The depth section
 explains the union semantics (each checked mode admits its decisions;
 more checked = more matched; nothing checked = facet off), the
 inner-level distinction per mode, and the per-mode **Analysis level**
@@ -413,10 +414,10 @@ below, so the block contributes a well-formed two-tier outline wherever it
 lands. Only the host knows the outline it is embedding into — see Pitfalls
 for why the parameter is `[EditorRequired]` rather than defaulted, and
 for the migration it forces. The `fh-*` anchor ids are unaffected by the
-level and stay the embedding contract (pinned).
+level (pinned).
 
 A final non-facet section, **What the panel remembers**
-(`fh-what-is-remembered`), is the storage-assurance copy: it states in
+(`StorageSectionAnchorId`), is the storage-assurance copy: it states in
 user terms that the panel saves its settings in the reader's own browser
 on their own machine and uploads nothing, and it names both
 `localStorage` entries — the applied config and the disclosure
@@ -428,6 +429,9 @@ Scope is exactly what `FilterPanel` persists: a sibling `xg_*` key
 belonging to a host app is that host's to document. A host with its own
 data-ownership copy points *into* this section rather than restating it
 (BgQuiz's Help does that) — the same one-owner rule as the facet prose.
+That link is a code contract, not a prose one: the section's id and its
+heading text are the component's two `public` constants, and the heading
+renders from the same pair the host links with (see Host surface).
 
 ### Non-visual interaction model (`Model/`)
 
@@ -688,11 +692,15 @@ host's help lives and add app-level framing around it.
   parameters-set. Required because only the host knows the outline it is
   embedding into — see Pitfalls.
 
-Stable `fh-*` anchor ids on every heading are the embedding surface for
-hosts that want to deep-link a section — including `fh-using-the-panel`
-(the chrome section) and `fh-what-is-remembered`, the storage-assurance
-section a host's data-ownership copy points at. The ids do not move with
-`HeadingLevel`.
+- `const string StorageSectionAnchorId` / `const string
+  StorageSectionHeading` — the storage-assurance section's anchor id and
+  heading text: the deep-link surface a host's data-ownership copy points
+  at, composing its own sentence around them rather than spelling either
+  as a literal. The heading renders from the same pair, so the link and
+  what it lands on cannot drift. Stable across `HeadingLevel`; renamed
+  only as a deliberate breaking change. The members' own docs carry the
+  rest — including why the other eleven `fh-*` ids are constants too but
+  `internal`.
 
 `FilterPanel`'s two `localStorage` key constants are `internal`, not
 public: the copy naming them lives here, in the producer, so a consumer
@@ -832,7 +840,8 @@ producer-side, so neither widens what consumers can see.
   the point of making the level explicit. Sections are always lead + 1:
   don't add a second parameter for them, and don't let a host set them
   independently. The `fh-*` anchor ids never move with the level (pinned)
-  — they are the embedding contract, and hosts may already link to them.
+  — hosts may already link to them, and `StorageSectionAnchorId` says so
+  in the type system.
 - **Panel documentation has one owner: `FilterHelp`.** Consumers embed
   the component and add app-level framing only — a consumer that writes
   its own description of a facet's semantics creates a second encoding
@@ -841,8 +850,9 @@ producer-side, so neither widens what consumers can see.
   `FilterHelp` lacks, the fix is to extend `FilterHelp` here, not to
   write it host-side. That rule is why the storage-assurance copy for
   the panel's own keys is producer-owned too — a host states its own
-  data ownership and points into `fh-what-is-remembered` for the panel's
-  half. **It covers the chrome as well as the facets**: the disclosure
+  data ownership and points into the storage section for the panel's
+  half, linking with `FilterHelp.StorageSectionAnchorId` rather than a
+  literal. **It covers the chrome as well as the facets**: the disclosure
   and its hidden-active signal, Apply's two disabled states, Clear
   filters. Those are the panel's behavior, not the app's, so a host
   describing them is the same drift hazard one tier up — app-level
