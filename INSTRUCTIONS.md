@@ -206,6 +206,36 @@ loads, shows its values, marks the offender, and is refused a commit —
 never silently repaired, never dropped (the lib's documented posture,
 pinned).
 
+**The match-score field's verdict — two voices over one lib seam**
+(`halheinrich/backgammon#121`). The score-token grammar joined the lib's
+field table when the money token split by the Jacoby rule, so this field
+is the second to red itself off `GetInvalidFields()` membership
+(`FilterField.MatchScores`) and the second to close Apply through the
+same `IsCommittable` member — Apply-gating parity with the
+position-pattern field comes for free from that one member, and is
+pinned. The seam has a second tier the error bounds do not need: the
+field names the *list*, not what is wrong in it, so the panel asks
+`MatchScoreToken.GetFault` per token and reads back a
+`MatchScoreTokenFault`. It renders **one voice per distinct fault kind**
+into `#matchScoreFeedback` — `Malformed` states the vocabulary and is
+answered by retyping; `Retired` says the bare money token is retired and
+names its replacements from `MatchScoreToken.RetiredMoneyReplacements`,
+because that mistake was correct spelling under an earlier grammar and
+retyping is not the remedy. A buffer holding both kinds gets both lines;
+many tokens of one kind still get one. The lib returns no strings — the
+fault is typed and wordless, the wording is the panel's, the same
+division of labour as `BoardPattern.TryParse`.
+
+Both feedback lines key on their **own** fields, never on "the invalid
+set is non-empty": the set now spans two facets, and a facet-blind test
+would explain the error bounds over a fault committed three sections
+down (pinned both ways).
+
+**Token spellings render from the lib's constants, never as literals.**
+The placeholder's examples, the hint line, and both verdicts all render
+`MatchScoreToken.MoneyWithJacoby` / `MoneyWithoutJacoby` /
+`RetiredMoney` — see Pitfalls.
+
 **Information hierarchy** (dogfooding-driven): the error-range section is
 first and always visible — it is the panel's most-used control. The other
 eight sections (player names, decision type, match scores, move number
@@ -390,7 +420,14 @@ explains the union semantics (each checked mode admits its decisions;
 more checked = more matched; nothing checked = facet off), the
 inner-level distinction per mode, and the per-mode **Analysis level**
 disclosure: what its `any` / `N selected` badge says without opening it,
-and that levels under an unchecked mode are kept but inert. The shelved
+and that levels under an unchecked mode are kept but inert. The
+match-scores section teaches the two rule-bearing money tokens, that
+admitting either rule means listing both, and that a session whose file
+never recorded the Jacoby rule matches neither (rare to the point of
+absent from files the current converter writes); it renders those
+spellings from `MatchScoreToken`'s constants and deliberately does not
+offer the retired bare token — explaining a retirement belongs to the
+panel, which meets it where a user still has one typed. The shelved
 facets (Position types / Play types) are deliberately undocumented until
 their UI returns.
 
@@ -522,6 +559,16 @@ bUnit + xUnit, targets .NET 10. `BunitContext` with
 `JSInterop.Mode = JSRuntimeMode.Loose` so `OnAfterRenderAsync`'s
 `localStorage.getItem` calls return `default` (treated as "no persisted
 state").
+
+**Pin posture: structure and wiring, never copy.** These suites assert
+that a component renders the identity, value, or spelling its source of
+truth names — the anchor ids, the storage keys, the score-token
+constants — reached through test-only `InternalsVisibleTo` where the
+source is `internal`. Wording itself is not pinned here: an
+independent-literal oracle for "the user can read X" would be a second
+copy of the very text under test, so that oracle lives in the consumer's
+e2e suite. The corollary is the no-literal-spellings rule in Pitfalls,
+which binds these pins as much as the markup.
 
 ### Test-support assembly (`XgFilter_Razor.Testing`)
 
@@ -942,6 +989,24 @@ producer-side, so neither widens what consumers can see.
   membership), not a facet-wide red. What the panel does own is the
   wording: `GetInvalidFields` deliberately returns no message strings, the
   same division of labour as `BoardPattern.TryParse`.
+- **Never type a lib-owned spelling as a literal — render it.** Anything
+  the user types that the lib parses has an exported constant, and that
+  constant is the only place the spelling exists on this side:
+  `MatchScoreToken.MoneyWithJacoby` / `MoneyWithoutJacoby` /
+  `RetiredMoney` (and `RetiredMoneyReplacements` for what to offer in
+  place of the retired one) across the placeholder, the hint line, both
+  verdicts, and `FilterHelp`'s match-scores prose; `FilterPanel.ConfigKey`
+  / `DisclosureKey` for the storage names; `FilterFacet` / enum
+  `[Description]`s via `ToLabel()` for every label. A second literal
+  agrees today and drifts silently the day the grammar respells a token —
+  which is exactly what the bare money token did in
+  `halheinrich/backgammon#121`, and the reason those constants are
+  exported at all. **The rule binds the tests too**: a pin that re-types
+  the spelling is a third copy, and it would keep passing through the
+  drift it exists to catch. Where an *absence* must be pinned and a
+  substring check cannot serve — the retired spelling is a prefix of both
+  live ones — ask the grammar word by word (`GetFault`) rather than
+  reaching for a literal.
 - **`TryGetEditedConfig` is Apply's validity gate, and must stay exactly
   that.** Both directions matter. Stricter, and save-as refuses a
   selection the user could apply; looser, and a saved document is minted

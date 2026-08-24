@@ -1,5 +1,6 @@
 @using System.Globalization
 @using XgFilter_Lib.Enums
+@using XgFilter_Lib.Filtering
 @using XgFilter_Razor.Components.Internal
 
 @* ── FilterHelp.razor ────────────────────────────────────────────────────────
@@ -112,6 +113,14 @@
         </p>
     </section>
 
+    @* The token spellings here render from MatchScoreToken's exported
+       constants, never as literals — the same discipline the storage section
+       keeps with the panel's key names, and the reason those constants are
+       exported at all. The section teaches the two rule-bearing money tokens
+       that replaced the bare one (halheinrich/backgammon#121); the bare
+       spelling is retired vocabulary and is deliberately not offered here.
+       Explaining the retirement belongs to the panel, which meets it where a
+       user still has one typed. *@
     <section>
         @Heading(SectionLevel, MatchScoresAnchorId, FilterFacet.MatchScores.ToLabel())
         <p>
@@ -120,8 +129,13 @@
             anchored to the player on roll: M is the points the player on roll
             still needs, N the opponent — so 4a5a and 5a4a are different
             scores; list both to catch either orientation. Append C for a
-            Crawford game (1a2aC), write money for money sessions, and note
-            double match point is 1a1a.
+            Crawford game (1a2aC), write @MatchScoreToken.MoneyWithJacoby or
+            @MatchScoreToken.MoneyWithoutJacoby for a session played with or
+            without the Jacoby rule, and note double match point is 1a1a.
+            Those two are separate scores like any other, so list both to
+            admit a session under either rule. A session whose file never
+            recorded which way the Jacoby rule was set matches neither of
+            them — vanishingly rare, and nothing you can type picks it up.
         </p>
     </section>
 

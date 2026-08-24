@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.RegularExpressions;
 using AngleSharp.Dom;
 using Bunit;
 using Microsoft.AspNetCore.Components;
@@ -68,6 +69,36 @@ public class FilterPanelTests : BunitContext
 
     private static IElement Apply(IRenderedComponent<FilterPanel> cut) =>
         cut.Find("button.btn-primary");
+
+    // The match-score box, behind the disclosure. Selected by the stable head
+    // of its placeholder rather than the whole string, so the example tokens it
+    // advertises stay free to change — they did, when the money token split by
+    // the Jacoby rule (halheinrich/backgammon#121) — without re-keying every
+    // test that types here.
+    private static IElement MatchScores(IRenderedComponent<FilterPanel> cut) =>
+        cut.Find("input[placeholder^='e.g. 4a5a']");
+
+    // The match-score field's rendered verdicts, one entry per voice, with
+    // incidental markup whitespace collapsed. A list, not a string: the panel
+    // words a malformed token and a retired one differently, and how many
+    // voices spoke is as much a part of the assertion as what they said.
+    private static string[] MatchScoreVerdicts(IRenderedComponent<FilterPanel> cut) =>
+        cut.FindAll("#matchScoreFeedback span")
+           .Select(e => Regex.Replace(e.TextContent.Trim(), @"\s+", " "))
+           .ToArray();
+
+    // The words of a rendered line that the grammar calls retired vocabulary —
+    // the oracle for "this copy offers no retired spelling". A literal absence
+    // check cannot serve here: the retired token's spelling is a prefix of both
+    // live ones, so `DoesNotContain("money")` would fail on the very tokens the
+    // copy is supposed to advertise. Asking MatchScoreToken.GetFault word by
+    // word puts the question to the same grammar the panel renders from, and
+    // needs no literal at all.
+    private static string[] RetiredWordsIn(string text) =>
+        Regex.Split(text, "[^A-Za-z0-9]+")
+             .Where(w => w.Length > 0
+                      && MatchScoreToken.GetFault(w) == MatchScoreTokenFault.Retired)
+             .ToArray();
 
     [Fact]
     public void Render_DefaultParameters_ProducesFilterCardMarkup()
@@ -1114,7 +1145,7 @@ public class FilterPanelTests : BunitContext
 
         // Anchor to the match-score section's own hint, not just page markup,
         // so an unrelated mention of the convention elsewhere can't satisfy this.
-        var section = cut.Find("input[placeholder^='e.g. 4a5a']").ParentElement!;
+        var section = MatchScores(cut).ParentElement!;
         var hint = section.QuerySelector(".form-text")!;
 
         Assert.Contains("on-roll-anchored", hint.TextContent);
@@ -1132,7 +1163,7 @@ public class FilterPanelTests : BunitContext
     {
         var cut = RenderExpanded();
 
-        var placeholder = cut.Find("input[placeholder^='e.g. 4a5a']").GetAttribute("placeholder")!;
+        var placeholder = MatchScores(cut).GetAttribute("placeholder")!;
 
         Assert.DoesNotContain("DMP", placeholder);
     }
@@ -1150,7 +1181,7 @@ public class FilterPanelTests : BunitContext
     {
         var cut = RenderExpanded();
 
-        var placeholder = cut.Find("input[placeholder^='e.g. 4a5a']").GetAttribute("placeholder")!;
+        var placeholder = MatchScores(cut).GetAttribute("placeholder")!;
         var examples = placeholder
             .Replace("e.g. ", string.Empty)
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -1159,6 +1190,219 @@ public class FilterPanelTests : BunitContext
         // Build() is the lib's Apply-time validation path.
         var cfg = new FilterConfig { MatchScores = [.. examples] };
         Assert.Null(Record.Exception(() => cfg.Build()));
+    }
+
+    // ── Match-score token validity ─────────────────────────────────────────
+    //
+    // The grammar itself lives in XgFilter_Lib (MatchScoreToken) and is asked
+    // twice over: FilterConfig.GetInvalidFields() names the list when any entry
+    // faults, and MatchScoreToken.GetFault says of a single token which kind of
+    // fault it is. These pins are the panel's half — that it asks, that it
+    // marks this field and no other, that Apply and save both refuse while a
+    // token is faulted, and that the two fault kinds get two voices.
+    //
+    // Posture, stated because this leg turns on it: this suite pins structure
+    // and wiring, never copy — the same ruling FilterHelpTests records. Where a
+    // token spelling must enter an assertion it is referenced from
+    // MatchScoreToken's constants, never re-typed: two literals would agree
+    // today and drift silently the day a token is respelled, which is the exact
+    // drift the exported constants exist to prevent. The independent-literal
+    // oracle for "the user can read X" lives in the e2e suite.
+
+    // Both fault kinds land in the same panel state, and it is the
+    // position-pattern field's: the field reds itself, a verdict appears under
+    // it, and Apply closes — with no #applyDisabledReason line, because an
+    // invalid value explains itself where it was typed and the panel never
+    // states a reason twice.
+    [Theory]
+    [InlineData("not-a-score")]
+    [InlineData(MatchScoreToken.RetiredMoney)]
+    public void FaultedMatchScoreToken_MarksTheField_AndGatesApply(string token)
+    {
+        var cut = RenderExpanded();
+
+        MatchScores(cut).Input(token);
+
+        Assert.Contains("is-invalid", MatchScores(cut).GetAttribute("class"));
+        Assert.Single(MatchScoreVerdicts(cut));
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+        Assert.Empty(cut.FindAll("#applyDisabledReason"));
+    }
+
+    // The clean case, including both live money tokens: listing them together
+    // is what the retired one used to mean, and the panel must let it through
+    // rather than treating "two money entries" as a contradiction.
+    [Fact]
+    public void ValidMatchScoreTokens_LeaveTheFieldClean_AndApplyOffered()
+    {
+        var cut = RenderExpanded();
+
+        MatchScores(cut).Input(
+            $"4a5a, 1a2aC, {MatchScoreToken.MoneyWithJacoby}, {MatchScoreToken.MoneyWithoutJacoby}");
+
+        Assert.DoesNotContain("is-invalid", MatchScores(cut).GetAttribute("class"));
+        Assert.Empty(MatchScoreVerdicts(cut));
+        Assert.False(Apply(cut).HasAttribute("disabled"));
+    }
+
+    // The malformed voice states the vocabulary, and the spellings it states
+    // are the grammar's own — not this test's, and not the panel's either.
+    // The second half is the absent half of the pair: a malformed token is
+    // answered by retyping it, so this line must never hand the user a
+    // spelling the grammar has retired.
+    [Fact]
+    public void MalformedMatchScoreToken_VerdictNamesTheMoneyTokens_AndNoRetiredSpelling()
+    {
+        var cut = RenderExpanded();
+
+        MatchScores(cut).Input("not-a-score");
+
+        var verdict = Assert.Single(MatchScoreVerdicts(cut));
+        Assert.Contains(MatchScoreToken.MoneyWithJacoby, verdict);
+        Assert.Contains(MatchScoreToken.MoneyWithoutJacoby, verdict);
+        Assert.Empty(RetiredWordsIn(verdict));
+    }
+
+    // The retired voice is the one that may — must — speak the retired
+    // spelling: it is naming what the user typed. Both halves pinned, and both
+    // from the lib: the retired token it names is MatchScoreToken's, and the
+    // replacements it offers are the lib's own statement of what to offer,
+    // RetiredMoneyReplacements, rather than a pair this panel chose.
+    [Fact]
+    public void RetiredMatchScoreToken_VerdictNamesTheTokenAndItsReplacements()
+    {
+        var cut = RenderExpanded();
+
+        MatchScores(cut).Input(MatchScoreToken.RetiredMoney);
+
+        var verdict = Assert.Single(MatchScoreVerdicts(cut));
+        Assert.Equal([MatchScoreToken.RetiredMoney], RetiredWordsIn(verdict));
+        foreach (var replacement in MatchScoreToken.RetiredMoneyReplacements)
+            Assert.Contains(replacement, verdict);
+    }
+
+    // Two voices, not one line with a swapped noun — the remedies genuinely
+    // differ (retype it versus use these instead), so a buffer holding both
+    // kinds gets both, in the order the panel renders them.
+    [Fact]
+    public void MatchScoreVerdicts_AreOneVoicePerFaultKind()
+    {
+        var cut = RenderExpanded();
+
+        MatchScores(cut).Input("not-a-score");
+        var malformed = Assert.Single(MatchScoreVerdicts(cut));
+
+        MatchScores(cut).Input(MatchScoreToken.RetiredMoney);
+        var retired = Assert.Single(MatchScoreVerdicts(cut));
+
+        Assert.NotEqual(malformed, retired);
+
+        MatchScores(cut).Input($"not-a-score, {MatchScoreToken.RetiredMoney}");
+
+        Assert.Equal([malformed, retired], MatchScoreVerdicts(cut));
+    }
+
+    // One kind of mistake is explained once, however many entries made it —
+    // the verdict is per fault kind, not per offending token.
+    [Fact]
+    public void ManyFaultedTokensOfOneKind_SpeakWithOneVoice()
+    {
+        var cut = RenderExpanded();
+
+        MatchScores(cut).Input("not-a-score, 0a5a, 3a5aC");
+
+        Assert.Single(MatchScoreVerdicts(cut));
+    }
+
+    // Recovery: the mark, the verdict, and the gate are all derived, never
+    // latched, so correcting the token restores the panel with no other
+    // gesture — the error-bound recovery pin, over the field next door.
+    [Fact]
+    public void FixingFaultedMatchScoreToken_ClearsTheVerdict_AndReEnablesApply()
+    {
+        var cut = RenderExpanded();
+
+        MatchScores(cut).Input(MatchScoreToken.RetiredMoney);
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+
+        MatchScores(cut).Input(MatchScoreToken.MoneyWithoutJacoby);
+
+        Assert.DoesNotContain("is-invalid", MatchScores(cut).GetAttribute("class"));
+        Assert.Empty(MatchScoreVerdicts(cut));
+        Assert.False(Apply(cut).HasAttribute("disabled"));
+    }
+
+    // Attribution across facets, both directions. The invalid-field set now
+    // spans two facets, so each feedback line must key on its own fields: a
+    // faulted token must not draw an explanation of the error bounds, and a
+    // bad bound must not draw one about score tokens. This is what fails if
+    // either line is ever pointed at the wrong field.
+    [Fact]
+    public void FaultedMatchScoreToken_DrawsNoErrorRangeVerdict()
+    {
+        var cut = RenderExpanded();
+
+        MatchScores(cut).Input(MatchScoreToken.RetiredMoney);
+
+        Assert.Single(MatchScoreVerdicts(cut));
+        Assert.Empty(cut.FindAll("#errorRangeFeedback"));
+        Assert.DoesNotContain("is-invalid", ErrorMin(cut).GetAttribute("class"));
+        Assert.DoesNotContain("is-invalid", ErrorMax(cut).GetAttribute("class"));
+    }
+
+    [Fact]
+    public void InvalidErrorBound_DrawsNoMatchScoreVerdict()
+    {
+        var cut = RenderExpanded();
+
+        ErrorMin(cut).Input("-1");
+
+        Assert.NotNull(cut.Find("#errorRangeFeedback"));
+        Assert.Empty(MatchScoreVerdicts(cut));
+        Assert.DoesNotContain("is-invalid", MatchScores(cut).GetAttribute("class"));
+    }
+
+    // The field's advertised copy — the placeholder's examples and the hint
+    // line beneath it — offers nothing the grammar has retired. The absent
+    // half of the placeholder pair (its present half is
+    // MatchScorePlaceholder_ExampleTokensAllParse, which the retired token
+    // fails through Build()), extended to the hint, which advertised the bare
+    // money token too until halheinrich/backgammon#121 split it.
+    [Fact]
+    public void MatchScoreFieldCopy_OffersNoRetiredSpelling()
+    {
+        var cut = RenderExpanded();
+
+        var placeholder = MatchScores(cut).GetAttribute("placeholder")!;
+        var hint = MatchScores(cut).ParentElement!.QuerySelector(".form-text")!.TextContent;
+
+        Assert.Empty(RetiredWordsIn(placeholder));
+        Assert.Empty(RetiredWordsIn(hint));
+        // The present half for the hint: it names both live tokens, from the
+        // grammar's constants rather than a literal of its own.
+        Assert.Contains(MatchScoreToken.MoneyWithJacoby, hint);
+        Assert.Contains(MatchScoreToken.MoneyWithoutJacoby, hint);
+    }
+
+    // The lib's documented posture, pinned at the panel for the case
+    // halheinrich/backgammon#121 actually creates: a filter saved before the
+    // money token split still loads, still shows the token it holds, marks the
+    // field, and is refused a commit — never silently rewritten to one of the
+    // replacements (which would change the user's filter behind their back),
+    // never silently dropped.
+    [Fact]
+    public void StoredConfigWithRetiredMoneyToken_LoadsAndShowsInvalid_WithApplyGated()
+    {
+        JSInterop.Setup<string?>("localStorage.getItem", ConfigKey)
+            .SetResult(new FilterConfig { MatchScores = [MatchScoreToken.RetiredMoney] }.ToJson());
+
+        var cut = Render<FilterPanel>();
+        ExpandMoreFilters(cut);
+
+        Assert.Equal(MatchScoreToken.RetiredMoney, MatchScores(cut).GetAttribute("value"));
+        Assert.Contains("is-invalid", MatchScores(cut).GetAttribute("class"));
+        Assert.Single(MatchScoreVerdicts(cut));
+        Assert.True(Apply(cut).HasAttribute("disabled"));
     }
 
     // LoadConfig is staging-only: it projects the config into the edit buffers
@@ -1253,19 +1497,25 @@ public class FilterPanelTests : BunitContext
         Assert.Null(cfg);
     }
 
-    // Pins the deliberate Apply-parity contract: TryGetEditedConfig is no
-    // stricter than Apply. Match-score text rides raw through both paths and
-    // is validated only downstream in FilterConfig.Build() — a config you
-    // could Apply is always a config you can save.
-    [Fact]
-    public void TryGetEditedConfig_MirrorsApplyGate_RawMatchScoreTextPasses()
+    // Re-keyed by halheinrich/backgammon#121, and the re-keying is the point.
+    // Match-score text used to ride raw through both paths, validated only
+    // downstream in FilterConfig.Build(); the grammar has since joined the
+    // lib's field table, so GetInvalidFields names the list and the one
+    // IsCommittable member both gates read tightened in the same edit. Save
+    // still mirrors Apply exactly — which is why this pin moved rather than
+    // being deleted: a saved document minted from a faulted token would be a
+    // permanent trap, since loading it reproduces the state with Apply shut.
+    [Theory]
+    [InlineData("not-a-score")]
+    [InlineData(MatchScoreToken.RetiredMoney)]
+    public void TryGetEditedConfig_FaultedMatchScoreToken_ReturnsFalseNull(string token)
     {
         var cut = RenderExpanded();
 
-        cut.Find("input[placeholder^='e.g. 4a5a']").Input("not-a-score");
+        MatchScores(cut).Input(token);
 
-        Assert.True(cut.Instance.TryGetEditedConfig(out var cfg));
-        Assert.Contains("not-a-score", cfg!.MatchScores);
+        Assert.False(cut.Instance.TryGetEditedConfig(out var cfg));
+        Assert.Null(cfg);
     }
 
     // ── Error-bound validity ───────────────────────────────────────────────

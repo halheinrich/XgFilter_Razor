@@ -1,5 +1,7 @@
+using System.Text.RegularExpressions;
 using Bunit;
 using XgFilter_Lib.Enums;
+using XgFilter_Lib.Filtering;
 using XgFilter_Razor.Components;
 using XgFilter_Razor.Components.Internal;
 
@@ -105,6 +107,48 @@ public class FilterHelpTests : BunitContext
 
         Assert.Equal(new[] { FilterPanel.ConfigKey, FilterPanel.DisclosureKey }, keys);
     }
+
+    // Same posture, same reason, one section down. The match-scores section
+    // teaches a vocabulary the lib owns and exports, so the spellings it
+    // renders must be that export rather than a copy of it — a second literal
+    // here would agree today and drift the day a token is respelled, which is
+    // precisely what happened to the bare money token
+    // (halheinrich/backgammon#121). Present half: both live tokens are named.
+    [Fact]
+    public void MatchScoresSection_NamesBothMoneyTokens_FromTheLibsConstants()
+    {
+        var cut = RenderHelp();
+
+        var prose = MatchScoresProse(cut);
+
+        Assert.Contains(MatchScoreToken.MoneyWithJacoby, prose);
+        Assert.Contains(MatchScoreToken.MoneyWithoutJacoby, prose);
+    }
+
+    // Absent half: the section no longer tells anyone to write the retired
+    // token. It cannot be asked as a substring — the retired spelling is a
+    // prefix of both live ones — so it is asked of the grammar instead, word
+    // by word, which needs no literal and cannot go stale. Explaining the
+    // retirement is the panel's job, where a user still has one typed; help
+    // that is read before typing anything teaches only live vocabulary.
+    [Fact]
+    public void MatchScoresSection_OffersNoRetiredSpelling()
+    {
+        var cut = RenderHelp();
+
+        var retired = Regex.Split(MatchScoresProse(cut), "[^A-Za-z0-9]+")
+                           .Where(w => w.Length > 0
+                                    && MatchScoreToken.GetFault(w) == MatchScoreTokenFault.Retired)
+                           .ToArray();
+
+        Assert.Empty(retired);
+    }
+
+    // The match-scores section's prose, scoped to the section so a mention of
+    // a token anywhere else in the block cannot satisfy — or break — either
+    // half of the pair above.
+    private static string MatchScoresProse(IRenderedComponent<FilterHelp> cut) =>
+        cut.Find($"#{FilterHelp.MatchScoresAnchorId} ~ p").TextContent;
 
     // The two non-facet sections carry stable anchor ids on headings, like
     // every facet section here — those anchors are the embedding surface a
