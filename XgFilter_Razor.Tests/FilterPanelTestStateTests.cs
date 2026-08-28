@@ -32,7 +32,7 @@ public class FilterPanelTestStateTests : BunitContext
 
         cut.WaitForAssertion(() => Assert.Equal(
             "0.1",
-            cut.Find("input[type='number'][placeholder='Min']").GetAttribute("value")));
+            cut.Find("#errorMin").GetAttribute("value")));
     }
 
     // The seeded blob is the config's own serialization, so a test cannot
@@ -49,8 +49,8 @@ public class FilterPanelTestStateTests : BunitContext
 
         cut.WaitForAssertion(() =>
         {
-            Assert.Equal("0.1", cut.Find("input[type='number'][placeholder='Min']").GetAttribute("value"));
-            Assert.Equal("0.5", cut.Find("input[type='number'][placeholder='Max']").GetAttribute("value"));
+            Assert.Equal("0.1", cut.Find("#errorMin").GetAttribute("value"));
+            Assert.Equal("0.5", cut.Find("#errorMax").GetAttribute("value"));
         });
     }
 

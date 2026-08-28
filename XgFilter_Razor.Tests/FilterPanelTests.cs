@@ -61,11 +61,22 @@ public class FilterPanelTests : BunitContext
 
     // The two controls these tests drive to make the panel dirty and clean
     // again — the always-visible Error-range Min box and the Apply button.
+    // Keyed by id, like every other handle here: the panel has two range
+    // facets and they carry the same Min/Max placeholders, so a placeholder
+    // selector would resolve by document order and silently follow whichever
+    // section renders first.
     private static IElement ErrorMin(IRenderedComponent<FilterPanel> cut) =>
-        cut.Find("input[type='number'][placeholder='Min']");
+        cut.Find("#errorMin");
 
     private static IElement ErrorMax(IRenderedComponent<FilterPanel> cut) =>
-        cut.Find("input[type='number'][placeholder='Max']");
+        cut.Find("#errorMax");
+
+    // The other range facet's pair, behind the disclosure.
+    private static IElement MoveNumberMin(IRenderedComponent<FilterPanel> cut) =>
+        cut.Find("#moveNumberMin");
+
+    private static IElement MoveNumberMax(IRenderedComponent<FilterPanel> cut) =>
+        cut.Find("#moveNumberMax");
 
     private static IElement Apply(IRenderedComponent<FilterPanel> cut) =>
         cut.Find("button.btn-primary");
@@ -496,7 +507,7 @@ public class FilterPanelTests : BunitContext
         var cut = RenderExpanded();
 
         cut.Find("input[placeholder='e.g. Hal, Magriel']").Input("Hal, Magriel");
-        cut.Find("input[type='number'][placeholder='Min']").Input("0.05");
+        cut.Find("#errorMin").Input("0.05");
         cut.Find("#dt_CheckerPlaysOnly").Change(true);
         cut.Find("#ct_Race").Change(true);
 
@@ -513,7 +524,7 @@ public class FilterPanelTests : BunitContext
         var restored = RenderExpanded();
 
         Assert.Equal("Hal, Magriel", restored.Find("input[placeholder='e.g. Hal, Magriel']").GetAttribute("value"));
-        Assert.Equal("0.05", restored.Find("input[type='number'][placeholder='Min']").GetAttribute("value"));
+        Assert.Equal("0.05", restored.Find("#errorMin").GetAttribute("value"));
         Assert.True(restored.Find("#dt_CheckerPlaysOnly").HasAttribute("checked"));
         Assert.True(restored.Find("#ct_Race").HasAttribute("checked"));
     }
@@ -1332,13 +1343,14 @@ public class FilterPanelTests : BunitContext
         Assert.False(Apply(cut).HasAttribute("disabled"));
     }
 
-    // Attribution across facets, both directions. The invalid-field set now
-    // spans two facets, so each feedback line must key on its own fields: a
-    // faulted token must not draw an explanation of the error bounds, and a
-    // bad bound must not draw one about score tokens. This is what fails if
-    // either line is ever pointed at the wrong field.
+    // Attribution across facets, both directions. The invalid-field set spans
+    // three facets — the score-token list and both range facets — so each
+    // feedback line must key on its own fields: a faulted token must not draw
+    // an explanation of either range, and a bad bound must not draw one about
+    // score tokens. This is what fails if any line is ever pointed at the
+    // wrong field, or at "the lib named something".
     [Fact]
-    public void FaultedMatchScoreToken_DrawsNoErrorRangeVerdict()
+    public void FaultedMatchScoreToken_DrawsNoRangeFacetVerdict()
     {
         var cut = RenderExpanded();
 
@@ -1348,6 +1360,9 @@ public class FilterPanelTests : BunitContext
         Assert.Empty(cut.FindAll("#errorRangeFeedback"));
         Assert.DoesNotContain("is-invalid", ErrorMin(cut).GetAttribute("class"));
         Assert.DoesNotContain("is-invalid", ErrorMax(cut).GetAttribute("class"));
+        Assert.Empty(cut.FindAll("#moveNumberFeedback"));
+        Assert.DoesNotContain("is-invalid", MoveNumberMin(cut).GetAttribute("class"));
+        Assert.DoesNotContain("is-invalid", MoveNumberMax(cut).GetAttribute("class"));
     }
 
     [Fact]
@@ -1682,6 +1697,199 @@ public class FilterPanelTests : BunitContext
         Assert.Null(cfg);
     }
 
+    // ── Move-number-bound validity ─────────────────────────────────────────
+    //
+    // The error-range block above, over the panel's other range facet — the
+    // same three properties (the panel asks, it marks the field the lib names
+    // and no other, and Apply and save both refuse while any field is named)
+    // pinned separately rather than parameterized over the two facets. The
+    // shape is shared, the rules are not: the lib floors an error magnitude at
+    // zero and a move ordinal at one (halheinrich/backgammon#119), so a shared
+    // theory would carry per-facet data for every value anyway and would hide
+    // which floor each case is really exercising. Message text is deliberately
+    // unasserted here as it is above — the wording is the panel's to change,
+    // the rule is not.
+
+    // The floor, from both sides of it: zero is the value a 1-based ordinal
+    // most invites (nothing on screen says moves start at one until this line
+    // appears), and a negative is the value a stored blob can carry in. Either
+    // reds the Min box, draws the facet's own feedback line, and closes Apply.
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-3")]
+    public void MoveNumberMinBelowOne_MarksMinField_AndGatesApply(string bound)
+    {
+        var cut = RenderExpanded();
+
+        MoveNumberMin(cut).Input(bound);
+
+        Assert.Contains("is-invalid", MoveNumberMin(cut).GetAttribute("class"));
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+        Assert.NotNull(cut.Find("#moveNumberFeedback"));
+    }
+
+    // Attribution is per field here too: a Max below the floor beside a good
+    // Min reds only the Max. What proves the styling keys on the lib's
+    // per-FilterField verdict rather than reding the whole facet the moment
+    // anything in it is wrong.
+    [Fact]
+    public void MoveNumberMaxBelowOne_MarksOnlyTheMaxField()
+    {
+        var cut = RenderExpanded();
+
+        MoveNumberMin(cut).Input("1");
+        MoveNumberMax(cut).Input("0");
+
+        Assert.DoesNotContain("is-invalid", MoveNumberMin(cut).GetAttribute("class"));
+        Assert.Contains("is-invalid", MoveNumberMax(cut).GetAttribute("class"));
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+    }
+
+    // The other half of the attribution rule: min > max is a fault of the pair
+    // with neither bound wrong on its own, so both carry the mark and the user
+    // picks which end to move.
+    [Fact]
+    public void MisorderedMoveNumberBounds_MarkBothFields()
+    {
+        var cut = RenderExpanded();
+
+        MoveNumberMin(cut).Input("5");
+        MoveNumberMax(cut).Input("2");
+
+        Assert.Contains("is-invalid", MoveNumberMin(cut).GetAttribute("class"));
+        Assert.Contains("is-invalid", MoveNumberMax(cut).GetAttribute("class"));
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+    }
+
+    // Bounds the lib accepts leave the facet unmarked and silent — the panel
+    // never volunteers an explanation for a rule that is not broken. The
+    // present half of the absence assertions above, and the reason a bound of
+    // one is typed explicitly: it sits on the floor, where an off-by-one in
+    // the rule would show.
+    [Fact]
+    public void ValidMoveNumberBounds_LeaveTheFacetUnmarkedAndSilent()
+    {
+        var cut = RenderExpanded();
+
+        MoveNumberMin(cut).Input("1");
+        MoveNumberMax(cut).Input("30");
+
+        Assert.DoesNotContain("is-invalid", MoveNumberMin(cut).GetAttribute("class"));
+        Assert.DoesNotContain("is-invalid", MoveNumberMax(cut).GetAttribute("class"));
+        Assert.Empty(cut.FindAll("#moveNumberFeedback"));
+        Assert.False(Apply(cut).HasAttribute("disabled"));
+    }
+
+    // Attribution across the two range facets, both directions. They share a
+    // shape and a pair of placeholders, so each line must key on its own two
+    // fields: a bad move number must not draw an explanation of the error
+    // bounds, and a bad error bound must not draw one about move numbers. This
+    // is what fails if either line is ever pointed at "the lib named
+    // something".
+    [Fact]
+    public void InvalidMoveNumberBound_DrawsNoOtherFacetVerdict()
+    {
+        var cut = RenderExpanded();
+
+        MoveNumberMin(cut).Input("0");
+
+        Assert.NotNull(cut.Find("#moveNumberFeedback"));
+        Assert.Empty(cut.FindAll("#errorRangeFeedback"));
+        Assert.DoesNotContain("is-invalid", ErrorMin(cut).GetAttribute("class"));
+        Assert.DoesNotContain("is-invalid", ErrorMax(cut).GetAttribute("class"));
+        Assert.Empty(MatchScoreVerdicts(cut));
+        Assert.DoesNotContain("is-invalid", MatchScores(cut).GetAttribute("class"));
+    }
+
+    [Fact]
+    public void InvalidErrorBound_DrawsNoMoveNumberVerdict()
+    {
+        var cut = RenderExpanded();
+
+        ErrorMin(cut).Input("-1");
+
+        Assert.NotNull(cut.Find("#errorRangeFeedback"));
+        Assert.Empty(cut.FindAll("#moveNumberFeedback"));
+        Assert.DoesNotContain("is-invalid", MoveNumberMin(cut).GetAttribute("class"));
+        Assert.DoesNotContain("is-invalid", MoveNumberMax(cut).GetAttribute("class"));
+    }
+
+    // Recovery: the mark and the gate are derived, never latched, so
+    // correcting the value restores the panel without any other gesture.
+    [Fact]
+    public void FixingInvalidMoveNumberBound_ClearsMark_AndReEnablesApply()
+    {
+        var cut = RenderExpanded();
+
+        MoveNumberMin(cut).Input("0");
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+
+        MoveNumberMin(cut).Input("1");
+
+        Assert.DoesNotContain("is-invalid", MoveNumberMin(cut).GetAttribute("class"));
+        Assert.Empty(cut.FindAll("#moveNumberFeedback"));
+        Assert.False(Apply(cut).HasAttribute("disabled"));
+    }
+
+    // The save gate is Apply's validity gate, whole: an out-of-range move
+    // bound refuses the snapshot exactly as an invalid error bound does, so a
+    // saved document can never be minted from a selection Apply would itself
+    // have refused.
+    [Fact]
+    public void TryGetEditedConfig_InvalidMoveNumberBound_ReturnsFalseNull()
+    {
+        var cut = RenderExpanded();
+
+        MoveNumberMin(cut).Input("5");
+        MoveNumberMax(cut).Input("2");
+
+        Assert.False(cut.Instance.TryGetEditedConfig(out var cfg));
+        Assert.Null(cfg);
+    }
+
+    // The lib's documented posture, pinned end to end for this facet: a stored
+    // selection whose bound a rule outlaws still loads, still shows the values
+    // it holds, marks the offending one only, and is refused a commit. The
+    // case that really exists — the floor arrived in
+    // halheinrich/backgammon#119, after selections carrying a zero could
+    // already have been saved. Never silently repaired (which would change the
+    // user's filter behind their back) and never silently dropped.
+    [Fact]
+    public void StoredConfigWithInvalidMoveNumberBound_LoadsAndShowsInvalid_WithApplyGated()
+    {
+        JSInterop.Setup<string?>("localStorage.getItem", ConfigKey)
+            .SetResult(new FilterConfig { MoveNumberMin = 0, MoveNumberMax = 30 }.ToJson());
+
+        var cut = RenderExpanded();
+
+        Assert.Equal("0", MoveNumberMin(cut).GetAttribute("value"));
+        Assert.Equal("30", MoveNumberMax(cut).GetAttribute("value"));
+        Assert.Contains("is-invalid", MoveNumberMin(cut).GetAttribute("class"));
+        Assert.DoesNotContain("is-invalid", MoveNumberMax(cut).GetAttribute("class"));
+        Assert.NotNull(cut.Find("#moveNumberFeedback"));
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+    }
+
+    // Gate composition across the two range facets: independent rules, so good
+    // bounds in one never rescue bad bounds in the other, and both facets
+    // speak at once when both are wrong. The disabled-reason line stays absent
+    // throughout — an invalid value explains itself where it sits.
+    [Fact]
+    public void InvalidBoundsInBothRangeFacets_MarkBothAndSpeakTwice()
+    {
+        var cut = RenderExpanded();
+
+        ErrorMin(cut).Input("-1");
+        MoveNumberMax(cut).Input("0");
+
+        Assert.Contains("is-invalid", ErrorMin(cut).GetAttribute("class"));
+        Assert.Contains("is-invalid", MoveNumberMax(cut).GetAttribute("class"));
+        Assert.NotNull(cut.Find("#errorRangeFeedback"));
+        Assert.NotNull(cut.Find("#moveNumberFeedback"));
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+        Assert.Empty(cut.FindAll("#applyDisabledReason"));
+    }
+
     // ── Disclosure ─────────────────────────────────────────────────────────
 
     // The default-hidden information hierarchy: at rest the panel shows the
@@ -1700,7 +1908,7 @@ public class FilterPanelTests : BunitContext
         Assert.Equal("moreFilters", toggle.GetAttribute("aria-controls"));
         Assert.NotNull(cut.Find("#moreFilters"));
 
-        Assert.NotNull(cut.Find("input[type='number'][placeholder='Min']"));
+        Assert.NotNull(cut.Find("#errorMin"));
         Assert.NotNull(cut.Find("button.btn-primary"));
         Assert.NotNull(cut.Find("#clearFilters"));
 
@@ -1711,6 +1919,11 @@ public class FilterPanelTests : BunitContext
         Assert.Empty(cut.FindAll("input[id^='md_']"));
         Assert.Empty(cut.FindAll("input[id^='dr_']"));
         Assert.Empty(cut.FindAll("#positionPattern"));
+        // The other range facet is hidden like the rest — the present half of
+        // this pair is the #errorMin assertion above, and the two are only
+        // distinguishable because each box carries its own id.
+        Assert.Empty(cut.FindAll("#moveNumberMin"));
+        Assert.Empty(cut.FindAll("#moveNumberMax"));
     }
 
     // The toggle round-trips: expand shows the hidden sections and flips
@@ -1832,7 +2045,7 @@ public class FilterPanelTests : BunitContext
     {
         var cut = Render<FilterPanel>();
 
-        cut.Find("input[type='number'][placeholder='Min']").Input("0.05");
+        cut.Find("#errorMin").Input("0.05");
 
         Assert.Empty(cut.FindAll("#hiddenActiveCount"));
         Assert.Empty(cut.FindAll("#hiddenActiveNames"));
@@ -1952,7 +2165,7 @@ public class FilterPanelTests : BunitContext
 
         cut.Find("input[placeholder='e.g. Hal, Magriel']").Input("Hal");
         cut.Find("#ct_Race").Change(true);
-        cut.Find("input[type='number'][placeholder='Min']").Input("0.05");
+        cut.Find("#errorMin").Input("0.05");
 
         await cut.Find("#clearFilters").ClickAsync(new());
 

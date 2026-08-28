@@ -74,7 +74,7 @@ public class FilterSurfaceTests : BunitContext
         cut.FindAll("button").Single(b => b.TextContent.Trim().StartsWith("Apply Filter"));
 
     private static IElement ErrorMin(IRenderedComponent<FilterSurface> cut) =>
-        cut.Find("input[type='number'][placeholder='Min']");
+        cut.Find("#errorMin");
 
     private static IElement? FindRowButton(
         IRenderedComponent<FilterSurface> cut, string name, string buttonText)
@@ -489,8 +489,8 @@ public class FilterSurfaceTests : BunitContext
         var cut = RenderSurface(TokenA, storage);
 
         // Min above Max — always-visible facet, so no disclosure gesture needed.
-        cut.Find("input[type='number'][placeholder='Min']").Input("5");
-        cut.Find("input[type='number'][placeholder='Max']").Input("2");
+        cut.Find("#errorMin").Input("5");
+        cut.Find("#errorMax").Input("2");
         await ClickRowButtonAsync(cut, "Race", "Save");
         await ClickRowButtonAsync(cut, "Race", "Overwrite");
 
@@ -498,7 +498,7 @@ public class FilterSurfaceTests : BunitContext
         Assert.Empty(storage.Writes);
 
         // Fixing the bound is a panel gesture, so it moots the refusal.
-        cut.Find("input[type='number'][placeholder='Max']").Input("9");
+        cut.Find("#errorMax").Input("9");
 
         Assert.Empty(cut.FindAll("#filterSaveError"));
     }

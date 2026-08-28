@@ -65,24 +65,31 @@
            and each input reds itself on its own FilterField, so a wrong max
            never marks a min the user got right — the lib's attribution rules
            decide that, and a misordered pair blames both by design. Hoisted
-           into a local like the hidden-active signal below: the two inputs and
-           the feedback line read one evaluation, and the Apply gate reads the
-           same rule through CanApply. The panel writes no rule of its own here
-           — only the words for it. *@
+           into a local like the hidden-active signal below: every marked input
+           and every feedback line on the panel — this facet's, the score
+           tokens', the move numbers' — reads that one evaluation, and the Apply
+           gate reads the same rule through CanApply. The panel writes no rule of
+           its own here — only the words for it. *@
         @{ var invalidFields = InvalidFields; }
         <div class="mb-3">
             <label class="form-label">
                 Error range
                 <small class="text-muted">(inclusive; blank = no bound)</small>
             </label>
+            @* Both range facets carry the same Min/Max placeholders, so the
+               boxes carry ids: a handle that says which facet it belongs to,
+               rather than one that resolves by whichever section renders
+               first. *@
             <div class="d-flex gap-2 align-items-center">
-                <input class="form-control @(invalidFields.Contains(FilterField.ErrorMin) ? "is-invalid" : string.Empty)"
+                <input id="errorMin"
+                       class="form-control @(invalidFields.Contains(FilterField.ErrorMin) ? "is-invalid" : string.Empty)"
                        style="max-width:140px"
                        type="number" step="0.001" placeholder="Min"
                        value="@_errorMinText"
                        @oninput="e => { _errorMinText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
                 <span>–</span>
-                <input class="form-control @(invalidFields.Contains(FilterField.ErrorMax) ? "is-invalid" : string.Empty)"
+                <input id="errorMax"
+                       class="form-control @(invalidFields.Contains(FilterField.ErrorMax) ? "is-invalid" : string.Empty)"
                        style="max-width:140px"
                        type="number" step="0.001" placeholder="Max"
                        value="@_errorMaxText"
@@ -255,23 +262,67 @@
                     }
                 </div>
 
-                @* ── Move number range ───────────────────────────────────────── *@
+                @* ── Move number range ─────────────────────────────────────────
+                   The error range's sibling, wired identically because it is
+                   the same shape of control under the same division of labour:
+                   the lib rules on these bounds too, GetInvalidFields names the
+                   offending one, each input reds itself on its own FilterField,
+                   and a misordered pair blames both while neither bound is
+                   wrong alone. It reads the hoisted invalidFields evaluation
+                   the error range reads, and closes Apply through the same
+                   IsCommittable member — no rule of the panel's own, here or
+                   there. The facets differ only in the floor each bound must
+                   clear (zero for an error magnitude, one for a 1-based move
+                   ordinal), and the floor is the lib's to set; the panel only
+                   words it. *@
                 <div class="mb-3">
                     <label class="form-label">
                         Move number range
                         <small class="text-muted">(inclusive; blank = no bound; non-standard-start games are excluded)</small>
                     </label>
                     <div class="d-flex gap-2 align-items-center">
-                        <input class="form-control" style="max-width:140px"
+                        <input id="moveNumberMin"
+                               class="form-control @(invalidFields.Contains(FilterField.MoveNumberMin) ? "is-invalid" : string.Empty)"
+                               style="max-width:140px"
                                type="number" step="1" min="1" placeholder="Min"
                                value="@_moveNumberMinText"
                                @oninput="e => { _moveNumberMinText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
                         <span>–</span>
-                        <input class="form-control" style="max-width:140px"
+                        <input id="moveNumberMax"
+                               class="form-control @(invalidFields.Contains(FilterField.MoveNumberMax) ? "is-invalid" : string.Empty)"
+                               style="max-width:140px"
                                type="number" step="1" min="1" placeholder="Max"
                                value="@_moveNumberMaxText"
                                @oninput="e => { _moveNumberMaxText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
                     </div>
+                    @* #errorRangeFeedback's shape, for the same reasons: the
+                       explicit @if and d-block because the inputs sit one level
+                       down inside the flex row and Bootstrap's sibling selector
+                       cannot reach across, and one line for both violations
+                       because the user fixes either at the same two boxes.
+                       Keyed to this facet's own two fields, never to "the lib
+                       named something" — the invalid set spans facets, and a
+                       line that fired on any membership would explain the move
+                       numbers over a fault the user committed in the section
+                       above.
+                       The floor is stated here and nowhere else on this screen.
+                       The hint beside the label says what the boxes *mean*
+                       (which end is which, what blank does, which games the
+                       facet can speak about at all); this says what they will
+                       *accept*, and only while something is not accepted. The
+                       error range splits its own copy on exactly that line —
+                       "(inclusive; blank = no bound)" above, "zero or greater"
+                       down here — so a reader who learns one facet's boxes
+                       knows where to look for the other's. *@
+                    @if (invalidFields.Contains(FilterField.MoveNumberMin)
+                         || invalidFields.Contains(FilterField.MoveNumberMax))
+                    {
+                        <div id="moveNumberFeedback" class="invalid-feedback d-block">
+                            Each bound must be a whole number, one or greater, and
+                            Min can't be above Max — fix it to apply, or clear a
+                            bound for no limit on that side.
+                        </div>
+                    }
                 </div>
 
                 @* ── Contact type ────────────────────────────────────────────── *@
