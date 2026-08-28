@@ -120,7 +120,7 @@
             }
         </div>
 
-        @* ── Disclosure toggle ────────────────────────────────────────────────
+        @* ── Disclosure toggle · Clear filters ────────────────────────────────
            An honest disclosure: a real button carrying aria-expanded /
            aria-controls over the always-rendered #moreFilters region, whose
            children render only while expanded. While collapsed, the toggle
@@ -136,7 +136,17 @@
            restore, Apply, Clear, and LoadConfig staging) and live mid-edit.
            The expand/collapse choice belongs to the user, not the config: it
            persists under DisclosureKey, and LoadConfig / Clear filters never
-           move it. *@
+           move it.
+           "Clear filters" shares this row, immediately right of the toggle —
+           beta feedback, ruled to this side in halheinrich/backgammon#153. It
+           is the full-clear gesture under an honest name: it clears filter
+           values only (buffers to defaults, persist + raise the empty config)
+           — it never touches host state or the disclosure, so standing on the
+           disclosure's row claims nothing about it. It precedes the
+           hidden-active names deliberately: those names come and go with the
+           signal, and a control that slides sideways when unrelated prose
+           appears is one the hand stops finding. The count badge stays welded
+           to what it counts by living inside the toggle itself. *@
         @{ var hiddenActive = HiddenActiveFacets; }
         <div class="mb-3 d-flex gap-2 align-items-center">
             <button type="button" id="moreFiltersToggle"
@@ -149,6 +159,11 @@
                 {
                     <span id="hiddenActiveCount" class="badge text-bg-primary ms-1">@hiddenActive.Count</span>
                 }
+            </button>
+            <button type="button" id="clearFilters"
+                    class="btn btn-outline-secondary btn-sm"
+                    @onclick="ClearFiltersAsync">
+                Clear filters
             </button>
             @if (!_moreFiltersExpanded && hiddenActive.Count > 0)
             {
@@ -501,10 +516,12 @@
             }
         </div>
 
-        @* ── Buttons ──────────────────────────────────────────────────────────
-           "Clear filters" is the full-clear gesture under an honest name: it
-           clears filter values only (buffers to defaults, persist + raise the
-           empty config) — it never touches host state or the disclosure.
+        @* ── Apply ────────────────────────────────────────────────────────────
+           The commit button, alone on this row since "Clear filters" moved up
+           beside the disclosure toggle (halheinrich/backgammon#153). The flex
+           row stays: it keeps Apply shrink-to-content rather than letting the
+           button stretch, and it keeps the disabled-reason line reading as the
+           line under the button, which is how the help describes it.
            Apply is gated on CanApply: the position pattern must be committable
            AND the selection must differ from the last-committed config.
            ApplyDisabledReason explains the second case in the
@@ -519,9 +536,6 @@
                     title="@applyDisabledReason"
                     @onclick="ApplyAsync">
                 Apply Filter
-            </button>
-            <button id="clearFilters" class="btn btn-outline-secondary btn-sm" @onclick="ClearFiltersAsync">
-                Clear filters
             </button>
         </div>
         @if (applyDisabledReason is not null)

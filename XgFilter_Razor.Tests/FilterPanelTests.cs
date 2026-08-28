@@ -1893,10 +1893,12 @@ public class FilterPanelTests : BunitContext
     // ── Disclosure ─────────────────────────────────────────────────────────
 
     // The default-hidden information hierarchy: at rest the panel shows the
-    // error-range section, the disclosure toggle, and the two buttons —
-    // every other section's controls are absent from the DOM, not styled
-    // away. The toggle is an honest disclosure control: a real button
-    // carrying aria-expanded and aria-controls.
+    // error-range section, the disclosure row (the toggle with Clear filters
+    // beside it) and the Apply row — every other section's controls are
+    // absent from the DOM, not styled away. The toggle is an honest
+    // disclosure control: a real button carrying aria-expanded and
+    // aria-controls. Presence only here; the row order those two buttons
+    // now share is pinned in the Clear filters contract below.
     [Fact]
     public void Disclosure_DefaultHidden_OnlyErrorRangeToggleAndButtonsAtRest()
     {
@@ -2152,6 +2154,53 @@ public class FilterPanelTests : BunitContext
 
         Assert.Equal("Clear filters", cut.Find("#clearFilters").TextContent.Trim());
         Assert.DoesNotContain("Reset", cut.Markup);
+    }
+
+    // The ruled placement (halheinrich/backgammon#153): Clear filters sits in
+    // the disclosure row, immediately after the Hide/Show toggle — which, in a
+    // default-direction flex row, is immediately to its right. Pinned as a DOM
+    // relationship, not a markup offset: nextElementSibling *is* the adjacency
+    // the ruling is about, so this asserts the intent rather than passing on an
+    // accident of document order.
+    [Fact]
+    public void ClearButton_SitsImmediatelyRightOfTheDisclosureToggle()
+    {
+        var cut = Render<FilterPanel>();
+
+        Assert.Equal(
+            "clearFilters",
+            cut.Find("#moreFiltersToggle").NextElementSibling?.Id);
+    }
+
+    // The other end of the same move: Clear left the commit row, so Apply is
+    // the only control there. Its own test rather than a second assertion on
+    // the adjacency pin — one intent each, so each keeps its own failure.
+    [Fact]
+    public void ApplyRow_CarriesApplyAlone()
+    {
+        var cut = Render<FilterPanel>();
+
+        var applyRow = cut.Find("button.btn-primary").ParentElement!;
+        var onlyButton = Assert.Single(applyRow.QuerySelectorAll("button"));
+        Assert.Equal("Apply Filter", onlyButton.TextContent.Trim());
+    }
+
+    // The adjacency survives the state most able to break it: collapsed with
+    // hidden filters active, the row also carries the hidden-active names.
+    // Clear stays welded to the toggle and the names trail the pair — the
+    // deliberate ordering, so Clear does not slide sideways as the signal
+    // comes and goes.
+    [Fact]
+    public void ClearButton_KeepsItsPlaceWhileTheHiddenActiveSignalShows()
+    {
+        var cut = RenderExpanded();
+
+        cut.Find("#ct_Race").Change(true);
+        cut.Find("#moreFiltersToggle").Click();   // collapse — the signal lights
+
+        var afterToggle = cut.Find("#moreFiltersToggle").NextElementSibling;
+        Assert.Equal("clearFilters", afterToggle?.Id);
+        Assert.Equal("hiddenActiveNames", afterToggle?.NextElementSibling?.Id);
     }
 
     // Clearing raises the empty config, judged by the lib's own predicates —
