@@ -625,25 +625,70 @@ public class FilterPanelTests : BunitContext
         Assert.NotEmpty(cut.FindAll("input[id^='lv_Evaluation_']"));
     }
 
-    // Exhaustive render check for one expanded level group: every AnalysisLevel
-    // member surfaces as a checkbox with its lib-owned [Description] label, in
-    // Enum.GetValues declaration order (the lib's ascending-rigor order — no
-    // UI-side sort rule). Iterating Enum.GetValues covers a new upstream member
-    // automatically, and pins Unknown as a first-class, selectable level.
+    // The ruled level vocabulary in its ruled order — member token paired
+    // with the [Description] label the user actually reads — written out as
+    // an independent literal. This is deliberately a second copy of
+    // BgDataTypes_Lib's AnalysisLevel declaration rather than a projection of
+    // it: an expectation built from Enum.GetValues is a tautology that moves
+    // with the producer and can never fail, which is precisely how the
+    // interleaved reordering and the new Ply3Red member reached this panel's
+    // user-visible surface unpinned (halheinrich/backgammon#159). The order is
+    // XG's own analysis-level menu — the ply family and the XG Roller family
+    // interleave, they are not two separate blocks — with Unknown at the head,
+    // outside the rigor scale rather than least-rigorous. A producer-side
+    // rename, reorder, relabel, insertion or removal breaks this literal, and
+    // that is the point: each of those changes what the user sees, so each
+    // must be ruled on here rather than followed silently.
+    private static readonly (string Member, string Label)[] RuledLevelVocabulary =
+    [
+        ("Unknown",          "Unknown"),
+        ("Ply1",             "1-ply"),
+        ("Ply2",             "2-ply"),
+        ("Ply3Red",          "3-ply Red"),
+        ("Ply3",             "3-ply"),
+        ("XgRoller",         "XG Roller"),
+        ("Ply4",             "4-ply"),
+        ("XgRollerPlus",     "XG Roller+"),
+        ("Ply5",             "5-ply"),
+        ("Ply6",             "6-ply"),
+        ("Ply7",             "7-ply"),
+        ("XgRollerPlusPlus", "XG Roller++"),
+    ];
+
+    // Every mode's expanded level group renders exactly that vocabulary, in
+    // exactly that order, labelled exactly that way. Checked per mode group,
+    // not once for a representative mode: each mode owns its own list, so a
+    // group that fell out of step with its siblings would be invisible to a
+    // single-mode check. Sequence equality also pins the membership — an extra
+    // or missing checkbox fails here too.
+    //
+    // Unknown is pinned present, selectable and first. That is current truth
+    // and it reads as deliberate: the panel's loop is unfiltered, and "level
+    // not recorded" is a real thing to filter for — a book hit whose levels
+    // the book database could not supply carries BookRollout + Unknown as the
+    // producer's graceful-degradation stamp, which
+    // LevelCheckbox_FlowsIntoItsOwnModesListOnly exercises as a deliberate
+    // opt-in. It is not the AnalysisMode treatment, where Unknown gets no
+    // toggle at all: no clause can name an unknown mode, but a clause can
+    // name an unknown level.
     [Fact]
-    public void LevelGroup_RendersEveryLevelInDeclarationOrderWithLibLabels()
+    public void LevelGroup_RendersTheRuledVocabularyInTheRuledOrder()
     {
         var cut = RenderExpanded();
-        CheckModeAndExpandLevels(cut, AnalysisMode.Rollout);
 
-        var renderedOrder = cut.FindAll("input[id^='lv_Rollout_']")
-            .Select(el => Enum.Parse<AnalysisLevel>(el.Id!["lv_Rollout_".Length..]))
-            .ToArray();
-        Assert.Equal(Enum.GetValues<AnalysisLevel>(), renderedOrder);
+        foreach (var mode in SelectableModes)
+        {
+            CheckModeAndExpandLevels(cut, mode);
 
-        foreach (var level in Enum.GetValues<AnalysisLevel>())
-            Assert.Equal(level.ToLabel(),
-                cut.Find($"label[for='lv_Rollout_{level}']").TextContent.Trim());
+            Assert.Equal(
+                RuledLevelVocabulary.Select(v => v.Member),
+                cut.FindAll($"input[id^='lv_{mode}_']")
+                   .Select(el => el.Id![$"lv_{mode}_".Length..]));
+
+            foreach (var (member, label) in RuledLevelVocabulary)
+                Assert.Equal(label,
+                    cut.Find($"label[for='lv_{mode}_{member}']").TextContent.Trim());
+        }
     }
 
     // While collapsed, the group's badge is its hidden-active signal: "any"
@@ -890,6 +935,45 @@ public class FilterPanelTests : BunitContext
         Assert.DoesNotContain("checked", restored.Find("#lv_BookRollout_XgRoller").OuterHtml);
     }
 
+    // Ply3Red through the same persistence path, both directions, against a
+    // literal wire token. It is the newest member of the level vocabulary
+    // (halheinrich/backgammon#159) and the one a serializer or producer change
+    // is likeliest to drop or fold away, so pin it by name: check it, Apply,
+    // and assert the blob literally carries the string "Ply3Red" — the
+    // JsonStringEnumConverter member name, re-typed here on purpose rather
+    // than read back off the enum — then remount from that blob and assert
+    // the checkbox returns checked under its own "3-ply Red" label.
+    //
+    // The closing assertion is the one that matters most: Ply3 must come back
+    // unchecked. XG's "3-ply Red" was a label variant of Ply3 before the
+    // interleave gave it its own identity, and a regression that folded the
+    // two back together would round-trip perfectly while quietly widening the
+    // user's filter.
+    [Fact]
+    public async Task AnalysisDepth_Ply3Red_RoundTripsUnderItsOwnWireToken()
+    {
+        var cut = RenderExpanded();
+
+        CheckModeAndExpandLevels(cut, AnalysisMode.Evaluation);
+        cut.Find("#lv_Evaluation_Ply3Red").Change(true);
+        await Apply(cut).ClickAsync(new());
+
+        var stored = JSInterop.Invocations["localStorage.setItem"]
+            .Last(i => (string?)i.Arguments[0] == ConfigKey)
+            .Arguments[1] as string;
+        Assert.NotNull(stored);
+        Assert.Contains("\"Ply3Red\"", stored!);
+
+        JSInterop.Setup<string?>("localStorage.getItem", ConfigKey).SetResult(stored);
+        var restored = RenderExpanded();
+
+        restored.Find("#lvlToggle_Evaluation").Click();
+        Assert.True(restored.Find("#lv_Evaluation_Ply3Red").HasAttribute("checked"));
+        Assert.Equal("3-ply Red",
+            restored.Find("label[for='lv_Evaluation_Ply3Red']").TextContent.Trim());
+        Assert.DoesNotContain("checked", restored.Find("#lv_Evaluation_Ply3").OuterHtml);
+    }
+
     // Persistence back-compat: a blob saved before the depth pairs existed
     // carries none of the three toggles or level lists. TryFromJson must
     // restore the facet inactive — no toggle checked, no level group rendered —
@@ -928,22 +1012,32 @@ public class FilterPanelTests : BunitContext
         Assert.Empty(cut.FindAll("button[id^='lvlToggle_']"));
     }
 
-    // Canonical-order render pin for the dice facet: every roll must surface as a
-    // #dr_<token> checkbox, and the checkboxes must appear in DiceRoll.All order
-    // (the lib's ascending canonical order) — no UI-side roll list or sort rule.
-    // Reads the rendered #dr_* inputs in DOM order, parses each id back to a
-    // DiceRoll, and compares the sequence to DiceRoll.All (which is the 21 rolls).
+    // Canonical-order render pin for the dice facet: every roll must surface as
+    // a #dr_<token> checkbox, in the lib's ascending canonical order — no
+    // UI-side roll list or sort rule. The expectation is an independent literal
+    // of the 21 tokens, not a projection of DiceRoll.All: comparing the
+    // rendered ids back to the very list the panel iterates is a tautology that
+    // moves with the lib and can never fail on drift (re-keyed out of that
+    // vacuous-green class alongside the level pin, halheinrich/backgammon#159).
+    // The ids are DiceRoll's own two-digit tokens, read as text, so a panel-side
+    // token rule could not satisfy this either, and the literal's length pins
+    // the cardinality without a separate count.
     [Fact]
     public void DiceSection_RendersAll21RollsInCanonicalOrder()
     {
         var cut = RenderExpanded();
 
-        var renderedOrder = cut.FindAll("input[id^='dr_']")
-            .Select(el => DiceRoll.Parse(el.Id!["dr_".Length..]))
-            .ToArray();
-
-        Assert.Equal(DiceRoll.All, renderedOrder);
-        Assert.Equal(21, renderedOrder.Length);
+        Assert.Equal(
+            new[]
+            {
+                "11",
+                "21", "22",
+                "31", "32", "33",
+                "41", "42", "43", "44",
+                "51", "52", "53", "54", "55",
+                "61", "62", "63", "64", "65", "66",
+            },
+            cut.FindAll("input[id^='dr_']").Select(el => el.Id!["dr_".Length..]));
     }
 
     // Silent-splat guard for the dice facet (cf. the Contact-type guard): an
