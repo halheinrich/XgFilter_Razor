@@ -24,6 +24,13 @@
    a row Save differs from save-as only in taking its name from the row.
    Hosts that cannot persist right now (e.g. a missing FS-Access grant) say so
    via CanPersist — the panel is told, it never knows.
+   The one thing the panel says in its own voice is the load confirmation.
+   Load is the single gesture whose outcome the panel can observe without
+   guessing — the request returned and nothing threw — and it produces no
+   document swap, so nothing else would ever tell the user it landed;
+   "{name} loaded." is therefore panel-local, and every host gets it with no
+   wiring. Host rulings stay the host's to explain (a refused save, a failed
+   write): those are judgements the panel does not make and must not narrate.
    Location: XgFilter_Razor/Components/SavedFiltersPanel.razor
 ──────────────────────────────────────────────────────────────────────────── *@
 
@@ -82,7 +89,7 @@
                         {
                             <div class="d-flex gap-2">
                                 <button class="btn btn-outline-primary btn-sm"
-                                        @onclick="() => OnLoadRequested.InvokeAsync(name)">
+                                        @onclick="() => LoadClickedAsync(name)">
                                     Load
                                 </button>
                                 <button class="btn btn-outline-primary btn-sm"
@@ -138,6 +145,24 @@
         {
             <div class="form-text">@PersistDisabledReason</div>
         }
+
+        @* ── Load confirmation ───────────────────────────────────────────────
+           Loading rewrites the filters below without touching anything in
+           this card, so without this line the gesture is silent
+           (halheinrich/backgammon#171). A completed action the user asked
+           for: polite, not assertive — role="status", the same idiom the
+           composite's outcome notices use, and an implicitly polite live
+           region.
+           The region itself is rendered unconditionally and only its content
+           swaps: a live region that first appears in the very render that
+           fills it is announced unreliably across screen readers, and this
+           one fills and empties repeatedly through a session. *@
+        <div id="savedFilterLoadedNotice" role="status">
+            @if (_loadedName is not null)
+            {
+                <div class="alert alert-success mt-3 mb-0">@_loadedName loaded.</div>
+            }
+        </div>
     </div>
 </div>
 
@@ -244,6 +269,18 @@
     // document swap (the host acted, or reloaded) cancels stale confirms.
     private NamedFilterCollection? _lastSeenFilters;
 
+    // The name from the last Load the host accepted, or null when no
+    // confirmation stands. View-state about this panel's own gesture — the
+    // same category as the pending confirms above, and retired by the same
+    // rule: it says where the panel's values just came from, so the moment
+    // any other saved-filters gesture actually begins (past its guards) it
+    // no longer describes the panel and is cleared there; a new Filters
+    // instance clears it too, through the OnParametersSet reset. Cancelling
+    // a confirm needs no clear of its own — the gesture that posed the
+    // confirm already did it. Never inferred from the arriving document:
+    // that would be the causation guessing OnParametersSet refuses.
+    private string? _loadedName;
+
     private bool IsSaveNameBlank => _saveNameText.Trim().Length == 0;
 
     private string? DisabledTitle => CanPersist ? null : PersistDisabledReason;
@@ -268,12 +305,28 @@
             _pendingSaveName = null;
             _pendingOverwriteName = null;
             _saveNameText = string.Empty;
+            _loadedName = null;
         }
+    }
+
+    // Clear-then-raise-then-state: the previous confirmation goes first, so a
+    // host handler that throws leaves none standing rather than the stale one,
+    // and the new one is stated only once the request has come back without
+    // throwing — the panel applies nothing itself, so the host's return is the
+    // whole of what it can honestly claim. The exception still propagates
+    // untouched; swallowing it to keep the notice quiet would hide a real
+    // failure. Load is ungated by CanPersist, like the button that calls it.
+    private async Task LoadClickedAsync(string name)
+    {
+        _loadedName = null;
+        await OnLoadRequested.InvokeAsync(name);
+        _loadedName = name;
     }
 
     private void RequestDelete(string name)
     {
         if (!CanPersist) return;
+        _loadedName = null;
         _pendingDeleteName = name;
         _pendingSaveName = null;
     }
@@ -281,6 +334,7 @@
     private async Task ConfirmDeleteAsync(string name)
     {
         if (!CanPersist) return;
+        _loadedName = null;
         _pendingDeleteName = null;
         await OnDeleteRequested.InvokeAsync(name);
     }
@@ -288,6 +342,7 @@
     private void RequestSave(string name)
     {
         if (!CanPersist) return;
+        _loadedName = null;
         _pendingSaveName = name;
         _pendingDeleteName = null;
     }
@@ -299,6 +354,7 @@
     private async Task ConfirmSaveAsync(string name)
     {
         if (!CanPersist) return;
+        _loadedName = null;
         _pendingSaveName = null;
         await OnSaveRequested.InvokeAsync(name);
     }
@@ -308,6 +364,11 @@
         if (!CanPersist) return Task.CompletedTask;
         var name = _saveNameText.Trim();
         if (name.Length == 0) return Task.CompletedTask;
+
+        // Past the guards: a save gesture is genuinely under way, so the load
+        // confirmation is retired whether this poses the overwrite prompt or
+        // raises outright. Refusals above leave it standing — nothing happened.
+        _loadedName = null;
 
         // Contains keeps the case-insensitive one-name rule in the lib — the
         // panel never re-implements the comparison.
@@ -323,6 +384,7 @@
     private async Task ConfirmOverwriteAsync()
     {
         if (!CanPersist || _pendingOverwriteName is null) return;
+        _loadedName = null;
         await RaiseSaveAsync(_pendingOverwriteName);
     }
 

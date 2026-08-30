@@ -390,9 +390,161 @@ public class SavedFiltersPanelTests : BunitContext
         Assert.Equal(string.Empty, cut.Find("#saveFilterName").GetAttribute("value"));
     }
 
+    // ── Load confirmation (halheinrich/backgammon#171) ──────────────────────
+    // Loading rewrites the filters below and changes nothing inside this card,
+    // so the panel says so itself. It is the panel's own voice by construction:
+    // no host wiring, no new parameter, hence no test here binds anything new.
+
+    [Fact]
+    public async Task Load_ShowsConfirmationNamingTheFilter()
+    {
+        var cut = RenderPanel(Collection("Race", "Blitz"));
+
+        await ClickRowButtonAsync(cut, "Blitz", "Load");
+
+        Assert.Equal("Blitz loaded.", LoadedNoticeText(cut));
+    }
+
+    // The region is a permanent fixture that fills and empties; only its
+    // content moves. A region created in the same render that fills it is
+    // announced unreliably, so its presence before any load is the contract —
+    // as is role="status", the polite (never assertive) live-region idiom.
+    [Fact]
+    public async Task LoadConfirmation_LivesInAPersistentPoliteRegion()
+    {
+        var cut = RenderPanel(Collection("Race"));
+
+        var regionBeforeAnyLoad = cut.Find("#savedFilterLoadedNotice");
+        Assert.Equal("status", regionBeforeAnyLoad.GetAttribute("role"));
+        Assert.Equal(string.Empty, LoadedNoticeText(cut));
+
+        await ClickRowButtonAsync(cut, "Race", "Load");
+
+        var regionAfter = cut.Find("#savedFilterLoadedNotice");
+        Assert.Equal("status", regionAfter.GetAttribute("role"));
+        Assert.Equal("Race loaded.", regionAfter.TextContent.Trim());
+    }
+
+    [Fact]
+    public async Task SecondLoad_ReplacesTheConfirmation()
+    {
+        var cut = RenderPanel(Collection("Race", "Blitz"));
+
+        await ClickRowButtonAsync(cut, "Race", "Load");
+        await ClickRowButtonAsync(cut, "Blitz", "Load");
+
+        Assert.Equal("Blitz loaded.", LoadedNoticeText(cut));
+        Assert.Equal(["Race", "Blitz"], _loadRequests);
+    }
+
+    // Every other saved-filters gesture retires it, at the moment the gesture
+    // begins — the confirm-posing click, not the commit: once a Save or Delete
+    // prompt stands, "X loaded." no longer describes where the panel is.
+    [Fact]
+    public async Task RowDeleteRequest_RetiresTheLoadConfirmation()
+    {
+        var cut = RenderPanel(Collection("Race"));
+
+        await ClickRowButtonAsync(cut, "Race", "Load");
+        await ClickRowButtonAsync(cut, "Race", "Delete");
+
+        Assert.Equal(string.Empty, LoadedNoticeText(cut));
+        // And a cancelled confirm does not bring it back — the gesture that
+        // retired it already happened.
+        await ClickRowButtonAsync(cut, "Race", "Cancel");
+        Assert.Equal(string.Empty, LoadedNoticeText(cut));
+    }
+
+    [Fact]
+    public async Task RowSaveRequest_RetiresTheLoadConfirmation()
+    {
+        var cut = RenderPanel(Collection("Race"));
+
+        await ClickRowButtonAsync(cut, "Race", "Load");
+        await ClickRowButtonAsync(cut, "Race", "Save");
+
+        Assert.Equal(string.Empty, LoadedNoticeText(cut));
+    }
+
+    [Fact]
+    public async Task SaveAs_RetiresTheLoadConfirmation()
+    {
+        var cut = RenderPanel(Collection("Race"));
+
+        await ClickRowButtonAsync(cut, "Race", "Load");
+        cut.Find("#saveFilterName").Input("Blitz");
+        await ClickSaveButtonAsync(cut);
+
+        Assert.Equal(string.Empty, LoadedNoticeText(cut));
+    }
+
+    // A new Filters instance invalidates all in-flight view-state; the load
+    // confirmation is view-state, so a store reset (or any host swap) takes it
+    // with the pending confirms and the typed name.
+    [Fact]
+    public async Task FiltersParameterSwap_RetiresTheLoadConfirmation()
+    {
+        var cut = RenderPanel(Collection("Race"));
+
+        await ClickRowButtonAsync(cut, "Race", "Load");
+        Assert.Equal("Race loaded.", LoadedNoticeText(cut));
+
+        cut.Render(parameters => parameters.Add(p => p.Filters, NamedFilterCollection.Empty));
+
+        Assert.Equal(string.Empty, LoadedNoticeText(cut));
+    }
+
+    // A gesture the panel refuses is not a gesture: the CanPersist guards
+    // early-return before the retire, so a programmatic Save/Delete click that
+    // raises nothing also disturbs nothing. Load itself stays ungated.
+    [Fact]
+    public async Task RefusedSaveAndDeleteGestures_LeaveTheLoadConfirmationStanding()
+    {
+        var cut = RenderPanel(Collection("Race"), canPersist: false);
+
+        await ClickRowButtonAsync(cut, "Race", "Load");
+        await ClickRowButtonAsync(cut, "Race", "Save");
+        await ClickRowButtonAsync(cut, "Race", "Delete");
+
+        Assert.Empty(_rowSaveRequests);
+        Assert.Empty(_deleteRequests);
+        Assert.Equal("Race loaded.", LoadedNoticeText(cut));
+    }
+
+    // The confirmation states what the host did, so it waits on the host: a
+    // handler that throws loaded nothing, and must leave nothing claiming it
+    // did — not even the confirmation that was standing before the click.
+    [Fact]
+    public async Task LoadHandlerThrows_ShowsNoConfirmation()
+    {
+        var cut = Render<SavedFiltersPanel>(parameters => parameters
+            .Add(p => p.Filters, Collection("Race", "Blitz"))
+            .Add(p => p.OnLoadRequested, (string n) =>
+            {
+                if (n == "Blitz") throw new InvalidOperationException("host refused");
+                _loadRequests.Add(n);
+            })
+            .Add(p => p.OnSaveRequested, (string n) => _rowSaveRequests.Add(n))
+            .Add(p => p.OnSaveAsRequested, (string n) => _saveRequests.Add(n))
+            .Add(p => p.OnDeleteRequested, (string n) => _deleteRequests.Add(n)));
+
+        await ClickRowButtonAsync(cut, "Race", "Load");
+        Assert.Equal("Race loaded.", LoadedNoticeText(cut));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => ClickRowButtonAsync(cut, "Blitz", "Load"));
+
+        Assert.Equal(string.Empty, LoadedNoticeText(cut));
+    }
+
     // ── Gesture helpers ─────────────────────────────────────────────────────
     // Rows are located by their name span, buttons within a row by their text,
     // so tests read as user gestures rather than CSS selectors.
+
+    // The live region is permanent, so "no confirmation" is empty text inside
+    // it — never a missing element.
+    private static string LoadedNoticeText(IRenderedComponent<SavedFiltersPanel> cut) =>
+        cut.Find("#savedFilterLoadedNotice").TextContent.Trim();
 
     private static AngleSharp.Dom.IElement? FindRowButton(
         IRenderedComponent<SavedFiltersPanel> cut, string name, string buttonText)
