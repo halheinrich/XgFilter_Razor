@@ -939,9 +939,9 @@ public class FilterPanelTests : BunitContext
     // literal wire token. It is the newest member of the level vocabulary
     // (halheinrich/backgammon#159) and the one a serializer or producer change
     // is likeliest to drop or fold away, so pin it by name: check it, Apply,
-    // and assert the blob literally carries the string "Ply3Red" — the
-    // JsonStringEnumConverter member name, re-typed here on purpose rather
-    // than read back off the enum — then remount from that blob and assert
+    // and assert the blob literally carries the string "Ply3Red" — the member
+    // name FilterConfig's canonical options write, re-typed here on purpose
+    // rather than read back off the enum — then remount from that blob and assert
     // the checkbox returns checked under its own "3-ply Red" label.
     //
     // The closing assertion is the one that matters most: Ply3 must come back
@@ -990,6 +990,50 @@ public class FilterPanelTests : BunitContext
         foreach (var mode in SelectableModes)
             Assert.False(cut.Find($"#md_{mode}").HasAttribute("checked"));
         Assert.Empty(cut.FindAll("button[id^='lvlToggle_']"));
+    }
+
+    // The consumer half of halheinrich/backgammon#164, wire-tested here rather
+    // than assumed from the producer's own suite: a stored blob whose level is
+    // a numeric ordinal must not restore a filter. XgFilter_Lib tightened
+    // FilterConfig's canonical options to reject ordinals, so TryFromJson
+    // answers false and the panel keeps its defaults — the same
+    // reset-on-unreadable path the retired-field blobs above take.
+    //
+    // Why this matters at the panel and not only in the lib: 5 is XgRoller's
+    // number today and was Ply4's before Ply3Red was inserted into the ladder.
+    // Honouring the ordinal would silently restore a level the user never
+    // chose, which reads as a working filter rather than as corruption.
+    [Fact]
+    public void ConfigWithOrdinalLevel_IsRejected_RestoresToInactive()
+    {
+        JSInterop.Setup<string?>("localStorage.getItem", ConfigKey)
+            .SetResult("{\"DecisionType\":\"Both\",\"IncludeEvaluations\":true," +
+                "\"EvaluationLevels\":[5]}");
+
+        var cut = RenderExpanded();
+
+        // Byte-identical to ConfigWithNamedLevel_Restores below except for the
+        // one token, so this pair discriminates: that blob renders the toggle,
+        // this one must not. IncludeEvaluations is set precisely so the
+        // assertion would FAIL if the ordinal were honoured.
+        foreach (var mode in SelectableModes)
+            Assert.False(cut.Find($"#md_{mode}").HasAttribute("checked"));
+        Assert.Empty(cut.FindAll("button[id^='lvlToggle_']"));
+    }
+
+    // The same blob with the level spelled as its member name DOES restore, so
+    // the rejection above is about token kind and not a broken read path.
+    [Fact]
+    public void ConfigWithNamedLevel_Restores()
+    {
+        JSInterop.Setup<string?>("localStorage.getItem", ConfigKey)
+            .SetResult("{\"DecisionType\":\"Both\",\"IncludeEvaluations\":true," +
+                "\"EvaluationLevels\":[\"XgRoller\"]}");
+
+        var cut = RenderExpanded();
+
+        cut.Find("#lvlToggle_Evaluation").Click();
+        Assert.True(cut.Find("#lv_Evaluation_XgRoller").HasAttribute("checked"));
     }
 
     // Migration guard: blobs saved under the two retired depth shapes — the
