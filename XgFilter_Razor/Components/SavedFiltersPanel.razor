@@ -1,5 +1,6 @@
 @namespace XgFilter_Razor.Components.Internal
 @attribute [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+@using BgDataTypes_Lib
 @using XgFilter_Lib.Filtering
 
 @* ── SavedFiltersPanel.razor ─────────────────────────────────────────────────
@@ -170,10 +171,11 @@
     /// <summary>
     /// The saved-filter document to render. Immutable — after mediating a save
     /// or delete the host passes the <em>new</em> instance returned by
-    /// <see cref="NamedFilterCollection.With"/> /
-    /// <see cref="NamedFilterCollection.Without"/> back down, and the panel
-    /// re-renders from its <see cref="NamedFilterCollection.Names"/>. A
-    /// reference change also cancels any pending inline confirm (it was posed
+    /// <see cref="NamedCollection{FilterConfig, NamedFilterCollection}.With"/> /
+    /// <see cref="NamedCollection{FilterConfig, NamedFilterCollection}.Without"/>
+    /// back down, and the panel re-renders from its
+    /// <see cref="NamedCollection{FilterConfig, NamedFilterCollection}.Names"/>.
+    /// A reference change also cancels any pending inline confirm (it was posed
     /// against the old document). Required: the panel is meaningless without a
     /// document, so <see cref="EditorRequiredAttribute"/> makes a missing
     /// binding an <c>RZ2012</c> compile error rather than a silent Razor splat.
@@ -184,8 +186,9 @@
     /// <summary>
     /// Raised when the user clicks a row's Load button, carrying the saved
     /// name. The host resolves it (e.g.
-    /// <see cref="NamedFilterCollection.TryGetConfig"/>) and pushes the config
-    /// wherever it goes — typically <c>FilterPanel.LoadConfig</c>. The panel
+    /// <see cref="NamedCollection{FilterConfig, NamedFilterCollection}.TryGet"/>)
+    /// and pushes the config wherever it goes — typically
+    /// <c>FilterPanel.LoadConfig</c>. The panel
     /// mutates nothing. Required: the button renders unconditionally, and an
     /// unbound callback would be a silent no-op affordance.
     /// </summary>
@@ -197,7 +200,8 @@
     /// carrying that row's name — "overwrite this saved filter with the
     /// current filters". Like save-as, the host snapshots the <em>live edit
     /// buffers</em> (e.g. <c>FilterPanel.TryGetEditedConfig</c>) — unapplied
-    /// edits included — calls <see cref="NamedFilterCollection.With"/>,
+    /// edits included — calls
+    /// <see cref="NamedCollection{FilterConfig, NamedFilterCollection}.With"/>,
     /// persists, and passes the new collection back down; the two gestures
     /// differ only in where the name comes from. The panel mutates nothing.
     /// Required for the same silent-splat reason as
@@ -210,9 +214,11 @@
     /// <summary>
     /// Raised when the user commits save-as — including only <em>after</em>
     /// the inline confirm when the name already exists (case-insensitively,
-    /// per <see cref="NamedFilterCollection.Contains"/>) — carrying the
-    /// trimmed, non-blank name, pre-normalized to satisfy
-    /// <see cref="NamedFilterCollection.With"/>'s name contract. The host
+    /// per
+    /// <see cref="NamedCollection{FilterConfig, NamedFilterCollection}.Contains"/>)
+    /// — carrying the trimmed, non-blank name, pre-normalized to satisfy
+    /// <see cref="NamedCollection{FilterConfig, NamedFilterCollection}.With"/>'s
+    /// name contract. The host
     /// snapshots the config (e.g. <c>FilterPanel.TryGetEditedConfig</c>),
     /// calls <c>With</c>, persists, and passes the new collection back down.
     /// Required for the same silent-splat reason as
@@ -224,8 +230,9 @@
     /// <summary>
     /// Raised only after the user confirms a row's inline delete prompt,
     /// carrying the name. The host calls
-    /// <see cref="NamedFilterCollection.Without"/>, persists, and passes the
-    /// new collection back down. Required for the same silent-splat reason as
+    /// <see cref="NamedCollection{FilterConfig, NamedFilterCollection}.Without"/>,
+    /// persists, and passes the new collection back down. Required for the same
+    /// silent-splat reason as
     /// <see cref="OnLoadRequested"/>.
     /// </summary>
     [Parameter, EditorRequired]

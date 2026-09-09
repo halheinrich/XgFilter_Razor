@@ -422,6 +422,26 @@ public class FilterSurfaceTests : BunitContext
         Assert.Null(_reports[^1]);                // staging reported as uncommitted
     }
 
+    // A load request naming an entry the document does not hold cannot come
+    // from the panel's rows — every name it raises came from this very
+    // collection — so the miss is a wiring bug, and the composite says so
+    // instead of no-opping under the panel's "{name} loaded." confirmation
+    // (halheinrich/backgammon#173). Reached through the mounted panel's own
+    // callback, the only way to pose a name the rows cannot.
+    [Fact]
+    public async Task LoadRequest_NamingAnAbsentEntry_Throws()
+    {
+        var cut = RenderSurface(TokenA, StorageWith(("Race", new FilterConfig())));
+        var panel = cut.FindComponent<SavedFiltersPanel>();
+
+        // Through the renderer's dispatcher, the way a real click arrives —
+        // invoking the callback off-thread trips bUnit's own guard instead.
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => cut.InvokeAsync(() => panel.Instance.OnLoadRequested.InvokeAsync("Blitz")));
+
+        Assert.Contains("Blitz", thrown.Message);
+    }
+
     [Fact]
     public async Task RowSave_SnapshotsLiveBuffers_WritesCanonicalThroughSeam()
     {
@@ -435,7 +455,7 @@ public class FilterSurfaceTests : BunitContext
         var write = Assert.Single(storage.Writes);
         Assert.Equal(SavedFiltersDocument.FileName, write.FileName);
         Assert.True(NamedFilterCollection.TryFromJson(write.Json, out var written));
-        Assert.True(written.TryGetConfig("Race", out var saved));
+        Assert.True(written.TryGet("Race", out var saved));
         Assert.Equal(0.5, saved!.ErrorMin); // the unapplied edit rode along
     }
 

@@ -395,7 +395,7 @@ pending Delete confirm and vice versa. Hosts that cannot persist right
 now (e.g. BgQuiz without its FS-Access grant) disable Save/Delete via
 `CanPersist` + `PersistDisabledReason`; Load stays enabled — it is
 read-only over a collection already in memory. The typical wiring:
-`OnLoadRequested` → resolve via `TryGetConfig` → `FilterPanel.LoadConfig`;
+`OnLoadRequested` → resolve via `TryGet` → `FilterPanel.LoadConfig`;
 `OnSaveRequested` / `OnSaveAsRequested` → `FilterPanel.TryGetEditedConfig`
 → `With` → persist.
 

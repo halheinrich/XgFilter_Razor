@@ -1,5 +1,6 @@
 namespace XgFilter_Razor;
 
+using BgDataTypes_Lib;
 using XgFilter_Lib.Filtering;
 
 /// <summary>
@@ -38,9 +39,9 @@ using XgFilter_Lib.Filtering;
 /// <b>Serialization is the document's own.</b>
 /// <see cref="NamedFilterCollection"/> carries a type-level
 /// <c>[JsonConverter]</c>, so this store round-trips through
-/// <see cref="NamedFilterCollection.ToJson"/> /
-/// <see cref="NamedFilterCollection.TryFromJson"/> — it owns no
-/// <c>JsonSerializerOptions</c>.
+/// <see cref="NamedCollection{FilterConfig, NamedFilterCollection}.ToJson"/> /
+/// <see cref="NamedCollection{FilterConfig, NamedFilterCollection}.TryFromJson"/>
+/// — it owns no <c>JsonSerializerOptions</c>.
 /// </para>
 /// </summary>
 public sealed class SavedFiltersStore
@@ -69,7 +70,8 @@ public sealed class SavedFiltersStore
 
     /// <summary>
     /// The current saved-filters document —
-    /// <see cref="NamedFilterCollection.Empty"/> until a load lands one, and
+    /// <see cref="NamedCollection{FilterConfig, NamedFilterCollection}.Empty"/>
+    /// until a load lands one, and
     /// again after a <see cref="Reset"/>. A fresh instance after every
     /// save/delete (the wither returns a new collection), which is what lets
     /// <c>SavedFiltersPanel</c> observe the change and clear its pending
@@ -173,7 +175,11 @@ public sealed class SavedFiltersStore
     /// host's <c>CanPersist</c> gate, holding even if a disabled button is
     /// bypassed.
     /// </summary>
-    /// <param name="name">The saved-filter name, pre-normalized per <see cref="NamedFilterCollection.With"/>'s contract.</param>
+    /// <param name="name">
+    /// The saved-filter name, pre-normalized per
+    /// <see cref="NamedCollection{FilterConfig, NamedFilterCollection}.With"/>'s
+    /// contract.
+    /// </param>
     /// <param name="config">The config to save.</param>
     /// <exception cref="ArgumentNullException"><paramref name="name"/> or <paramref name="config"/> is null.</exception>
     /// <exception cref="ArgumentException">

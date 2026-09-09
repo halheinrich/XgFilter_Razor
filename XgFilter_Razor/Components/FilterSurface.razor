@@ -377,13 +377,22 @@
 
     // ── Saved-filters mediation ─────────────────────────────────────────────
 
+    // A miss is unreachable through the panel's own rows: every name the panel
+    // can raise came from this very collection's Names. So a failed lookup is
+    // the store and the panel having diverged — a bug here, not bad input —
+    // and the silent no-op it used to be is the one path where the panel's
+    // "{name} loaded." confirmation could outrun reality, standing over filters
+    // that never moved (halheinrich/backgammon#173). Throwing is what keeps
+    // that confirmation honest: the panel states it only once the request has
+    // come back without throwing.
     private void HandleLoadRequested(string name)
     {
         _saveRefusalNotice = null;
-        if (_store.Filters.TryGetConfig(name, out var config))
-        {
-            _filterPanel?.LoadConfig(config);
-        }
+        if (!_store.Filters.TryGet(name, out var config))
+            throw new InvalidOperationException(
+                $"The saved-filters document has no entry named '{name}'.");
+
+        _filterPanel?.LoadConfig(config);
     }
 
     // One handler for both save gestures — row Save and save-as differ only
