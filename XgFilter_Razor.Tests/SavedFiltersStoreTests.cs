@@ -19,8 +19,8 @@ public class SavedFiltersStoreTests
 
         await store.LoadAsync();
 
-        Assert.Equal(SavedFiltersStatus.Disabled, store.Status);
-        Assert.Equal(0, store.Filters.Count);
+        Assert.Equal(NamedDocumentStatus.Disabled, store.Status);
+        Assert.Equal(0, store.Document.Count);
     }
 
     // A null adapter also no-ops mutations — the adapterless host composes
@@ -33,8 +33,8 @@ public class SavedFiltersStoreTests
 
         await store.SaveAsync("Race", new FilterConfig());
 
-        Assert.Equal(SavedFiltersStatus.Disabled, store.Status);
-        Assert.Equal(0, store.Filters.Count);
+        Assert.Equal(NamedDocumentStatus.Disabled, store.Status);
+        Assert.Equal(0, store.Document.Count);
     }
 
     [Fact]
@@ -45,8 +45,8 @@ public class SavedFiltersStoreTests
 
         await store.LoadAsync();
 
-        Assert.Equal(SavedFiltersStatus.Ready, store.Status);
-        Assert.Equal(0, store.Filters.Count);
+        Assert.Equal(NamedDocumentStatus.Ready, store.Status);
+        Assert.Equal(0, store.Document.Count);
         // Both names were tried, canonical first.
         Assert.Equal(
             [SavedFiltersDocument.FileName, SavedFiltersDocument.LegacyFileName],
@@ -62,8 +62,8 @@ public class SavedFiltersStoreTests
 
         await store.LoadAsync();
 
-        Assert.Equal(SavedFiltersStatus.Ready, store.Status);
-        Assert.True(store.Filters.Contains("Race"));
+        Assert.Equal(NamedDocumentStatus.Ready, store.Status);
+        Assert.True(store.Document.Contains("Race"));
         Assert.Equal([SavedFiltersDocument.FileName], storage.Reads);
     }
 
@@ -80,8 +80,8 @@ public class SavedFiltersStoreTests
 
         await store.LoadAsync();
 
-        Assert.Equal(SavedFiltersStatus.LoadFailed, store.Status);
-        Assert.Equal(0, store.Filters.Count);
+        Assert.Equal(NamedDocumentStatus.LoadFailed, store.Status);
+        Assert.Equal(0, store.Document.Count);
         Assert.Equal([SavedFiltersDocument.FileName], storage.Reads);
     }
 
@@ -99,8 +99,8 @@ public class SavedFiltersStoreTests
         await store.SaveAsync("Race", new FilterConfig());
 
         Assert.Empty(storage.Writes);
-        Assert.Equal(SavedFiltersStatus.LoadFailed, store.Status);
-        Assert.Equal(0, store.Filters.Count);
+        Assert.Equal(NamedDocumentStatus.LoadFailed, store.Status);
+        Assert.Equal(0, store.Document.Count);
     }
 
     // The migration rule end to end: canonical absent → the legacy document
@@ -116,18 +116,35 @@ public class SavedFiltersStoreTests
 
         await store.LoadAsync();
 
-        Assert.Equal(SavedFiltersStatus.Ready, store.Status);
-        Assert.True(store.Filters.Contains("Race"));
+        Assert.Equal(NamedDocumentStatus.Ready, store.Status);
+        Assert.True(store.Document.Contains("Race"));
 
         await store.SaveAsync("Blitz", new FilterConfig());
 
         var write = Assert.Single(storage.Writes);
         Assert.Equal(SavedFiltersDocument.FileName, write.FileName);
         // The migrated document carries the legacy content plus the new save...
-        Assert.True(store.Filters.Contains("Race"));
-        Assert.True(store.Filters.Contains("Blitz"));
+        Assert.True(store.Document.Contains("Race"));
+        Assert.True(store.Document.Contains("Blitz"));
         // ...while the legacy file survives byte-for-byte.
         Assert.Equal(legacyJson, storage.Documents[SavedFiltersDocument.LegacyFileName]);
+    }
+
+    // The other half of the two-name rule, and the half only a second
+    // specialization can pin: the fallback read runs because THIS document
+    // declares a legacy name, not because the base always tries two files. A
+    // specialization that declares none — every document minted from here on
+    // — must read exactly one.
+    [Fact]
+    public async Task NoLegacyNameDeclared_Load_ReadsTheCanonicalFileOnly()
+    {
+        var storage = new FakeFilterDocumentStorage();
+        var store = new NoLegacyStore(storage);
+
+        await store.LoadAsync();
+
+        Assert.Equal(NamedDocumentStatus.Ready, store.Status);
+        Assert.Equal([NoLegacyStore.OnlyFileName], storage.Reads);
     }
 
     [Fact]
@@ -139,8 +156,8 @@ public class SavedFiltersStoreTests
 
         await store.LoadAsync();
 
-        Assert.Equal(SavedFiltersStatus.LoadFailed, store.Status);
-        Assert.Equal(0, store.Filters.Count);
+        Assert.Equal(NamedDocumentStatus.LoadFailed, store.Status);
+        Assert.Equal(0, store.Document.Count);
     }
 
     [Fact]
@@ -151,8 +168,8 @@ public class SavedFiltersStoreTests
 
         await store.LoadAsync();
 
-        Assert.Equal(SavedFiltersStatus.LoadFailed, store.Status);
-        Assert.Equal(0, store.Filters.Count);
+        Assert.Equal(NamedDocumentStatus.LoadFailed, store.Status);
+        Assert.Equal(0, store.Document.Count);
     }
 
     // ── LoadFailedFileName: non-null exactly while LoadFailed, naming the
@@ -225,7 +242,7 @@ public class SavedFiltersStoreTests
 
         storage.Documents[SavedFiltersDocument.FileName] = CollectionJson("Race");
         await store.LoadAsync();
-        Assert.Equal(SavedFiltersStatus.Ready, store.Status);
+        Assert.Equal(NamedDocumentStatus.Ready, store.Status);
         Assert.Null(store.LoadFailedFileName);
 
         storage.Documents[SavedFiltersDocument.FileName] = "not a filters document";
@@ -248,15 +265,15 @@ public class SavedFiltersStoreTests
         storage.ThrowOnWrite = true;
         await store.SaveAsync("Race", new FilterConfig());
 
-        Assert.Equal(SavedFiltersStatus.WriteFailed, store.Status);
-        Assert.True(store.Filters.Contains("Race"));
+        Assert.Equal(NamedDocumentStatus.WriteFailed, store.Status);
+        Assert.True(store.Document.Contains("Race"));
         Assert.Empty(storage.Writes);
 
         storage.ThrowOnWrite = false;
         await store.SaveAsync("Blitz", new FilterConfig());
 
         Assert.Empty(storage.Writes);
-        Assert.False(store.Filters.Contains("Blitz"));
+        Assert.False(store.Document.Contains("Blitz"));
     }
 
     [Fact]
@@ -269,11 +286,11 @@ public class SavedFiltersStoreTests
 
         await store.DeleteAsync("Race");
 
-        Assert.False(store.Filters.Contains("Race"));
-        Assert.True(store.Filters.Contains("Blitz"));
+        Assert.False(store.Document.Contains("Race"));
+        Assert.True(store.Document.Contains("Blitz"));
         var write = Assert.Single(storage.Writes);
         Assert.Equal(SavedFiltersDocument.FileName, write.FileName);
-        Assert.Equal(SavedFiltersStatus.Ready, store.Status);
+        Assert.Equal(NamedDocumentStatus.Ready, store.Status);
     }
 
     [Fact]
@@ -286,8 +303,8 @@ public class SavedFiltersStoreTests
 
         store.Reset();
 
-        Assert.Equal(SavedFiltersStatus.Disabled, store.Status);
-        Assert.Equal(0, store.Filters.Count);
+        Assert.Equal(NamedDocumentStatus.Disabled, store.Status);
+        Assert.Equal(0, store.Document.Count);
     }
 
     // The staleness guard: a load whose read is still in flight when a newer
@@ -306,8 +323,8 @@ public class SavedFiltersStoreTests
         pendingRead.SetResult(CollectionJson("Race"));
         await load;
 
-        Assert.Equal(SavedFiltersStatus.Disabled, store.Status);
-        Assert.Equal(0, store.Filters.Count);
+        Assert.Equal(NamedDocumentStatus.Disabled, store.Status);
+        Assert.Equal(0, store.Document.Count);
     }
 
     [Fact]
@@ -322,5 +339,16 @@ public class SavedFiltersStoreTests
             () => store.SaveAsync("Race", null!));
         await Assert.ThrowsAsync<ArgumentNullException>(
             () => store.DeleteAsync(null!));
+    }
+
+    // A store specialization over the same collection that declares no legacy
+    // name — the whole of what distinguishes it from SavedFiltersStore, which
+    // is the point: identity is all a specialization supplies.
+    private sealed class NoLegacyStore(IFilterDocumentStorage? storage)
+        : NamedDocumentStore<FilterConfig, NamedFilterCollection>(storage)
+    {
+        public const string OnlyFileName = "no-legacy-document.json";
+
+        protected override string FileName => OnlyFileName;
     }
 }

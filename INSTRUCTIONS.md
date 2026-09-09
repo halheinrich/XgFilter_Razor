@@ -58,9 +58,10 @@ XgFilter_Razor/
     FilterSourceToken.cs             — opaque host-minted source identity
     IFilterDocumentStorage.cs        — host storage-adapter seam
     FilterStorageException.cs        — the seam's one failure type
+    NamedDocumentStatus.cs           — named-document context condition
+    NamedDocumentStore.cs            — named-document lifecycle over the seam
     SavedFiltersDocument.cs          — canonical/legacy file names + migration rule
-    SavedFiltersStatus.cs            — saved-filters context condition
-    SavedFiltersStore.cs             — saved-filters document lifecycle over the seam
+    SavedFiltersStore.cs             — the saved-filters specialization: identity only
   wwwroot/
 XgFilter_Razor.Testing/
   XgFilter_Razor.Testing.csproj
@@ -513,20 +514,29 @@ their gates must survive (BgQuiz: Scoped), and `FilterSurface` drives them.
   string nothing reconstitutes into a path. `FromGeneration` wraps its
   counter as-is. Factory domains are prefixed, so tokens from different
   factories never collide. "No source yet" is `FilterSourceToken?`.
-- **`SavedFiltersStore`** + **`SavedFiltersStatus`** — the saved-filters
-  document lifecycle over the host's storage adapter: `LoadAsync` /
-  `SaveAsync` / `DeleteAsync` / `Reset` moving through Disabled / Ready /
-  LoadFailed / WriteFailed. Degrade, never block: no member throws for
-  storage trouble; LoadFailed preserves the file untouched and keeps
-  saving dead; WriteFailed keeps the in-memory edit and stops further
-  writes. Round-trip is the document's own
-  (`NamedFilterCollection.ToJson` / `TryFromJson`) — the store owns no
-  serializer options. A null adapter = permanently Disabled, so an
-  adapterless host composes with the same store. An internal load-version
-  guard (the producer edition of BgQuiz's `PickGeneration` discipline)
-  makes a superseded in-flight load discard its outcome. Deliberately
-  hardcoded to the saved-filters document — the queued mix-saves sibling
-  is a new store over its own identity (umbrella ruling).
+- **`NamedDocumentStore<TValue, TSelf>`** + **`NamedDocumentStatus`** — the
+  lifecycle of *any* `NamedCollection` document over the host's storage
+  adapter: `LoadAsync` / `SaveAsync` / `DeleteAsync` / `Reset` moving
+  through Disabled / Ready / LoadFailed / WriteFailed, over a `Document`
+  the panel binds. Degrade, never block: no member throws for storage
+  trouble; LoadFailed preserves the file untouched and keeps saving dead;
+  WriteFailed keeps the in-memory edit and stops further writes.
+  Round-trip is the document's own (`NamedCollection.ToJson` /
+  `TryFromJson`) — the store owns no serializer options. A null adapter =
+  permanently Disabled, so an adapterless host composes with the same
+  store. An internal load-version guard (the producer edition of BgQuiz's
+  `PickGeneration` discipline) makes a superseded in-flight load discard
+  its outcome. The two-name migration rule runs here too, but only for a
+  specialization that declares a legacy name — a document with one name
+  never reads a second file.
+- **`SavedFiltersStore`** — the saved-filters specialization of that store,
+  and the shape every sibling document takes: a sealed derived type
+  supplying `FileName` and `LegacyFileName` from `SavedFiltersDocument`,
+  and nothing else. No domain-named forwarder for `Document` — a second
+  name for it would be a second thing to keep true. The queued mix-saves
+  sibling is another such specialization, not a second copy of the
+  lifecycle (umbrella arc halheinrich/backgammon#190 leg (D), superseding
+  the earlier hardcoded-store ruling).
 - **`IFilterDocumentStorage`** + **`FilterStorageException`** — the host
   seam: per-document text I/O keyed by file name (`ReadAsync(name)`
   returning null for absent, `WriteAsync(name, json)`), generalized by
@@ -535,10 +545,11 @@ their gates must survive (BgQuiz: Scoped), and `FilterSurface` drives them.
   one type the store catches (see Pitfalls).
 - **`SavedFiltersDocument`** — the document identity: public constants
   `FileName` (`xg-filters.json`) and `LegacyFileName`
-  (`bgquiz-filters.json`), plus the stated two-name migration rule the
-  store implements — read canonical first, fall back to legacy only when
-  canonical is *absent*, write only canonical, never delete the legacy
-  file (see Pitfalls for the corrupt-file rationale).
+  (`bgquiz-filters.json`), which `SavedFiltersStore` hands to the base,
+  plus the stated two-name migration rule they imply — read canonical
+  first, fall back to legacy only when canonical is *absent*, write only
+  canonical, never delete the legacy file (see Pitfalls for the
+  corrupt-file rationale).
 
 ### `FilterConfig` provenance
 
@@ -712,14 +723,21 @@ Parameters (all callbacks `[EditorRequired]`, as is `Filters`):
 - `FilterSourceToken` — `readonly record struct`; factories
   `FromGeneration(int)` / `FromPath(string)`; value-equal, with
   `FromPath` normalizing path identity itself (case, trailing separator).
-- `SavedFiltersStore` — ctor `(IFilterDocumentStorage? storage)`;
-  `NamedFilterCollection Filters`, `SavedFiltersStatus Status`,
-  `string? LoadFailedFileName` (non-null exactly while `LoadFailed`,
-  naming the actual file — canonical or legacy — the failed load was
-  about, so degrade copy never guesses), `Task LoadAsync()`,
-  `Task SaveAsync(string, FilterConfig)`, `Task DeleteAsync(string)`,
-  `void Reset()`. Never throws for storage trouble; mutating members
-  no-op unless `Status == Ready`.
+- `NamedDocumentStore<TValue, TSelf>` — ctor
+  `(IFilterDocumentStorage? storage)` (`protected`); `TSelf Document`,
+  `NamedDocumentStatus Status`, `string? LoadFailedFileName` (non-null
+  exactly while `LoadFailed`, naming the actual file — canonical or
+  legacy — the failed load was about, so degrade copy never guesses),
+  `Task LoadAsync()`, `Task SaveAsync(string, TValue)`,
+  `Task DeleteAsync(string)`, `void Reset()`. Never throws for storage
+  trouble; mutating members no-op unless `Status == Ready`. A
+  specialization overrides `protected abstract string FileName` and, only
+  where an older name is superseded, `protected virtual string?
+  LegacyFileName` (default `null` = one name, one read).
+- `SavedFiltersStore` — that store over `FilterConfig` /
+  `NamedFilterCollection`; public ctor `(IFilterDocumentStorage? storage)`
+  and the two identity overrides, nothing more. Read the document through
+  the inherited `Document`.
 - `IFilterDocumentStorage` — `Task<string?> ReadAsync(string fileName)`
   (null = absent), `Task WriteAsync(string fileName, string json)`;
   failures signalled as `FilterStorageException` only.
@@ -1203,6 +1221,24 @@ producer-side, so neither widens what consumers can see.
     remounts quiet after an edit. Dropping the forwarding is silent at
     compile time and pinned by
     `Remount_WithinSetup_AfterAnEdit_DoesNotResurrectTheNotice`.
+- **The store's two renames are not forwarded, deliberately.** `Filters`
+  became `Document` and `SavedFiltersStatus` became `NamedDocumentStatus`
+  when the store generalized (halheinrich/backgammon#190 leg (D)). Neither
+  keeps a compatibility alias: the generic base cannot know a domain noun,
+  and an alias would be a second name for one fact — the very thing this
+  arc exists to remove. Host call sites move; the compile break *is* the
+  migration, and it is cheaper than the drift an alias invites.
+- **A store specialization supplies identity and nothing else.**
+  `SavedFiltersStore` is a constructor plus `FileName` and
+  `LegacyFileName`. Adding any member to it — a convenience read, a
+  domain-shaped wrapper, a second load path — puts behaviour in one
+  document's store that every sibling document then silently lacks. The
+  lifecycle belongs to `NamedDocumentStore`, or it does not exist.
+  `LegacyFileName` defaults to `null` on purpose: a document minted from
+  here on declares no legacy name and therefore never reads a second file
+  — pinned by a test-only specialization rather than trusted, because
+  nothing in `SavedFiltersStore`'s own cases can distinguish "the fallback
+  ran because this document asked" from "the base always tries two".
 - **The WriteFailed copy promises page-lifetime retention only.** The
   composite-owned store lives and dies with the page, so a failed edit
   does not survive navigation — "kept for this session" would over-promise

@@ -3,15 +3,16 @@ namespace XgFilter_Razor;
 /// <summary>
 /// Identity of the saved-filters document — the producer-owned canonical file
 /// name every host shares, plus the legacy name it supersedes.
-/// <see cref="SavedFiltersStore"/> implements the migration rule these names
-/// imply; this type is where the rule is stated:
+/// <see cref="SavedFiltersStore"/> supplies both to
+/// <see cref="NamedDocumentStore{TValue, TSelf}"/>, which runs the migration
+/// rule these names imply; this type is where the rule is stated:
 ///
 /// <para>
 /// <b>The two-name migration rule.</b> Read <see cref="FileName"/> first and
 /// fall back to <see cref="LegacyFileName"/> only when the canonical file is
 /// <i>absent</i> — never when it is present but unparseable (falling back on
 /// corrupt would resurrect stale data while newer-but-corrupt data exists;
-/// the store's <see cref="SavedFiltersStatus.LoadFailed"/> both reports the
+/// the store's <see cref="NamedDocumentStatus.LoadFailed"/> both reports the
 /// corruption and keeps saving disabled so the file is preserved untouched).
 /// Write only the canonical name — the first save after a legacy fallback is
 /// what migrates the document — and never delete the legacy file: it stays as
