@@ -50,12 +50,13 @@ XgFilter_Razor/
   Components/
     FilterSurface.razor              — THE consumer surface: panels + wiring
     FilterPanel.razor                — filter form (.Internal — not consumer surface)
-    SavedFiltersPanel.razor          — saved-filter pick list (.Internal — not consumer surface)
+    NamedEntriesPanel.razor          — generic pick list over any NamedCollection
     FilterHelp.razor                 — producer-owned facet + storage documentation
   Model/
     AppliedFilter.cs                 — applied-config holder, keyed to its source
     FilterRestoreNotice.cs           — restored-selection notice state, app-scoped
     FilterSourceToken.cs             — opaque host-minted source identity
+    NamedEntriesSurface.cs           — a pick-list mount's copy and element ids
     IFilterDocumentStorage.cs        — host storage-adapter seam
     FilterStorageException.cs        — the seam's one failure type
     NamedDocumentStatus.cs           — named-document context condition
@@ -74,7 +75,7 @@ XgFilter_Razor.Tests/
   FilterPanelTestStateTests.cs       — the seeding seam, pinned against a real render
   FilterSourceTokenTests.cs          — token equality rules
   FilterSurfaceTests.cs              — bUnit wire tests for the composite
-  SavedFiltersPanelTests.cs          — bUnit tests for SavedFiltersPanel
+  NamedEntriesPanelTests.cs          — bUnit tests for NamedEntriesPanel
   SavedFiltersStoreTests.cs          — store transitions over a fake storage seam
   FilterHelpTests.cs                 — bUnit tests for FilterHelp
 ```
@@ -94,7 +95,9 @@ resulting `FilterConfig` via an `EventCallback`.
 ### `FilterSurface` component — the consumer surface
 
 The one component hosts embed (umbrella arc #63/#78 Step 2): it owns
-`FilterPanel` + `SavedFiltersPanel` and the interaction wiring end to end —
+`FilterPanel` + the saved-filters mount of `NamedEntriesPanel`, the
+`NamedEntriesSurface` preset that mount renders, and the interaction
+wiring end to end —
 load→stage, save/save-as→snapshot-or-refuse, delete, applied-state
 mediation onto the host's `AppliedFilter` holder, the saved-filters degrade
 notices, and the source-change rule. Hosts bind the holder (host-registered,
@@ -293,7 +296,7 @@ therefore never disagree:
   names no field. `ApplyAsync` guards on the same condition it renders
   `disabled` from, so programmatic dispatch cannot re-commit either.
   While Apply is disabled *because nothing changed*, the panel says so —
-  a `title` plus a muted hint line, the `SavedFiltersPanel`
+  a `title` plus a muted hint line, the `NamedEntriesPanel`
   disabled-reason idiom, except that here the panel knows its own reason
   rather than being told it by the host. Neither invalid-value case gets a
   hint line: the offending field's own `invalid-feedback` already explains
@@ -370,33 +373,52 @@ re-shows the same notice (navigation changes nothing, in both directions).
 Disclosure toggles are navigation and keep it; `ForgetCommitted` is
 choreography and keeps it (see Pitfalls).
 
-### `SavedFiltersPanel` component
+### `NamedEntriesPanel` component
 
-A persistence-agnostic pick list over `XgFilter_Lib`'s
-`NamedFilterCollection`. The panel owns no document state and mutates
-nothing: every gesture is raised as a request — `OnLoadRequested`,
-`OnSaveRequested` (per-row Save, #38), `OnSaveAsRequested`,
-`OnDeleteRequested`, each carrying the name — for
-the host to mediate. The host calls `With` / `Without`, persists wherever
-it persists, and passes the **new** collection instance back down through
-`Filters`; the reference change is also the panel's confirmation channel
-(it cancels pending inline confirms and clears the typed save-as name).
-Selection is deliberately stateless — the "current" config lives in
-`FilterPanel`'s edit buffers, so a highlighted row would be a second
+A persistence-agnostic pick list over **any** `NamedCollection` — generic
+in the payload and the specialization, so the saved-filters document and
+the queued mix-saves document are two mounts of one component
+(halheinrich/backgammon#190 leg (D)). Both type arguments are inferred
+from what is bound to `Document`; nothing spells them at a mount site.
+The panel owns no document state and mutates nothing: every gesture is
+raised as a request — `OnLoadRequested`, `OnSaveRequested` (per-row Save,
+#38), `OnSaveAsRequested`, `OnDeleteRequested`, each carrying the name —
+for the host to mediate. The host calls `With` / `Without`, persists
+wherever it persists, and passes the **new** collection instance back
+down through `Document`; the reference change is also the panel's
+confirmation channel (it cancels pending inline confirms and clears the
+typed save-as name). Selection is deliberately stateless — the "current"
+value lives in whatever editor the host wires up (for filters,
+`FilterPanel`'s edit buffers), so a highlighted row would be a second
 source of truth that lies. Every destructive gesture runs through an
 inline confirm in the panel — a row's Save, a save-as under an existing
 name, and delete; `Contains` keeps the case-insensitive name rule in
-the lib. A row's Save overwrites that saved filter with the current
-filters — the same live-edit-buffers snapshot save-as takes, the name
-coming from the row instead of the input — and its confirm copy says so
-("Overwrite '\<name\>' with the current filters?"), deliberately
-distinguishable from the save-as overwrite prompt ("Overwrite
+the lib. A row's Save overwrites that entry with the current value — the
+same live-edit snapshot save-as takes, the name coming from the row
+instead of the input — and its confirm copy says so ("Overwrite
+'\<name\>' with \<the surface's noun\>?"), deliberately distinguishable
+from the save-as overwrite prompt ("Overwrite
 '\<name\>'?"). A row holds one confirm slot: requesting Save supersedes a
 pending Delete confirm and vice versa. Hosts that cannot persist right
 now (e.g. BgQuiz without its FS-Access grant) disable Save/Delete via
 `CanPersist` + `PersistDisabledReason`; Load stays enabled — it is
-read-only over a collection already in memory. The typical wiring:
-`OnLoadRequested` → resolve via `TryGet` → `FilterPanel.LoadConfig`;
+read-only over a collection already in memory.
+
+**What the generic cannot know arrives as one record.** `Surface`, a
+required `NamedEntriesSurface`, carries the card title, the empty-list
+line, the name placeholder, the row-Save prompt's noun, and the three
+element ids (`NameInputId` / `SaveButtonId` / `LoadedNoticeId`). One
+parameter rather than seven, so a new mount cannot half-configure itself.
+A preset belongs with the composite that mounts it, not with this
+component: `FilterSurface` owns `SavedFilters`, which spells
+`saveFilterName`, `saveFilterButton`, `savedFilterLoadedNotice`, "Saved
+Filters", "No saved filters yet.", "Filter name" and "the current
+filters" — the ids and copy three repositories' suites pin. That preset
+is `internal` so this repo's panel suite mounts the one true instance
+rather than retyping it.
+
+The saved-filters wiring: `OnLoadRequested` → resolve via `TryGet` →
+`FilterPanel.LoadConfig` (a miss throws — see Pitfalls);
 `OnSaveRequested` / `OnSaveAsRequested` → `FilterPanel.TryGetEditedConfig`
 → `With` → persist.
 
@@ -609,14 +631,17 @@ exists to remove.
 
 ## Public API
 
-The consumer surface is `FilterSurface` + `FilterHelp` (namespace
-`XgFilter_Razor.Components`) and the non-visual model types (root
-`XgFilter_Razor` namespace). `FilterPanel` and `SavedFiltersPanel` live in
-`XgFilter_Razor.Components.Internal` with `[EditorBrowsable(Never)]` and
-are **not consumer surface** — consuming them from a host is banned
-outright, host tests included (see Pitfalls for the narrowing record).
-Their contracts below remain documented because `FilterSurface` builds on
-them and this repo's tests pin them.
+The consumer surface is `FilterSurface` + `FilterHelp` +
+`NamedEntriesPanel` (namespace `XgFilter_Razor.Components`) and the
+non-visual model types (root `XgFilter_Razor` namespace). `FilterPanel`
+alone lives in `XgFilter_Razor.Components.Internal` with
+`[EditorBrowsable(Never)]` and is **not consumer surface** — consuming it
+from a host is banned outright, host tests included (see Pitfalls for the
+narrowing record). Its contract below remains documented because
+`FilterSurface` builds on it and this repo's tests pin it.
+`NamedEntriesPanel` left that narrowing behind in
+halheinrich/backgammon#190 leg (D): it is the reusable piece the arc
+exists for, and the queued mix-saves document mounts it from BgQuiz.
 
 ### `FilterSurface`
 
@@ -692,19 +717,28 @@ caller (its source-change rule and its first-mount reconcile
 respectively), so neither is host-facing surface (see Architecture and
 Pitfalls).
 
-### `SavedFiltersPanel` (`.Internal` — via `FilterSurface` only)
+### `NamedEntriesPanel<TValue, TSelf>`
 
-Parameters (all callbacks `[EditorRequired]`, as is `Filters`):
+Consumer surface. `TValue : IJsonDocument<TValue>` and
+`TSelf : NamedCollection<TValue, TSelf>, INamedCollectionSpecialization<TValue, TSelf>`
+— the base collection's own constraints — and both are inferred from
+`Document`, so a mount names neither.
 
-- `NamedFilterCollection Filters` — the immutable document to render;
-  the host passes each new instance back down after mediating a change.
+Parameters (all callbacks `[EditorRequired]`, as are `Document` and
+`Surface`):
+
+- `NamedCollection<TValue, TSelf> Document` — the immutable document to
+  render; the host passes each new instance back down after mediating a
+  change.
+- `NamedEntriesSurface Surface` — this mount's copy and element ids; see
+  the model types below.
 - `EventCallback<string> OnLoadRequested` / `OnSaveRequested` /
   `OnSaveAsRequested` / `OnDeleteRequested` — request-only gestures
-  carrying the filter name; the panel mutates nothing. `OnSaveRequested`
-  is the per-row Save (#38): overwrite that saved filter with the current
-  live edit buffers — the host mediates it exactly as save-as
-  (`TryGetEditedConfig` → `With` → persist), the name coming from the
-  row.
+  carrying the entry name; the panel mutates nothing. `OnSaveRequested`
+  is the per-row Save (#38): overwrite that entry with the host editor's
+  current live state — the host mediates it exactly as save-as (for
+  filters, `TryGetEditedConfig` → `With` → persist), the name coming from
+  the row.
 - `bool CanPersist` (default `true`) + `string? PersistDisabledReason` —
   gate Save/Save-as/Delete as one switch when the host cannot persist;
   Load stays enabled.
@@ -723,6 +757,12 @@ Parameters (all callbacks `[EditorRequired]`, as is `Filters`):
 - `FilterSourceToken` — `readonly record struct`; factories
   `FromGeneration(int)` / `FromPath(string)`; value-equal, with
   `FromPath` normalizing path identity itself (case, trailing separator).
+- `NamedEntriesSurface` — sealed immutable record; seven `required init`
+  members: `Title`, `EmptyText`, `NamePlaceholder`, `OverwriteWithNoun`,
+  `NameInputId`, `SaveButtonId`, `LoadedNoticeId`. `required` is the
+  guard: a preset cannot be half-built. A preset lives beside the
+  composite that mounts it, never on this type — the record is the shape
+  and knows no document.
 - `NamedDocumentStore<TValue, TSelf>` — ctor
   `(IFilterDocumentStorage? storage)` (`protected`); `TSelf Document`,
   `NamedDocumentStatus Status`, `string? LoadFailedFileName` (non-null
@@ -1053,20 +1093,22 @@ producer-side, so neither widens what consumers can see.
   a fresh panel was committed to. Widening either public would hand hosts a
   second, uncoordinated way to move the committed state that the
   applied-state events were designed around.
-- **The panels' narrowing is `.Internal` + `EditorBrowsable(Never)` — the
-  strongest the toolchain allows, and the ban is absolute anyway.** The
+- **`FilterPanel`'s narrowing is `.Internal` + `EditorBrowsable(Never)` —
+  the strongest the toolchain allows, and the ban is absolute anyway.** The
   spike (Step 2, ruled): a true `internal` component draws CS0262 — the
   Razor generator hardcodes `public partial` on the component class, so a
   user partial cannot narrow it. The ruled fallback is what stands:
-  `FilterPanel` / `SavedFiltersPanel` live in
-  `XgFilter_Razor.Components.Internal` with `[EditorBrowsable(Never)]`,
-  and consuming them from a host is banned outright — **including host
-  tests: no `FindComponent<FilterPanel>()` carve-out.** Host wire tests
-  drive `FilterSurface`'s rendered DOM with real gestures instead (both
-  hosts' existing tests do reach the panel types today; their migration
-  legs carry that rewrite). If the Razor toolchain ever allows internal
-  components, finish the job then. `FilterHelp` stays public — it is
-  consumer surface.
+  `FilterPanel` lives in `XgFilter_Razor.Components.Internal` with
+  `[EditorBrowsable(Never)]`, and consuming it from a host is banned
+  outright — **including host tests: no `FindComponent<FilterPanel>()`
+  carve-out.** Host wire tests drive `FilterSurface`'s rendered DOM with
+  real gestures instead (both hosts' existing tests do reach the panel type
+  today; their migration legs carry that rewrite). If the Razor toolchain
+  ever allows internal components, finish the job then. `FilterHelp` stays
+  public — it is consumer surface, and since
+  halheinrich/backgammon#190 leg (D) so is `NamedEntriesPanel`: the pick
+  list was only ever narrowed because it was filter-shaped, and it no
+  longer is.
 - **`FilterSurface` is told, never asks — keep it that way.** It has no
   parameter or interop path to pickers, paths, folder handles, or
   capabilities: the host mints `FilterSourceToken`s and rules `CanPersist`;
@@ -1221,6 +1263,33 @@ producer-side, so neither widens what consumers can see.
     remounts quiet after an edit. Dropping the forwarding is silent at
     compile time and pinned by
     `Remount_WithinSetup_AfterAnEdit_DoesNotResurrectTheNotice`.
+- **A new mount of `NamedEntriesPanel` supplies a surface record and
+  nothing else.** Copy and ids belong to the mount, not the component: the
+  panel spells no title, no empty-list line, no placeholder, no prompt
+  noun and no element id of its own, and adding one would give every other
+  document that document's voice. If a mount needs wording the record does
+  not carry, the record grows a member — it does not grow a parameter, and
+  the panel does not grow a special case. Presets live beside their
+  composites (`FilterSurface.SavedFilters`), never on
+  `NamedEntriesSurface`, which knows no document.
+- **A mount's element ids are published surface the moment a host renders
+  them.** `saveFilterName`, `saveFilterButton` and
+  `savedFilterLoadedNotice` are found by fifty-odd sites across BgQuiz's
+  unit and e2e suites, ExtractFromXgToCsv's tests and this repo's own.
+  Editing `FilterSurface.SavedFilters` is therefore a cross-repository
+  change, not a rename — nothing in this repo's build will tell you
+  otherwise, and the local pin that does notice
+  (`SaveAs_NewName_WritesThroughSeam`) only proves the preset and this
+  repo's suite still agree.
+- **`HandleLoadRequested` throws on a lookup miss; it must not degrade.**
+  The panel raises only names it read from the very document the composite
+  holds, so a miss means the two have diverged
+  (halheinrich/backgammon#173). It is also the one path where the panel's
+  own "{name} loaded." confirmation could stand over filters that never
+  moved, because the panel states that confirmation on the request
+  returning without throwing. Turning the throw back into a silent no-op —
+  or into a degrade notice — restores exactly that lie. This is a bug
+  path, not a bad-input path: it has no user-facing wording, deliberately.
 - **The store's two renames are not forwarded, deliberately.** `Filters`
   became `Document` and `SavedFiltersStatus` became `NamedDocumentStatus`
   when the store generalized (halheinrich/backgammon#190 leg (D)). Neither

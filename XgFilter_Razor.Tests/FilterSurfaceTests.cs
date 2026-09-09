@@ -68,7 +68,7 @@ public class FilterSurfaceTests : BunitContext
         return storage;
     }
 
-    // ── Gesture helpers (the SavedFiltersPanelTests idioms, over the surface) ─
+    // ── Gesture helpers (the NamedEntriesPanelTests idioms, over the surface) ─
 
     private static IElement Apply(IRenderedComponent<FilterSurface> cut) =>
         cut.FindAll("button").Single(b => b.TextContent.Trim().StartsWith("Apply Filter"));
@@ -432,7 +432,8 @@ public class FilterSurfaceTests : BunitContext
     public async Task LoadRequest_NamingAnAbsentEntry_Throws()
     {
         var cut = RenderSurface(TokenA, StorageWith(("Race", new FilterConfig())));
-        var panel = cut.FindComponent<SavedFiltersPanel>();
+        var panel =
+            cut.FindComponent<NamedEntriesPanel<FilterConfig, NamedFilterCollection>>();
 
         // Through the renderer's dispatcher, the way a real click arrives —
         // invoking the callback off-thread trips bUnit's own guard instead.

@@ -401,7 +401,7 @@ public class FilterPanelTests : BunitContext
 
     // A second Apply on an unchanged selection commits nothing — no repeat
     // OnFilterConfigChanged, no second config write. ApplyAsync guards on
-    // CanApply as well as rendering `disabled`, matching SavedFiltersPanel's
+    // CanApply as well as rendering `disabled`, matching NamedEntriesPanel's
     // handler-side gates, so the contract survives an event dispatch that
     // ignores the disabled attribute.
     [Fact]

@@ -525,7 +525,7 @@
            Apply is gated on CanApply: the position pattern must be committable
            AND the selection must differ from the last-committed config.
            ApplyDisabledReason explains the second case in the
-           SavedFiltersPanel disabled-reason idiom (title + muted hint line);
+           NamedEntriesPanel disabled-reason idiom (title + muted hint line);
            the first already explains itself in the pattern field's own
            invalid-feedback line. Hoisted into a local like the hidden-active
            signal above: both surfaces of the reason read the one evaluation. *@
@@ -943,7 +943,7 @@
     // was last committed.
     private bool CanApply => IsCommittable && MatchedCommittedConfig is null;
 
-    // Why Apply is disabled — the SavedFiltersPanel disabled-reason idiom
+    // Why Apply is disabled — the NamedEntriesPanel disabled-reason idiom
     // (button title plus a muted hint line), except that here the panel knows
     // its own reason instead of being told it by the host. Covers only the
     // nothing-to-apply case: an invalid value already explains itself in its own
@@ -972,7 +972,7 @@
     // choreography.
     private void RaiseAppliedState() => OnAppliedStateChanged.InvokeAsync(MatchedCommittedConfig);
 
-    // Guarded as well as visually disabled, matching SavedFiltersPanel's
+    // Guarded as well as visually disabled, matching NamedEntriesPanel's
     // handler-side gates: programmatic event dispatch ignores the disabled
     // attribute, and re-committing an unchanged selection would raise a
     // spurious OnFilterConfigChanged.

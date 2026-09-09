@@ -1,10 +1,15 @@
 using Bunit;
 using XgFilter_Lib.Filtering;
-using XgFilter_Razor.Components.Internal;
+using XgFilter_Razor.Components;
+
+// The panel under test, closed over the saved-filters document. Spelling the
+// closed type once keeps every signature below readable.
+using EntriesPanel = XgFilter_Razor.Components.NamedEntriesPanel<
+    XgFilter_Lib.Filtering.FilterConfig, XgFilter_Lib.Filtering.NamedFilterCollection>;
 
 namespace XgFilter_Razor.Tests;
 
-public class SavedFiltersPanelTests : BunitContext
+public class NamedEntriesPanelTests : BunitContext
 {
     // Captured callback payloads, one list per gesture, so every test can
     // assert both "the right callback fired with the right name" and "the
@@ -14,12 +19,16 @@ public class SavedFiltersPanelTests : BunitContext
     private readonly List<string> _saveRequests = [];
     private readonly List<string> _deleteRequests = [];
 
-    private IRenderedComponent<SavedFiltersPanel> RenderPanel(
+    // Mounted with FilterSurface's own preset, never a retyped copy of it: the
+    // literal ids and copy this file asserts are therefore assertions about
+    // the thing hosts actually render, and a preset edit lands here.
+    private IRenderedComponent<EntriesPanel> RenderPanel(
         NamedFilterCollection filters,
         bool canPersist = true,
         string? persistDisabledReason = null)
-        => Render<SavedFiltersPanel>(parameters => parameters
-            .Add(p => p.Filters, filters)
+        => Render<EntriesPanel>(parameters => parameters
+            .Add(p => p.Document, filters)
+            .Add(p => p.Surface, FilterSurface.SavedFilters)
             .Add(p => p.OnLoadRequested, (string n) => _loadRequests.Add(n))
             .Add(p => p.OnSaveRequested, (string n) => _rowSaveRequests.Add(n))
             .Add(p => p.OnSaveAsRequested, (string n) => _saveRequests.Add(n))
@@ -199,7 +208,7 @@ public class SavedFiltersPanelTests : BunitContext
         await ClickRowButtonAsync(cut, "Race", "Save");
         Assert.Contains("Overwrite 'Race' with the current filters?", cut.Markup);
 
-        cut.Render(parameters => parameters.Add(p => p.Filters, Collection("Race", "Blitz")));
+        cut.Render(parameters => parameters.Add(p => p.Document, Collection("Race", "Blitz")));
 
         Assert.DoesNotContain("with the current filters?", cut.Markup);
         Assert.Empty(_rowSaveRequests);
@@ -223,7 +232,7 @@ public class SavedFiltersPanelTests : BunitContext
 
         // The host mediated the save and passed the new collection down; that
         // swap is the confirmation channel that clears the input.
-        cut.Render(parameters => parameters.Add(p => p.Filters, Collection("Race")));
+        cut.Render(parameters => parameters.Add(p => p.Document, Collection("Race")));
 
         Assert.Equal(string.Empty, cut.Find("#saveFilterName").GetAttribute("value"));
     }
@@ -283,7 +292,7 @@ public class SavedFiltersPanelTests : BunitContext
         Assert.Equal(["Race"], _saveRequests);
         Assert.Contains("Overwrite 'Race'?", cut.Markup);
 
-        cut.Render(parameters => parameters.Add(p => p.Filters, Collection("Race")));
+        cut.Render(parameters => parameters.Add(p => p.Document, Collection("Race")));
 
         Assert.DoesNotContain("Overwrite 'Race'?", cut.Markup);
         Assert.Equal(string.Empty, cut.Find("#saveFilterName").GetAttribute("value"));
@@ -365,7 +374,7 @@ public class SavedFiltersPanelTests : BunitContext
         await ClickRowButtonAsync(cut, "Race", "Delete");
         Assert.Contains("Delete 'Race'?", cut.Markup);
 
-        cut.Render(parameters => parameters.Add(p => p.Filters, Collection("Race", "Blitz")));
+        cut.Render(parameters => parameters.Add(p => p.Document, Collection("Race", "Blitz")));
 
         Assert.DoesNotContain("Delete 'Race'?", cut.Markup);
         Assert.Empty(_deleteRequests);
@@ -385,7 +394,7 @@ public class SavedFiltersPanelTests : BunitContext
         cut.Find("#saveFilterName").Input("Half-typed");
         // The host deletes a different filter and passes the smaller document
         // down — a swap the typing did not cause.
-        cut.Render(parameters => parameters.Add(p => p.Filters, Collection("Race")));
+        cut.Render(parameters => parameters.Add(p => p.Document, Collection("Race")));
 
         Assert.Equal(string.Empty, cut.Find("#saveFilterName").GetAttribute("value"));
     }
@@ -489,7 +498,7 @@ public class SavedFiltersPanelTests : BunitContext
         await ClickRowButtonAsync(cut, "Race", "Load");
         Assert.Equal("Race loaded.", LoadedNoticeText(cut));
 
-        cut.Render(parameters => parameters.Add(p => p.Filters, NamedFilterCollection.Empty));
+        cut.Render(parameters => parameters.Add(p => p.Document, NamedFilterCollection.Empty));
 
         Assert.Equal(string.Empty, LoadedNoticeText(cut));
     }
@@ -517,8 +526,9 @@ public class SavedFiltersPanelTests : BunitContext
     [Fact]
     public async Task LoadHandlerThrows_ShowsNoConfirmation()
     {
-        var cut = Render<SavedFiltersPanel>(parameters => parameters
-            .Add(p => p.Filters, Collection("Race", "Blitz"))
+        var cut = Render<EntriesPanel>(parameters => parameters
+            .Add(p => p.Document, Collection("Race", "Blitz"))
+            .Add(p => p.Surface, FilterSurface.SavedFilters)
             .Add(p => p.OnLoadRequested, (string n) =>
             {
                 if (n == "Blitz") throw new InvalidOperationException("host refused");
@@ -537,17 +547,69 @@ public class SavedFiltersPanelTests : BunitContext
         Assert.Equal(string.Empty, LoadedNoticeText(cut));
     }
 
+    // ── The surface record (halheinrich/backgammon#190 leg (D)) ─────────────
+    // Everything above asserts the saved-filters preset's ids and copy, which
+    // is the byte-for-byte proof that mount did not move. This asserts the
+    // other half: none of it is the panel's. Mounted with a different record,
+    // every id and every phrase follows the record — so the mix-saves document
+    // the arc queues gets its own voice without touching this component.
+
+    [Fact]
+    public async Task ADifferentSurface_MovesEveryIdAndEveryPhrase()
+    {
+        var other = new NamedEntriesSurface
+        {
+            Title = "Saved Mixes",
+            EmptyText = "No saved mixes yet.",
+            NamePlaceholder = "Mix name",
+            OverwriteWithNoun = "the current mix",
+            NameInputId = "saveMixName",
+            SaveButtonId = "saveMixButton",
+            LoadedNoticeId = "savedMixLoadedNotice",
+        };
+
+        var cut = Render<EntriesPanel>(parameters => parameters
+            .Add(p => p.Document, NamedFilterCollection.Empty)
+            .Add(p => p.Surface, other)
+            .Add(p => p.OnLoadRequested, (string n) => _loadRequests.Add(n))
+            .Add(p => p.OnSaveRequested, (string n) => _rowSaveRequests.Add(n))
+            .Add(p => p.OnSaveAsRequested, (string n) => _saveRequests.Add(n))
+            .Add(p => p.OnDeleteRequested, (string n) => _deleteRequests.Add(n)));
+
+        // The three ids, and none of the saved-filters ones.
+        Assert.NotNull(cut.Find("#saveMixName"));
+        Assert.NotNull(cut.Find("#saveMixButton"));
+        Assert.NotNull(cut.Find("#savedMixLoadedNotice"));
+        Assert.Empty(cut.FindAll("#saveFilterName"));
+        Assert.Empty(cut.FindAll("#saveFilterButton"));
+        Assert.Empty(cut.FindAll("#savedFilterLoadedNotice"));
+
+        // The title, the empty line and the placeholder.
+        Assert.Contains("Saved Mixes", cut.Markup);
+        Assert.Contains("No saved mixes yet.", cut.Markup);
+        Assert.Equal("Mix name", cut.Find("#saveMixName").GetAttribute("placeholder"));
+        Assert.DoesNotContain("Saved Filters", cut.Markup);
+        Assert.DoesNotContain("No saved filters yet.", cut.Markup);
+
+        // ...and the row-Save prompt's noun, which needs an entry to pose over.
+        cut.Render(parameters => parameters.Add(p => p.Document, Collection("Opening")));
+        await ClickRowButtonAsync(cut, "Opening", "Save");
+
+        Assert.Contains("Overwrite 'Opening' with the current mix?", cut.Markup);
+        Assert.DoesNotContain("with the current filters?", cut.Markup);
+    }
+
     // ── Gesture helpers ─────────────────────────────────────────────────────
     // Rows are located by their name span, buttons within a row by their text,
     // so tests read as user gestures rather than CSS selectors.
 
     // The live region is permanent, so "no confirmation" is empty text inside
     // it — never a missing element.
-    private static string LoadedNoticeText(IRenderedComponent<SavedFiltersPanel> cut) =>
+    private static string LoadedNoticeText(IRenderedComponent<EntriesPanel> cut) =>
         cut.Find("#savedFilterLoadedNotice").TextContent.Trim();
 
     private static AngleSharp.Dom.IElement? FindRowButton(
-        IRenderedComponent<SavedFiltersPanel> cut, string name, string buttonText)
+        IRenderedComponent<EntriesPanel> cut, string name, string buttonText)
     {
         var row = cut.FindAll("li.list-group-item")
             .Single(li => li.QuerySelector("span")?.TextContent == name);
@@ -556,7 +618,7 @@ public class SavedFiltersPanelTests : BunitContext
     }
 
     private static async Task ClickRowButtonAsync(
-        IRenderedComponent<SavedFiltersPanel> cut, string name, string buttonText)
+        IRenderedComponent<EntriesPanel> cut, string name, string buttonText)
     {
         var button = FindRowButton(cut, name, buttonText);
         Assert.NotNull(button);
@@ -566,14 +628,14 @@ public class SavedFiltersPanelTests : BunitContext
     // The save-as button is found by id: since #38 every row carries a Save
     // button of its own, so text alone no longer identifies the save-as one.
     private static AngleSharp.Dom.IElement FindSaveButton(
-        IRenderedComponent<SavedFiltersPanel> cut) =>
+        IRenderedComponent<EntriesPanel> cut) =>
         cut.Find("#saveFilterButton");
 
-    private static Task ClickSaveButtonAsync(IRenderedComponent<SavedFiltersPanel> cut) =>
+    private static Task ClickSaveButtonAsync(IRenderedComponent<EntriesPanel> cut) =>
         FindSaveButton(cut).ClickAsync(new());
 
     private static async Task ClickButtonByTextAsync(
-        IRenderedComponent<SavedFiltersPanel> cut, string buttonText)
+        IRenderedComponent<EntriesPanel> cut, string buttonText)
     {
         var button = cut.FindAll("button").Single(b => b.TextContent.Trim() == buttonText);
         await button.ClickAsync(new());

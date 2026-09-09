@@ -2,8 +2,9 @@
 @using XgFilter_Razor.Components.Internal
 
 @* ── FilterSurface.razor ─────────────────────────────────────────────────────
-   The one consumer-facing filter component: owns FilterPanel +
-   SavedFiltersPanel and the interaction wiring end to end — load→stage,
+   The one consumer-facing filter component: owns FilterPanel + the saved-
+   filters mount of NamedEntriesPanel and the interaction wiring end to end
+   — load→stage,
    save/save-as→snapshot-or-refuse, delete, applied-state mediation onto the
    host's AppliedFilter holder, the saved-filters degrade notices, the
    source-change rule, and the first-mount reconcile that seeds the panel's
@@ -29,9 +30,10 @@
    Location: XgFilter_Razor/Components/FilterSurface.razor
 ──────────────────────────────────────────────────────────────────────────── *@
 
-@if (ShowSavedFiltersPanel)
+@if (ShowSavedFiltersSection)
 {
-    <SavedFiltersPanel Filters="_store.Document"
+    <NamedEntriesPanel Document="_store.Document"
+                       Surface="SavedFilters"
                        OnLoadRequested="HandleLoadRequested"
                        OnSaveRequested="HandleSaveRequested"
                        OnSaveAsRequested="HandleSaveRequested"
@@ -206,6 +208,29 @@
     /// </summary>
     [Parameter, EditorRequired]
     public EventCallback<FilterConfig?> OnAppliedStateChanged { get; set; }
+
+    // ── The saved-filters mount ─────────────────────────────────────────────
+    //
+    // The generic pick list knows no document, so the saved-filters identity
+    // lives here, with the composite that mounts it. Every id and every phrase
+    // below is pinned by suites in three repositories (this one, BgQuiz and
+    // ExtractFromXgToCsv) — they are published surface, and a change here is a
+    // change to those suites, not a rename.
+    // Internal, not private: this repo's panel suite mounts the generic panel
+    // with this very instance rather than retyping the ids and copy, which
+    // would be the second encoding the preset exists to prevent. The same
+    // producer-side idiom as FilterPanel's storage-key constants; it widens
+    // nothing for consumers.
+    internal static readonly NamedEntriesSurface SavedFilters = new()
+    {
+        Title = "Saved Filters",
+        EmptyText = "No saved filters yet.",
+        NamePlaceholder = "Filter name",
+        OverwriteWithNoun = "the current filters",
+        NameInputId = "saveFilterName",
+        SaveButtonId = "saveFilterButton",
+        LoadedNoticeId = "savedFilterLoadedNotice",
+    };
 
     private FilterPanel? _filterPanel;
 
@@ -426,7 +451,7 @@
     // (BgQuiz's ruling, now producer-owned). WriteFailed keeps the panel (the
     // in-memory list is still truthful) beside its notice; Disabled and
     // LoadFailed render no panel — the latter degrades to its notice.
-    private bool ShowSavedFiltersPanel => _store.Status switch
+    private bool ShowSavedFiltersSection => _store.Status switch
     {
         NamedDocumentStatus.Ready => CanPersist || _store.Document.Count > 0,
         NamedDocumentStatus.WriteFailed => true,
