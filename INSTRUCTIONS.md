@@ -759,10 +759,13 @@ Parameters (all callbacks `[EditorRequired]`, as are `Document` and
   `FromPath` normalizing path identity itself (case, trailing separator).
 - `NamedEntriesSurface` — sealed immutable record; seven `required init`
   members: `Title`, `EmptyText`, `NamePlaceholder`, `OverwriteWithNoun`,
-  `NameInputId`, `SaveButtonId`, `LoadedNoticeId`. `required` is the
-  guard: a preset cannot be half-built. A preset lives beside the
-  composite that mounts it, never on this type — the record is the shape
-  and knows no document.
+  `NameInputId`, `SaveButtonId`, `LoadedNoticeId`. Two guards, both at
+  construction because neither failure is discoverable later: `required`
+  stops a preset being half-built, and every member rejects null, blank
+  and untrimmed at `init` (`ArgumentException` naming the member) so it
+  cannot be built wrong. A `with` expression re-validates whatever it
+  changes. A preset lives beside the composite that mounts it, never on
+  this type — the record is the shape and knows no document.
 - `NamedDocumentStore<TValue, TSelf>` — ctor
   `(IFilterDocumentStorage? storage)` (`protected`); `TSelf Document`,
   `NamedDocumentStatus Status`, `string? LoadFailedFileName` (non-null

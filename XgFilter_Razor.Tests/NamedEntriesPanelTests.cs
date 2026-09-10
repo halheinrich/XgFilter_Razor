@@ -599,6 +599,85 @@ public class NamedEntriesPanelTests : BunitContext
         Assert.DoesNotContain("with the current filters?", cut.Markup);
     }
 
+    // ── Surface validation (halheinrich/backgammon#190 leg (D)) ────────
+    // A blank id is the silent failure this record exists to prevent: it
+    // renders valid markup, so nothing here fails — a host suite in another
+    // repository just stops finding the panel. Rejected at init instead, the
+    // same validated-never-coerced posture as the lib's name rule.
+
+    [Theory]
+    [InlineData(nameof(NamedEntriesSurface.Title))]
+    [InlineData(nameof(NamedEntriesSurface.EmptyText))]
+    [InlineData(nameof(NamedEntriesSurface.NamePlaceholder))]
+    [InlineData(nameof(NamedEntriesSurface.OverwriteWithNoun))]
+    [InlineData(nameof(NamedEntriesSurface.NameInputId))]
+    [InlineData(nameof(NamedEntriesSurface.SaveButtonId))]
+    [InlineData(nameof(NamedEntriesSurface.LoadedNoticeId))]
+    public void Surface_BlankMember_IsRejected(string member)
+    {
+        var thrown = Assert.Throws<ArgumentException>(
+            () => SurfaceWith(member, "   "));
+
+        // Named, so a preset with seven string literals says which one.
+        Assert.Equal(member, thrown.ParamName);
+    }
+
+    // The other two the one helper rejects. One member each is enough: every
+    // member routes through that single helper by construction, which is what
+    // the theory above establishes.
+    [Fact]
+    public void Surface_UntrimmedMember_IsRejected()
+    {
+        var thrown = Assert.Throws<ArgumentException>(
+            () => SurfaceWith(nameof(NamedEntriesSurface.NameInputId), " saveFilterName "));
+
+        Assert.Equal(nameof(NamedEntriesSurface.NameInputId), thrown.ParamName);
+    }
+
+    [Fact]
+    public void Surface_NullMember_IsRejected()
+    {
+        var thrown = Assert.Throws<ArgumentNullException>(
+            () => SurfaceWith(nameof(NamedEntriesSurface.Title), null!));
+
+        Assert.Equal(nameof(NamedEntriesSurface.Title), thrown.ParamName);
+    }
+
+    // A `with` expression re-runs the accessor for what it changes, so the
+    // copy path is no way around the rule either.
+    [Fact]
+    public void Surface_WithExpression_RevalidatesTheChangedMember()
+    {
+        var thrown = Assert.Throws<ArgumentException>(
+            () => FilterSurface.SavedFilters with { NameInputId = "  " });
+
+        Assert.Equal(nameof(NamedEntriesSurface.NameInputId), thrown.ParamName);
+    }
+
+    // ...and the preset every host renders satisfies the rule it introduced —
+    // named explicitly, because a preset that threw would surface everywhere
+    // else in this file as an unhelpful TypeInitializationException.
+    [Fact]
+    public void SavedFiltersPreset_Constructs()
+    {
+        Assert.Equal("saveFilterName", FilterSurface.SavedFilters.NameInputId);
+        Assert.Equal("Saved Filters", FilterSurface.SavedFilters.Title);
+    }
+
+    // Every member valid except the named one, which takes `value`. The
+    // initializer assigns in source order, so the rejection is the named
+    // member's own.
+    private static NamedEntriesSurface SurfaceWith(string member, string value) => new()
+    {
+        Title = member == nameof(NamedEntriesSurface.Title) ? value : "Saved Mixes",
+        EmptyText = member == nameof(NamedEntriesSurface.EmptyText) ? value : "No saved mixes yet.",
+        NamePlaceholder = member == nameof(NamedEntriesSurface.NamePlaceholder) ? value : "Mix name",
+        OverwriteWithNoun = member == nameof(NamedEntriesSurface.OverwriteWithNoun) ? value : "the current mix",
+        NameInputId = member == nameof(NamedEntriesSurface.NameInputId) ? value : "saveMixName",
+        SaveButtonId = member == nameof(NamedEntriesSurface.SaveButtonId) ? value : "saveMixButton",
+        LoadedNoticeId = member == nameof(NamedEntriesSurface.LoadedNoticeId) ? value : "savedMixLoadedNotice",
+    };
+
     // ── Gesture helpers ─────────────────────────────────────────────────────
     // Rows are located by their name span, buttons within a row by their text,
     // so tests read as user gestures rather than CSS selectors.
