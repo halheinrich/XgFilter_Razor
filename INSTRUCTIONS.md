@@ -57,8 +57,8 @@ XgFilter_Razor/
     FilterRestoreNotice.cs           — restored-selection notice state, app-scoped
     FilterSourceToken.cs             — opaque host-minted source identity
     NamedEntriesSurface.cs           — a pick-list mount's copy and element ids
-    IFilterDocumentStorage.cs        — host storage-adapter seam
-    FilterStorageException.cs        — the seam's one failure type
+    IDocumentStorage.cs              — host storage-adapter seam
+    DocumentStorageException.cs      — the seam's one failure type
     NamedDocumentStatus.cs           — named-document context condition
     NamedDocumentStore.cs            — named-document lifecycle over the seam
     SavedFiltersDocument.cs          — canonical/legacy file names + migration rule
@@ -70,7 +70,7 @@ XgFilter_Razor.Testing/
 XgFilter_Razor.Tests/
   XgFilter_Razor.Tests.csproj
   AppliedFilterTests.cs              — holder source-keyed applied contract
-  FakeFilterDocumentStorage.cs       — shared recording fake over the seam
+  FakeDocumentStorage.cs             — shared recording fake over the seam
   FilterPanelTests.cs                — bUnit tests for FilterPanel
   FilterPanelTestStateTests.cs       — the seeding seam, pinned against a real render
   FilterSourceTokenTests.cs          — token equality rules
@@ -106,7 +106,7 @@ necessity, since the composite dies with its page while BgQuiz's gates must
 survive navigation), the `FilterRestoreNotice` (host-registered, app-scoped
 — the restored-selection notice's state; see the panel section and
 Pitfalls), a `FilterSourceToken?` for the current source, an
-`IFilterDocumentStorage?` adapter (null = no saved-filters context), the
+`IDocumentStorage?` adapter (null = no saved-filters context), the
 host's `CanPersist` capability ruling with its host-specific
 `PersistDisabledReason` wording, and the two panel-shaped events
 (`OnFilterConfigChanged` / `OnAppliedStateChanged`), re-raised after
@@ -559,12 +559,20 @@ their gates must survive (BgQuiz: Scoped), and `FilterSurface` drives them.
   sibling is another such specialization, not a second copy of the
   lifecycle (umbrella arc halheinrich/backgammon#190 leg (D), superseding
   the earlier hardcoded-store ruling).
-- **`IFilterDocumentStorage`** + **`FilterStorageException`** — the host
+- **`IDocumentStorage`** + **`DocumentStorageException`** — the host
   seam: per-document text I/O keyed by file name (`ReadAsync(name)`
   returning null for absent, `WriteAsync(name, json)`), generalized by
-  document name so the queued sibling needs zero interface change.
-  Adapters wrap every native failure in `FilterStorageException` — the
-  one type the store catches (see Pitfalls).
+  document name so a sibling document needs zero interface change — a
+  generalization `NamedDocumentStore` has since taken up, and the queued
+  mix-saves document will ride without touching it. Adapters wrap every
+  native failure in `DocumentStorageException` — the one type the store
+  catches (see Pitfalls). **The seam knows no document kind**, which is
+  why neither name says "filter" or "named"
+  (halheinrich/backgammon#190 leg (D)): it moves text for a file name,
+  and *which* document that is belongs to the store above it. Adapters
+  follow the same rule and are named for where they read and write —
+  `HttpDocumentStorage`, `PickedFolderDocumentStorage`, this repo's
+  `FakeDocumentStorage`.
 - **`SavedFiltersDocument`** — the document identity: public constants
   `FileName` (`xg-filters.json`) and `LegacyFileName`
   (`bgquiz-filters.json`), which `SavedFiltersStore` hands to the base,
@@ -659,7 +667,7 @@ Parameters:
 - `FilterSourceToken? Source` — the current source's token; null = none
   (applies are not recorded). Changing it triggers the composite-owned
   source-change rule; the first parameters-set only initializes and loads.
-- `IFilterDocumentStorage? Storage` — the saved-filters seam; null = no
+- `IDocumentStorage? Storage` — the saved-filters seam; null = no
   saved-filters section at all. The composite owns the store over it.
 - `bool CanPersist` (default true) + `string? PersistDisabledReason` — the
   host's capability half of the persist gate and its wording; ANDed with
@@ -767,7 +775,7 @@ Parameters (all callbacks `[EditorRequired]`, as are `Document` and
   changes. A preset lives beside the composite that mounts it, never on
   this type — the record is the shape and knows no document.
 - `NamedDocumentStore<TValue, TSelf>` — ctor
-  `(IFilterDocumentStorage? storage)` (`protected`); `TSelf Document`,
+  `(IDocumentStorage? storage)` (`protected`); `TSelf Document`,
   `NamedDocumentStatus Status`, `string? LoadFailedFileName` (non-null
   exactly while `LoadFailed`, naming the actual file — canonical or
   legacy — the failed load was about, so degrade copy never guesses),
@@ -778,12 +786,12 @@ Parameters (all callbacks `[EditorRequired]`, as are `Document` and
   where an older name is superseded, `protected virtual string?
   LegacyFileName` (default `null` = one name, one read).
 - `SavedFiltersStore` — that store over `FilterConfig` /
-  `NamedFilterCollection`; public ctor `(IFilterDocumentStorage? storage)`
+  `NamedFilterCollection`; public ctor `(IDocumentStorage? storage)`
   and the two identity overrides, nothing more. Read the document through
   the inherited `Document`.
-- `IFilterDocumentStorage` — `Task<string?> ReadAsync(string fileName)`
+- `IDocumentStorage` — `Task<string?> ReadAsync(string fileName)`
   (null = absent), `Task WriteAsync(string fileName, string json)`;
-  failures signalled as `FilterStorageException` only.
+  failures signalled as `DocumentStorageException` only.
 - `SavedFiltersDocument` — `const string FileName = "xg-filters.json"`,
   `const string LegacyFileName = "bgquiz-filters.json"`; public by
   design (see Pitfalls).
@@ -1031,7 +1039,7 @@ producer-side, so neither widens what consumers can see.
   by any host's `CanPersist` courtesy). Writes go only to the canonical
   name, and the legacy file is never deleted — it stays as the user's own
   backup, going stale from the first canonical write onward.
-- **Storage adapters must wrap failures in `FilterStorageException`.**
+- **Storage adapters must wrap failures in `DocumentStorageException`.**
   The store's degrade-never-block posture rides on a *typed* catch: an
   adapter that lets its native failure type escape (`JSException`,
   `IOException`, an HTTP exception) will fault the host's flow instead of

@@ -5,7 +5,7 @@ using BgDataTypes_Lib;
 /// <summary>
 /// Owns a <see cref="NamedCollection{TValue, TSelf}"/> document for the host's
 /// current source: reads it at load time, applies save and delete edits, and
-/// writes it back through the host's <see cref="IFilterDocumentStorage"/>
+/// writes it back through the host's <see cref="IDocumentStorage"/>
 /// adapter. The host (or the composite that mounts the pick list) drives every
 /// transition through an awaited call, so the page re-renders off
 /// <see cref="Document"/> / <see cref="Status"/> after each.
@@ -29,7 +29,7 @@ using BgDataTypes_Lib;
 /// (<see cref="NamedDocumentStatus.WriteFailed"/>). The host's own flow is
 /// never interrupted — a source with no usable document context is fully
 /// functional, minus the affordance that document powers. The one exception
-/// type this contract rides on is <see cref="FilterStorageException"/>:
+/// type this contract rides on is <see cref="DocumentStorageException"/>:
 /// adapters wrap their native failures in it, and anything else propagates as
 /// a bug.
 /// </para>
@@ -66,7 +66,7 @@ public abstract class NamedDocumentStore<TValue, TSelf>
     where TValue : IJsonDocument<TValue>
     where TSelf : NamedCollection<TValue, TSelf>, INamedCollectionSpecialization<TValue, TSelf>
 {
-    private readonly IFilterDocumentStorage? _storage;
+    private readonly IDocumentStorage? _storage;
 
     private TSelf _document = NamedCollection<TValue, TSelf>.Empty;
 
@@ -86,7 +86,7 @@ public abstract class NamedDocumentStore<TValue, TSelf>
     /// special case.
     /// </summary>
     /// <param name="storage">The host's document I/O, or <c>null</c> for none.</param>
-    protected NamedDocumentStore(IFilterDocumentStorage? storage) => _storage = storage;
+    protected NamedDocumentStore(IDocumentStorage? storage) => _storage = storage;
 
     /// <summary>
     /// The canonical file name this store reads and writes — the only name
@@ -190,7 +190,7 @@ public abstract class NamedDocumentStore<TValue, TSelf>
                 LoadFailedFileName = fileName;
             }
         }
-        catch (FilterStorageException)
+        catch (DocumentStorageException)
         {
             if (version != _loadVersion) return;
             // The adapter failed the read. Degrade — no document for this
@@ -269,7 +269,7 @@ public abstract class NamedDocumentStore<TValue, TSelf>
         {
             await _storage!.WriteAsync(FileName, updated.ToJson());
         }
-        catch (FilterStorageException)
+        catch (DocumentStorageException)
         {
             Status = NamedDocumentStatus.WriteFailed;
         }

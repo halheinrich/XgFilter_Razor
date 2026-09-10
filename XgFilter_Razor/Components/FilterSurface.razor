@@ -18,7 +18,7 @@
    - a FilterSourceToken? for "which source is current" (told, never asks:
      this component never sees pickers, paths, or capabilities — the host
      mints tokens and the composite only compares them),
-   - an IFilterDocumentStorage adapter for the saved-filters document (null =
+   - an IDocumentStorage adapter for the saved-filters document (null =
      no context), plus the host's CanPersist capability ruling and its
      host-specific disabled-reason wording,
    - the two panel-shaped events, re-raised after mediation.
@@ -165,7 +165,7 @@
     /// remount re-reads the document (a setup-time, degrade-tolerant read).
     /// </summary>
     [Parameter]
-    public IFilterDocumentStorage? Storage { get; set; }
+    public IDocumentStorage? Storage { get; set; }
 
     /// <summary>
     /// The host's capability half of the persist gate — e.g. BgQuiz's
@@ -245,7 +245,7 @@
     // end-setup choreography on mount) from a genuine change.
     private bool _initialized;
     private FilterSourceToken? _lastSource;
-    private IFilterDocumentStorage? _lastStorage;
+    private IDocumentStorage? _lastStorage;
 
     // Composite-owned refusal copy for a save the panel optimistically
     // confirmed but TryGetEditedConfig refused. Cleared on any panel gesture,

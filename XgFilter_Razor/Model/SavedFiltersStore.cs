@@ -30,7 +30,7 @@ public sealed class SavedFiltersStore : NamedDocumentStore<FilterConfig, NamedFi
     /// <c>null</c> adapter means.
     /// </summary>
     /// <param name="storage">The host's document I/O, or <c>null</c> for none.</param>
-    public SavedFiltersStore(IFilterDocumentStorage? storage) : base(storage) { }
+    public SavedFiltersStore(IDocumentStorage? storage) : base(storage) { }
 
     /// <inheritdoc/>
     protected override string FileName => SavedFiltersDocument.FileName;

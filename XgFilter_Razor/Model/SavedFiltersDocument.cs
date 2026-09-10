@@ -33,7 +33,7 @@ namespace XgFilter_Razor;
 /// <para>
 /// A future sibling document (named mix saves is queued) gets its own
 /// identity type beside this one, over the same
-/// <see cref="IFilterDocumentStorage"/> seam.
+/// <see cref="IDocumentStorage"/> seam.
 /// </para>
 /// </summary>
 public static class SavedFiltersDocument

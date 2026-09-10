@@ -4,9 +4,9 @@ namespace XgFilter_Razor.Tests;
 /// Recording fake over the storage seam, shared by the store's unit tests and
 /// the composite's wire tests: an in-memory document dictionary, a log of
 /// every read and write, and switchable failure modes that throw the seam's
-/// contractual <see cref="FilterStorageException"/>.
+/// contractual <see cref="DocumentStorageException"/>.
 /// </summary>
-internal sealed class FakeFilterDocumentStorage : IFilterDocumentStorage
+internal sealed class FakeDocumentStorage : IDocumentStorage
 {
     public Dictionary<string, string> Documents { get; } = new(StringComparer.Ordinal);
     public List<string> Reads { get; } = [];
@@ -21,7 +21,7 @@ internal sealed class FakeFilterDocumentStorage : IFilterDocumentStorage
     public Task<string?> ReadAsync(string fileName)
     {
         Reads.Add(fileName);
-        if (ThrowOnRead) throw new FilterStorageException("read failed");
+        if (ThrowOnRead) throw new DocumentStorageException("read failed");
         if (ReadOverride is not null) return ReadOverride(fileName);
         return Task.FromResult(
             Documents.TryGetValue(fileName, out var json) ? json : null);
@@ -29,7 +29,7 @@ internal sealed class FakeFilterDocumentStorage : IFilterDocumentStorage
 
     public Task WriteAsync(string fileName, string json)
     {
-        if (ThrowOnWrite) throw new FilterStorageException("write failed");
+        if (ThrowOnWrite) throw new DocumentStorageException("write failed");
         Writes.Add((fileName, json));
         Documents[fileName] = json;
         return Task.CompletedTask;

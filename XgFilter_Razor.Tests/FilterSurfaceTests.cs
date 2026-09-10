@@ -32,7 +32,7 @@ public class FilterSurfaceTests : BunitContext
 
     private IRenderedComponent<FilterSurface> RenderSurface(
         FilterSourceToken? source,
-        IFilterDocumentStorage? storage,
+        IDocumentStorage? storage,
         bool canPersist = true,
         string? persistDisabledReason = null)
         => Render<FilterSurface>(parameters => parameters
@@ -61,9 +61,9 @@ public class FilterSurfaceTests : BunitContext
         JSInterop.Setup<string?>("localStorage.getItem", FilterPanel.ConfigKey)
                  .SetResult(config.ToJson());
 
-    private static FakeFilterDocumentStorage StorageWith(params (string Name, FilterConfig Config)[] entries)
+    private static FakeDocumentStorage StorageWith(params (string Name, FilterConfig Config)[] entries)
     {
-        var storage = new FakeFilterDocumentStorage();
+        var storage = new FakeDocumentStorage();
         storage.Documents[SavedFiltersDocument.FileName] = CollectionJson(entries);
         return storage;
     }
@@ -155,7 +155,7 @@ public class FilterSurfaceTests : BunitContext
         _notice.Dismiss();
         StoredConfig(applied);
 
-        var cut = RenderSurface(TokenA, new FakeFilterDocumentStorage());
+        var cut = RenderSurface(TokenA, new FakeDocumentStorage());
 
         cut.WaitForAssertion(() => Assert.True(Apply(cut).HasAttribute("disabled")));
         Assert.Contains("already applied", cut.Find("#applyDisabledReason").TextContent);
@@ -174,7 +174,7 @@ public class FilterSurfaceTests : BunitContext
     {
         StoredConfig(new FilterConfig { ErrorMin = 0.1 });
 
-        var cut = RenderSurface(TokenA, new FakeFilterDocumentStorage());
+        var cut = RenderSurface(TokenA, new FakeDocumentStorage());
 
         Assert.Null(_holder.ConfigFor(TokenA));
         cut.WaitForAssertion(() => Assert.Equal("0.1", ErrorMin(cut).GetAttribute("value")));
@@ -191,7 +191,7 @@ public class FilterSurfaceTests : BunitContext
         _holder.Set(applied, TokenB);
         StoredConfig(applied);
 
-        var cut = RenderSurface(TokenA, new FakeFilterDocumentStorage());
+        var cut = RenderSurface(TokenA, new FakeDocumentStorage());
 
         cut.WaitForAssertion(() => Assert.Equal("0.1", ErrorMin(cut).GetAttribute("value")));
         Assert.False(Apply(cut).HasAttribute("disabled"));
@@ -211,7 +211,7 @@ public class FilterSurfaceTests : BunitContext
     {
         StoredConfig(new FilterConfig { ErrorMin = 0.1 });
 
-        var cut = RenderSurface(TokenA, new FakeFilterDocumentStorage());
+        var cut = RenderSurface(TokenA, new FakeDocumentStorage());
 
         cut.WaitForAssertion(() => Assert.Contains(
             "previous session", cut.Find("#filterRestoredNotice").TextContent));
@@ -223,7 +223,7 @@ public class FilterSurfaceTests : BunitContext
     {
         // Nothing in storage (the loose JS default): nothing was restored,
         // so the notice must not claim otherwise over a defaults screen.
-        var cut = RenderSurface(TokenA, new FakeFilterDocumentStorage());
+        var cut = RenderSurface(TokenA, new FakeDocumentStorage());
 
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("#filterRestoredNotice")));
     }
@@ -232,7 +232,7 @@ public class FilterSurfaceTests : BunitContext
     public void Notice_DiesAtTheFirstEdit()
     {
         StoredConfig(new FilterConfig { ErrorMin = 0.1 });
-        var cut = RenderSurface(TokenA, new FakeFilterDocumentStorage());
+        var cut = RenderSurface(TokenA, new FakeDocumentStorage());
         cut.WaitForAssertion(() => cut.Find("#filterRestoredNotice"));
 
         ErrorMin(cut).Input("0.2");
@@ -244,7 +244,7 @@ public class FilterSurfaceTests : BunitContext
     public async Task Notice_DiesAtApply()
     {
         StoredConfig(new FilterConfig { ErrorMin = 0.1 });
-        var cut = RenderSurface(TokenA, new FakeFilterDocumentStorage());
+        var cut = RenderSurface(TokenA, new FakeDocumentStorage());
         cut.WaitForAssertion(() => cut.Find("#filterRestoredNotice"));
 
         await Apply(cut).ClickAsync(new());
@@ -258,7 +258,7 @@ public class FilterSurfaceTests : BunitContext
         // Toggling the disclosure is navigation, not an edit — the restored
         // selection is still not the user's own, so the notice holds.
         StoredConfig(new FilterConfig { ErrorMin = 0.1 });
-        var cut = RenderSurface(TokenA, new FakeFilterDocumentStorage());
+        var cut = RenderSurface(TokenA, new FakeDocumentStorage());
         cut.WaitForAssertion(() => cut.Find("#filterRestoredNotice"));
 
         cut.Find("#moreFiltersToggle").Click();
@@ -275,11 +275,11 @@ public class FilterSurfaceTests : BunitContext
     public void Remount_WithinSetup_AfterAnEdit_DoesNotResurrectTheNotice()
     {
         StoredConfig(new FilterConfig { ErrorMin = 0.1 });
-        var first = RenderSurface(TokenA, new FakeFilterDocumentStorage());
+        var first = RenderSurface(TokenA, new FakeDocumentStorage());
         first.WaitForAssertion(() => first.Find("#filterRestoredNotice"));
         ErrorMin(first).Input("0.2");
 
-        var second = RenderSurface(TokenA, new FakeFilterDocumentStorage());
+        var second = RenderSurface(TokenA, new FakeDocumentStorage());
 
         second.WaitForAssertion(() =>
             Assert.Equal("0.1", ErrorMin(second).GetAttribute("value")));
@@ -292,10 +292,10 @@ public class FilterSurfaceTests : BunitContext
     public void Remount_WithinSetup_Untouched_KeepsTheNotice()
     {
         StoredConfig(new FilterConfig { ErrorMin = 0.1 });
-        var first = RenderSurface(TokenA, new FakeFilterDocumentStorage());
+        var first = RenderSurface(TokenA, new FakeDocumentStorage());
         first.WaitForAssertion(() => first.Find("#filterRestoredNotice"));
 
-        var second = RenderSurface(TokenA, new FakeFilterDocumentStorage());
+        var second = RenderSurface(TokenA, new FakeDocumentStorage());
 
         second.WaitForAssertion(() => second.Find("#filterRestoredNotice"));
     }
@@ -310,7 +310,7 @@ public class FilterSurfaceTests : BunitContext
     public void Notice_SurvivesAnInPlaceSourceChange()
     {
         StoredConfig(new FilterConfig { ErrorMin = 0.1 });
-        var cut = RenderSurface(TokenA, new FakeFilterDocumentStorage());
+        var cut = RenderSurface(TokenA, new FakeDocumentStorage());
         cut.WaitForAssertion(() => cut.Find("#filterRestoredNotice"));
 
         cut.Render(parameters => parameters.Add(p => p.Source, TokenB));
@@ -324,7 +324,7 @@ public class FilterSurfaceTests : BunitContext
     [Fact]
     public async Task Apply_KeysHolderToSource_AndRaisesBothEvents()
     {
-        var cut = RenderSurface(TokenA, new FakeFilterDocumentStorage());
+        var cut = RenderSurface(TokenA, new FakeDocumentStorage());
 
         ErrorMin(cut).Input("0.05");
         await Apply(cut).ClickAsync(new());
@@ -344,7 +344,7 @@ public class FilterSurfaceTests : BunitContext
     [Fact]
     public async Task EditAfterApply_DropsTheAppliedState_ReportsNull()
     {
-        var cut = RenderSurface(TokenA, new FakeFilterDocumentStorage());
+        var cut = RenderSurface(TokenA, new FakeDocumentStorage());
         await Apply(cut).ClickAsync(new());
         Assert.NotNull(_holder.ConfigFor(TokenA));
 
@@ -463,7 +463,7 @@ public class FilterSurfaceTests : BunitContext
     [Fact]
     public async Task SaveAs_NewName_WritesThroughSeam()
     {
-        var storage = new FakeFilterDocumentStorage();
+        var storage = new FakeDocumentStorage();
         var cut = RenderSurface(TokenA, storage);
 
         cut.Find("#saveFilterName").Input("Blitz");
@@ -545,7 +545,7 @@ public class FilterSurfaceTests : BunitContext
     public void LoadFailed_NoticeReplacesPanel_NamingTheActualFile()
     {
         // Canonical corrupt → the notice names the canonical file.
-        var storage = new FakeFilterDocumentStorage();
+        var storage = new FakeDocumentStorage();
         storage.Documents[SavedFiltersDocument.FileName] = "not a filters document";
         var cut = RenderSurface(TokenA, storage);
 
@@ -559,7 +559,7 @@ public class FilterSurfaceTests : BunitContext
     [Fact]
     public void LoadFailed_OnTheLegacyFallback_NamesTheLegacyFile()
     {
-        var storage = new FakeFilterDocumentStorage();
+        var storage = new FakeDocumentStorage();
         storage.Documents[SavedFiltersDocument.LegacyFileName] = "not a filters document";
         var cut = RenderSurface(TokenA, storage);
 
@@ -596,7 +596,7 @@ public class FilterSurfaceTests : BunitContext
     {
         // No document at all → Ready over Empty; with the host's CanPersist
         // false there is nothing to load and nothing to save — clutter rule.
-        var cut = RenderSurface(TokenA, new FakeFilterDocumentStorage(), canPersist: false);
+        var cut = RenderSurface(TokenA, new FakeDocumentStorage(), canPersist: false);
 
         Assert.Empty(cut.FindAll("li.list-group-item"));
         Assert.Empty(cut.FindAll("#saveFilterName"));
