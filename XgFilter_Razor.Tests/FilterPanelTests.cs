@@ -2290,6 +2290,30 @@ public class FilterPanelTests : BunitContext
             i => (string?)i.Arguments[0] == ConfigKey);
     }
 
+    // The stored value survives a full round trip byte for byte: read back
+    // through restore, then written again by a gesture that leaves the set as
+    // it found it (close a row, reopen it), it comes out as exactly the
+    // literal that went in. Both directions cross the source-generated
+    // metadata the row set was moved onto so a trimmed host can publish it
+    // (halheinrich/backgammon#193), and the literal is written out by hand
+    // rather than produced by any serializer, so a change of mechanism that
+    // also changed the wire — spacing, escaping, a different shape — fails
+    // here instead of silently resetting every user's open rows.
+    [Fact]
+    public void StoredOpenSet_RoundTripsByteIdentical()
+    {
+        const string stored = "[\"Players\",\"MoveNumberRange\",\"DiceRolls\"]";
+        JSInterop.Setup<string?>("localStorage.getItem", DisclosureKey).SetResult(stored);
+
+        var cut = Render<FilterPanel>();
+        Assert.Equal("true", cut.Find("#facetToggle_MoveNumberRange").GetAttribute("aria-expanded"));
+
+        ExpandFacets(cut, FilterFacet.MoveNumberRange);   // close…
+        ExpandFacets(cut, FilterFacet.MoveNumberRange);   // …and reopen
+
+        Assert.Equal(stored, LastDisclosureWrite());
+    }
+
     // The last value written under the rows' key.
     private string? LastDisclosureWrite() =>
         JSInterop.Invocations["localStorage.setItem"]

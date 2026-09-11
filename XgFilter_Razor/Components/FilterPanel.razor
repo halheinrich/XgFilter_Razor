@@ -850,10 +850,14 @@
 
         if (string.IsNullOrWhiteSpace(stored)) return false;
 
+        // Declared string?[] although the metadata is string[]'s: the two are
+        // one runtime type, and a stored [null] really does put a null in it,
+        // so the element nullability the check below relies on is stated
+        // rather than assumed away.
         string?[]? names;
         try
         {
-            names = JsonSerializer.Deserialize<string?[]>(stored);
+            names = JsonSerializer.Deserialize(stored, XgFilterRazorJsonContext.Default.StringArray);
         }
         catch (JsonException)
         {
@@ -1135,9 +1139,16 @@
     // one spelling on disk: a hash-ordered array would differ run to run for
     // the same user choice and make the stored value unreadable to a person
     // inspecting it in devtools, which the help invites them to do.
+    //
+    // Both directions go through XgFilterRazorJsonContext's source-generated
+    // metadata, never a reflection-bound JsonSerializer overload: this
+    // assembly is trimmable, and a trimmed host (BgQuiz) refuses the
+    // reflection path at publish — halheinrich/backgammon#193 shipped it once
+    // and broke that publish.
     private string SerializeExpandedFacets() =>
         JsonSerializer.Serialize(
-            RowFacets.Where(_expandedFacets.Contains).Select(f => f.ToString()));
+            RowFacets.Where(_expandedFacets.Contains).Select(f => f.ToString()).ToArray(),
+            XgFilterRazorJsonContext.Default.StringArray);
 
     // Which facets currently hold active filters — the presence half of every
     // row's badge. Judged by the lib's activation predicates via
