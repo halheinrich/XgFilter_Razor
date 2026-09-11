@@ -47,18 +47,19 @@
 
     @* Panel chrome — the controls that govern every facet rather than
        describing one. Producer-owned for the same reason the facet prose is:
-       the disclosure's hidden-active signal, the Apply gate and its two
+       the filter rows and their badges, the Apply gate and its two
        disabled states are the panel's behavior, so a host restating them
        would be a second encoding that drifts. Placed before the facets: it is
        the frame a reader needs in order to find and commit any of them. *@
     <section>
         @Heading(SectionLevel, ChromeSectionAnchorId, "Setting and applying filters")
         <p>
-            Only <em>Error range</em> is shown at first — it is the one most
-            people reach for. <em>Show more filters</em> opens the rest. While
-            it is closed, a badge on it counts the hidden sections that
-            currently hold a filter and names them, so a filter you set earlier
-            can never be quietly out of sight.
+            Only <em>Error range</em> is shown open at first — it is the one
+            most people reach for. Every other filter sits on its own row that
+            you open and close, and the rows you left open are open again next
+            time. While a row is closed, a badge on it says the filter inside
+            is set, so a filter you set earlier can never be quietly out of
+            sight.
         </p>
         <p>
             Nothing you type or check takes effect until you press <em>Apply
@@ -73,8 +74,8 @@
         <p>
             <em>Clear filters</em> empties every filter and applies that
             immediately, giving you the unfiltered set back in one gesture. It
-            changes only the filters — whether <em>Show more filters</em> is
-            open is left exactly as you had it.
+            changes only the filters — which rows you have open is left
+            exactly as you had it.
         </p>
     </section>
 
@@ -256,10 +257,10 @@
                 Clear filters, and read back when the panel first appears.
             </li>
             <li>
-                <code>@FilterPanel.DisclosureKey</code> — whether
-                <em>Show more filters</em> is open. That is a display
-                preference, kept apart from your filters: it is not part of the
-                saved filter settings, and Clear filters never changes it.
+                <code>@FilterPanel.DisclosureKey</code> — which filter rows
+                you have open. That is a display preference, kept apart from
+                your filters: it is not part of the saved filter settings, and
+                Clear filters never changes it.
             </li>
         </ul>
         <p>

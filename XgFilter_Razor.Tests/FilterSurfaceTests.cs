@@ -253,15 +253,15 @@ public class FilterSurfaceTests : BunitContext
     }
 
     [Fact]
-    public void Notice_SurvivesTheDisclosureToggle()
+    public void Notice_SurvivesAFacetRowToggle()
     {
-        // Toggling the disclosure is navigation, not an edit — the restored
+        // Opening a filter row is navigation, not an edit — the restored
         // selection is still not the user's own, so the notice holds.
         StoredConfig(new FilterConfig { ErrorMin = 0.1 });
         var cut = RenderSurface(TokenA, new FakeDocumentStorage());
         cut.WaitForAssertion(() => cut.Find("#filterRestoredNotice"));
 
-        cut.Find("#moreFiltersToggle").Click();
+        cut.Find("#facetToggle_DiceRolls").Click();
 
         Assert.NotNull(cut.Find("#filterRestoredNotice"));
     }
@@ -481,10 +481,10 @@ public class FilterSurfaceTests : BunitContext
         var storage = StorageWith(("Race", new FilterConfig()));
         var cut = RenderSurface(TokenA, storage);
 
-        // Stage an unparseable position pattern (behind the disclosure), then
-        // attempt a row Save: TryGetEditedConfig refuses, so the composite
+        // Stage an unparseable position pattern (inside its own filter row),
+        // then attempt a row Save: TryGetEditedConfig refuses, so the composite
         // must say why instead of no-opping silently.
-        cut.Find("#moreFiltersToggle").Click();
+        cut.Find("#facetToggle_PositionPattern").Click();
         cut.Find("#positionPattern").Input("not a bracket list");
         await ClickRowButtonAsync(cut, "Race", "Save");
         await ClickRowButtonAsync(cut, "Race", "Overwrite");

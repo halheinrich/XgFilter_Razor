@@ -1,6 +1,7 @@
 @namespace XgFilter_Razor.Components.Internal
 @attribute [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
 @using System.Diagnostics.CodeAnalysis
+@using System.Text.Json
 @using XgFilter_Lib.Filtering
 @using XgFilter_Lib.Enums
 @using XgFilter_Lib.Patterns
@@ -23,12 +24,13 @@
    Consumers that need a DecisionFilterSet call FilterConfig.Build() on the
    received config.
    Information hierarchy: the error-range section is first and always visible;
-   the other eight sections sit behind one disclosure, default hidden. While
-   collapsed, the toggle carries a signal naming any hidden sections that hold
-   active filters — see the disclosure-toggle comment for how it is computed.
+   each of the other eight facets is its own collapsible row, one tier, in the
+   lib's FilterFacet declaration order. A collapsed row names its facet and,
+   while that facet holds an active filter, carries a badge — see the
+   facet-row comment for how presence and wording divide.
    State persists to localStorage under two keys: the whole filter selection as
    one serialized FilterConfig blob (lib-owned shape via FilterConfig.ToJson /
-   TryFromJson), and the disclosure's expand/collapse choice under its own key
+   TryFromJson), and the set of expanded rows under its own key
    (DisclosureKey) — user preference, never part of the config blob.
    Location: XgFilter_Razor/Components/FilterPanel.razor
 ──────────────────────────────────────────────────────────────────────────── *@
@@ -58,14 +60,14 @@
 
         @* ── Error range ──────────────────────────────────────────────────────
            First and always visible: dogfooding showed it is the panel's
-           most-used control, so it never rides behind the disclosure.
+           most-used control, so it never rides behind a row of its own.
 
            Validity is the lib's ruling, not this panel's: GetInvalidFields()
            names the offending bounds (non-negative, min ≤ max, NaN rejected)
            and each input reds itself on its own FilterField, so a wrong max
            never marks a min the user got right — the lib's attribution rules
            decide that, and a misordered pair blames both by design. Hoisted
-           into a local like the hidden-active signal below: every marked input
+           into a local like the active-facet set below: every marked input
            and every feedback line on the panel — this facet's, the score
            tokens', the move numbers' — reads that one evaluation, and the Apply
            gate reads the same rule through CanApply. The panel writes no rule of
@@ -120,415 +122,427 @@
             }
         </div>
 
-        @* ── Disclosure toggle · Clear filters ────────────────────────────────
-           An honest disclosure: a real button carrying aria-expanded /
-           aria-controls over the always-rendered #moreFilters region, whose
-           children render only while expanded. While collapsed, the toggle
-           carries the hidden-active signal — a count badge plus the section
-           names — computed from the live edit buffers through the same build
-           path Apply uses (BuildConfig) and the lib's GetActiveFacets(), minus
-           ErrorRange, which is always visible above. The facet labels are the
-           section headings by the lib's design (FilterFacet [Description]s),
-           so the signal names exactly the sections the user will find on
-           expanding. Never computed by re-inspecting config fields or edit
-           buffers — the activation predicates are the lib's SSOT. Because the
-           source is the live buffers, the signal is honest at rest (after
-           restore, Apply, Clear, and LoadConfig staging) and live mid-edit.
-           The expand/collapse choice belongs to the user, not the config: it
-           persists under DisclosureKey, and LoadConfig / Clear filters never
-           move it.
-           "Clear filters" shares this row, immediately right of the toggle —
-           beta feedback, ruled to this side in halheinrich/backgammon#153. It
-           is the full-clear gesture under an honest name: it clears filter
-           values only (buffers to defaults, persist + raise the empty config)
-           — it never touches host state or the disclosure, so standing on the
-           disclosure's row claims nothing about it. It precedes the
-           hidden-active names deliberately: those names come and go with the
-           signal, and a control that slides sideways when unrelated prose
-           appears is one the hand stops finding. The count badge stays welded
-           to what it counts by living inside the toggle itself. *@
-        @{ var hiddenActive = HiddenActiveFacets; }
+        @* ── Clear filters ────────────────────────────────────────────────────
+           Alone on its own row now, in the leftmost position the disclosure
+           toggle used to hold — the placement ruled in
+           halheinrich/backgammon#153, which the toggle's removal does not
+           re-rule. It is the full-clear gesture under an honest name: it
+           clears filter values only (buffers to defaults, persist + raise the
+           empty config) — it never touches host state, and never opens or
+           closes a row, so it claims nothing about what is on screen. *@
         <div class="mb-3 d-flex gap-2 align-items-center">
-            <button type="button" id="moreFiltersToggle"
-                    class="btn btn-outline-secondary btn-sm"
-                    aria-expanded="@(_moreFiltersExpanded ? "true" : "false")"
-                    aria-controls="moreFilters"
-                    @onclick="ToggleMoreFiltersAsync">
-                @(_moreFiltersExpanded ? "Hide more filters" : "Show more filters")
-                @if (!_moreFiltersExpanded && hiddenActive.Count > 0)
-                {
-                    <span id="hiddenActiveCount" class="badge text-bg-primary ms-1">@hiddenActive.Count</span>
-                }
-            </button>
             <button type="button" id="clearFilters"
                     class="btn btn-outline-secondary btn-sm"
                     @onclick="ClearFiltersAsync">
                 Clear filters
             </button>
-            @if (!_moreFiltersExpanded && hiddenActive.Count > 0)
-            {
-                <small id="hiddenActiveNames" class="text-muted">
-                    Active: @string.Join(", ", hiddenActive.Select(f => f.ToLabel()))
-                </small>
-            }
         </div>
 
-        <div id="moreFilters">
-            @if (_moreFiltersExpanded)
+        @* ── Facet rows ───────────────────────────────────────────────────────
+           One collapsible row per offered facet, one tier, directly under the
+           always-visible error range and in the lib's FilterFacet declaration
+           order. Each is an honest disclosure in the level-group idiom one
+           tier up: a real button carrying aria-expanded / aria-controls over
+           the always-rendered #facet_<Facet> region, whose children render
+           only while expanded (absent from the DOM when collapsed, not styled
+           away), plus a decorative +/− glyph that is aria-hidden because the
+           button's own aria-expanded already says which way the row sits. The
+           button's accessible name is the facet's own label — the lib's
+           FilterFacet [Description] via ToLabel(), never a literal here.
+
+           The badge divides in two, deliberately. Its PRESENCE is the lib's
+           ruling: a row badges exactly when GetActiveFacets() names its facet,
+           asked of the live edit buffers through the same build path Apply
+           commits through (BuildConfig), never by re-inspecting a buffer or a
+           config field here — the activation predicates are the lib's SSOT,
+           and reading a buffer directly would be a second encoding of one of
+           them. Reading the live buffers is also what keeps it honest at rest
+           (after restore, Apply, Clear filters and LoadConfig staging) and
+           live mid-edit. Its WORDS are the panel's display concern and nothing
+           else's — see FacetBadgeText. It renders only while the row is
+           collapsed: expanded, the controls themselves say everything the
+           badge could, which is the level groups' ruling one tier down.
+
+           Which rows are open is the user's choice, not the config's: the set
+           persists under DisclosureKey, and LoadConfig / Clear filters never
+           move it. Opening or closing a row is navigation, not an edit — no
+           ReportAppliedState. *@
+        @{
+            var activeFacets = ActiveFacets;
+
+            RenderFragment FacetRow(FilterFacet facet, RenderFragment body)
             {
-                @* ── Player ──────────────────────────────────────────────────── *@
-                <div class="mb-3">
-                    <label class="form-label">
-                        Player names
-                        <small class="text-muted">(comma-separated; blank = all players)</small>
-                    </label>
-                    <input class="form-control"
-                           placeholder="e.g. Hal, Magriel"
-                           value="@_playerText"
-                           @oninput="e => { _playerText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
-                </div>
+                var expanded = _expandedFacets.Contains(facet);
+                var badge = !expanded && activeFacets.Contains(facet)
+                    ? FacetBadgeText(facet)
+                    : null;
 
-                @* ── Decision type ───────────────────────────────────────────── *@
-                <div class="mb-3">
-                    <label class="form-label">Decision type</label>
-                    <div>
-                        @foreach (var opt in Enum.GetValues<DecisionTypeOption>())
+                return @<div class="mb-3">
+                    <button type="button" id="facetToggle_@facet"
+                            class="btn btn-link btn-sm p-0 text-decoration-none"
+                            aria-expanded="@(expanded ? "true" : "false")"
+                            aria-controls="facet_@facet"
+                            @onclick="() => ToggleFacetAsync(facet)">
+                        <span aria-hidden="true">@(expanded ? "−" : "+")</span>
+                        @facet.ToLabel()
+                        @if (badge is not null)
                         {
-                            <div class="form-check form-check-inline">
-                                <input class="form-check-input" type="radio"
-                                       name="decisionType"
-                                       id="dt_@opt"
-                                       checked="@(_decisionType == opt)"
-                                       @onchange="() => { _decisionType = opt; ReportAppliedState(); }" />
-                                <label class="form-check-label" for="dt_@opt">
-                                    @opt.ToLabel()
-                                </label>
-                            </div>
+                            <span id="facetBadge_@facet" class="badge text-bg-primary ms-1">@badge</span>
+                        }
+                    </button>
+                    <div id="facet_@facet">
+                        @if (expanded)
+                        {
+                            @body
                         }
                     </div>
-                </div>
+                </div>;
+            }
+        }
 
-                @* ── Match score ─────────────────────────────────────────────── *@
-                @* The position-pattern field's shape, over a facet whose rule the
-                   panel does not own: the lib names FilterField.MatchScores when any
-                   entry is a token its grammar rejects, the input reds itself on that
-                   membership, and the same IsCommittable member closes Apply — so a
-                   mistyped or retired score can never silently drop the filter the
-                   user meant to set.
+        @* ── Player ──────────────────────────────────────────────────────────── *@
+        @FacetRow(FilterFacet.Players, @<div class="ms-3">
+            <label class="form-label">
+                <small class="text-muted">(comma-separated; blank = all players)</small>
+            </label>
+            <input class="form-control"
+                   placeholder="e.g. Hal, Magriel"
+                   value="@_playerText"
+                   @oninput="e => { _playerText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
+        </div>)
 
-                   Two verdicts, not one, because the remedies differ: a malformed
-                   token is retyped, while a *retired* one was spelled correctly for
-                   an earlier grammar and needs its replacements named. The lib draws
-                   that distinction wordlessly (MatchScoreToken.GetFault) and the
-                   panel words it — the GetInvalidFields / BoardPattern.TryParse
-                   division of labour, one tier finer.
-
-                   Every token spelling on this screen — placeholder, hint, and both
-                   verdicts — renders from MatchScoreToken's exported constants. The
-                   panel never types 'moneyJ' as a literal: the grammar that accepts
-                   the token and the copy that advertises it are one source, which is
-                   the whole point of the constants being exported
-                   (halheinrich/backgammon#121). *@
-                <div class="mb-3">
-                    <label class="form-label">
-                        Match scores
-                        <small class="text-muted">(comma-separated; blank = all scores)</small>
+        @* ── Decision type ───────────────────────────────────────────────────
+           The one offered facet with no bracketed hint: its three options say
+           everything a hint would, so the row's body carries the controls
+           alone rather than an empty label element. *@
+        @FacetRow(FilterFacet.DecisionType, @<div class="ms-3">
+            @foreach (var opt in Enum.GetValues<DecisionTypeOption>())
+            {
+                <div class="form-check form-check-inline">
+                    <input class="form-check-input" type="radio"
+                           name="decisionType"
+                           id="dt_@opt"
+                           checked="@(_decisionType == opt)"
+                           @onchange="() => { _decisionType = opt; ReportAppliedState(); }" />
+                    <label class="form-check-label" for="dt_@opt">
+                        @opt.ToLabel()
                     </label>
-                    <input class="form-control @(invalidFields.Contains(FilterField.MatchScores) ? "is-invalid" : string.Empty)"
-                           placeholder="e.g. 4a5a, 1a1a, 1a2aC, @MatchScoreToken.MoneyWithJacoby, @MatchScoreToken.MoneyWithoutJacoby"
-                           value="@_matchScoreText"
-                           @oninput="e => { _matchScoreText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
-                    <div class="form-text">
-                        MaNa is on-roll-anchored — M = points the player on roll needs, N = the
-                        opponent — so 4a5a and 5a4a are distinct (list both to catch either
-                        orientation). C suffix = Crawford game;
-                        @MatchScoreToken.MoneyWithJacoby / @MatchScoreToken.MoneyWithoutJacoby =
-                        a session played with / without the Jacoby rule; DMP = 1a1a.
-                    </div>
-                    @* Same d-block + @if as the error-range line and for the same
-                       reason — the input is a sibling here, but rendering the verdict
-                       only while it applies keeps one idiom for the panel's feedback.
-                       The faults are read only inside the branch: asking them costs a
-                       buffer flush plus a sweep of the list, and outside the branch
-                       the answer is always "none". *@
-                    @if (invalidFields.Contains(FilterField.MatchScores))
+                </div>
+            }
+        </div>)
+
+        @* ── Match score ─────────────────────────────────────────────────────
+           The position-pattern field's shape, over a facet whose rule the
+           panel does not own: the lib names FilterField.MatchScores when any
+           entry is a token its grammar rejects, the input reds itself on that
+           membership, and the same IsCommittable member closes Apply — so a
+           mistyped or retired score can never silently drop the filter the
+           user meant to set.
+
+           Two verdicts, not one, because the remedies differ: a malformed
+           token is retyped, while a *retired* one was spelled correctly for
+           an earlier grammar and needs its replacements named. The lib draws
+           that distinction wordlessly (MatchScoreToken.GetFault) and the
+           panel words it — the GetInvalidFields / BoardPattern.TryParse
+           division of labour, one tier finer.
+
+           Every token spelling on this screen — placeholder, hint, and both
+           verdicts — renders from MatchScoreToken's exported constants. The
+           panel never types 'moneyJ' as a literal: the grammar that accepts
+           the token and the copy that advertises it are one source, which is
+           the whole point of the constants being exported
+           (halheinrich/backgammon#121). *@
+        @FacetRow(FilterFacet.MatchScores, @<div class="ms-3">
+            <label class="form-label">
+                <small class="text-muted">(comma-separated; blank = all scores)</small>
+            </label>
+            <input class="form-control @(invalidFields.Contains(FilterField.MatchScores) ? "is-invalid" : string.Empty)"
+                   placeholder="e.g. 4a5a, 1a1a, 1a2aC, @MatchScoreToken.MoneyWithJacoby, @MatchScoreToken.MoneyWithoutJacoby"
+                   value="@_matchScoreText"
+                   @oninput="e => { _matchScoreText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
+            <div class="form-text">
+                MaNa is on-roll-anchored — M = points the player on roll needs, N = the
+                opponent — so 4a5a and 5a4a are distinct (list both to catch either
+                orientation). C suffix = Crawford game;
+                @MatchScoreToken.MoneyWithJacoby / @MatchScoreToken.MoneyWithoutJacoby =
+                a session played with / without the Jacoby rule; DMP = 1a1a.
+            </div>
+            @* Same d-block + @if as the error-range line and for the same
+               reason — the input is a sibling here, but rendering the verdict
+               only while it applies keeps one idiom for the panel's feedback.
+               The faults are read only inside the branch: asking them costs a
+               buffer flush plus a sweep of the list, and outside the branch
+               the answer is always "none". *@
+            @if (invalidFields.Contains(FilterField.MatchScores))
+            {
+                var scoreFaults = MatchScoreFaults;
+                <div id="matchScoreFeedback" class="invalid-feedback d-block">
+                    @if (scoreFaults.Contains(MatchScoreTokenFault.Malformed))
                     {
-                        var scoreFaults = MatchScoreFaults;
-                        <div id="matchScoreFeedback" class="invalid-feedback d-block">
-                            @if (scoreFaults.Contains(MatchScoreTokenFault.Malformed))
-                            {
-                                <span>
-                                    Not a valid score — write MaNa like 4a5a, add C for a
-                                    Crawford game, or use @MatchScoreToken.MoneyWithJacoby or
-                                    @MatchScoreToken.MoneyWithoutJacoby; fix it to apply, or
-                                    clear it for no score filter.
-                                </span>
-                            }
-                            @if (scoreFaults.Contains(MatchScoreTokenFault.Retired))
-                            {
-                                <span>
-                                    The @MatchScoreToken.RetiredMoney token is retired — a
-                                    session now names the Jacoby rule it was played under: use
-                                    @(string.Join(" or ", MatchScoreToken.RetiredMoneyReplacements)),
-                                    or list both to admit either.
-                                </span>
-                            }
-                        </div>
+                        <span>
+                            Not a valid score — write MaNa like 4a5a, add C for a
+                            Crawford game, or use @MatchScoreToken.MoneyWithJacoby or
+                            @MatchScoreToken.MoneyWithoutJacoby; fix it to apply, or
+                            clear it for no score filter.
+                        </span>
+                    }
+                    @if (scoreFaults.Contains(MatchScoreTokenFault.Retired))
+                    {
+                        <span>
+                            The @MatchScoreToken.RetiredMoney token is retired — a
+                            session now names the Jacoby rule it was played under: use
+                            @(string.Join(" or ", MatchScoreToken.RetiredMoneyReplacements)),
+                            or list both to admit either.
+                        </span>
                     }
                 </div>
+            }
+        </div>)
 
-                @* ── Move number range ─────────────────────────────────────────
-                   The error range's sibling, wired identically because it is
-                   the same shape of control under the same division of labour:
-                   the lib rules on these bounds too, GetInvalidFields names the
-                   offending one, each input reds itself on its own FilterField,
-                   and a misordered pair blames both while neither bound is
-                   wrong alone. It reads the hoisted invalidFields evaluation
-                   the error range reads, and closes Apply through the same
-                   IsCommittable member — no rule of the panel's own, here or
-                   there. The facets differ only in the floor each bound must
-                   clear (zero for an error magnitude, one for a 1-based move
-                   ordinal), and the floor is the lib's to set; the panel only
-                   words it. *@
-                <div class="mb-3">
-                    <label class="form-label">
-                        Move number range
-                        <small class="text-muted">(inclusive; blank = no bound; non-standard-start games are excluded)</small>
-                    </label>
-                    <div class="d-flex gap-2 align-items-center">
-                        <input id="moveNumberMin"
-                               class="form-control @(invalidFields.Contains(FilterField.MoveNumberMin) ? "is-invalid" : string.Empty)"
-                               style="max-width:140px"
-                               type="number" step="1" min="1" placeholder="Min"
-                               value="@_moveNumberMinText"
-                               @oninput="e => { _moveNumberMinText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
-                        <span>–</span>
-                        <input id="moveNumberMax"
-                               class="form-control @(invalidFields.Contains(FilterField.MoveNumberMax) ? "is-invalid" : string.Empty)"
-                               style="max-width:140px"
-                               type="number" step="1" min="1" placeholder="Max"
-                               value="@_moveNumberMaxText"
-                               @oninput="e => { _moveNumberMaxText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
-                    </div>
-                    @* #errorRangeFeedback's shape, for the same reasons: the
-                       explicit @if and d-block because the inputs sit one level
-                       down inside the flex row and Bootstrap's sibling selector
-                       cannot reach across, and one line for both violations
-                       because the user fixes either at the same two boxes.
-                       Keyed to this facet's own two fields, never to "the lib
-                       named something" — the invalid set spans facets, and a
-                       line that fired on any membership would explain the move
-                       numbers over a fault the user committed in the section
-                       above.
-                       The floor is stated here and nowhere else on this screen.
-                       The hint beside the label says what the boxes *mean*
-                       (which end is which, what blank does, which games the
-                       facet can speak about at all); this says what they will
-                       *accept*, and only while something is not accepted. The
-                       error range splits its own copy on exactly that line —
-                       "(inclusive; blank = no bound)" above, "zero or greater"
-                       down here — so a reader who learns one facet's boxes
-                       knows where to look for the other's. *@
-                    @if (invalidFields.Contains(FilterField.MoveNumberMin)
-                         || invalidFields.Contains(FilterField.MoveNumberMax))
-                    {
-                        <div id="moveNumberFeedback" class="invalid-feedback d-block">
-                            Each bound must be a whole number, one or greater, and
-                            Min can't be above Max — fix it to apply, or clear a
-                            bound for no limit on that side.
-                        </div>
-                    }
+        @* ── Move number range ───────────────────────────────────────────────
+           The error range's sibling, wired identically because it is
+           the same shape of control under the same division of labour:
+           the lib rules on these bounds too, GetInvalidFields names the
+           offending one, each input reds itself on its own FilterField,
+           and a misordered pair blames both while neither bound is
+           wrong alone. It reads the hoisted invalidFields evaluation
+           the error range reads, and closes Apply through the same
+           IsCommittable member — no rule of the panel's own, here or
+           there. The facets differ only in the floor each bound must
+           clear (zero for an error magnitude, one for a 1-based move
+           ordinal), and the floor is the lib's to set; the panel only
+           words it. *@
+        @FacetRow(FilterFacet.MoveNumberRange, @<div class="ms-3">
+            <label class="form-label">
+                <small class="text-muted">(inclusive; blank = no bound; non-standard-start games are excluded)</small>
+            </label>
+            <div class="d-flex gap-2 align-items-center">
+                <input id="moveNumberMin"
+                       class="form-control @(invalidFields.Contains(FilterField.MoveNumberMin) ? "is-invalid" : string.Empty)"
+                       style="max-width:140px"
+                       type="number" step="1" min="1" placeholder="Min"
+                       value="@_moveNumberMinText"
+                       @oninput="e => { _moveNumberMinText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
+                <span>–</span>
+                <input id="moveNumberMax"
+                       class="form-control @(invalidFields.Contains(FilterField.MoveNumberMax) ? "is-invalid" : string.Empty)"
+                       style="max-width:140px"
+                       type="number" step="1" min="1" placeholder="Max"
+                       value="@_moveNumberMaxText"
+                       @oninput="e => { _moveNumberMaxText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
+            </div>
+            @* #errorRangeFeedback's shape, for the same reasons: the
+               explicit @if and d-block because the inputs sit one level
+               down inside the flex row and Bootstrap's sibling selector
+               cannot reach across, and one line for both violations
+               because the user fixes either at the same two boxes.
+               Keyed to this facet's own two fields, never to "the lib
+               named something" — the invalid set spans facets, and a
+               line that fired on any membership would explain the move
+               numbers over a fault the user committed in another row.
+               The floor is stated here and nowhere else on this screen.
+               The hint at the head of this row's body says what the boxes
+               *mean* (which end is which, what blank does, which games the
+               facet can speak about at all); this says what they will
+               *accept*, and only while something is not accepted. The
+               error range splits its own copy on exactly that line —
+               "(inclusive; blank = no bound)" above, "zero or greater"
+               down here — so a reader who learns one facet's boxes
+               knows where to look for the other's. *@
+            @if (invalidFields.Contains(FilterField.MoveNumberMin)
+                 || invalidFields.Contains(FilterField.MoveNumberMax))
+            {
+                <div id="moveNumberFeedback" class="invalid-feedback d-block">
+                    Each bound must be a whole number, one or greater, and
+                    Min can't be above Max — fix it to apply, or clear a
+                    bound for no limit on that side.
                 </div>
+            }
+        </div>)
 
-                @* ── Contact type ────────────────────────────────────────────── *@
-                <div class="mb-3">
-                    <label class="form-label">
-                        Contact type
-                        <small class="text-muted">(none checked = all types)</small>
-                    </label>
-                    <div>
-                        @foreach (var ct in Enum.GetValues<ContactType>())
-                        {
-                            <div class="form-check form-check-inline">
-                                <input class="form-check-input" type="checkbox"
-                                       id="ct_@ct"
-                                       checked="@_contactTypes.Contains(ct)"
-                                       @onchange="(e) => { if (e.Value is bool b && b) _contactTypes.Add(ct); else _contactTypes.Remove(ct); ReportAppliedState(); }" />
-                                <label class="form-check-label" for="ct_@ct">@ct.ToLabel()</label>
-                            </div>
-                        }
+        @* ── Contact type ────────────────────────────────────────────────────── *@
+        @FacetRow(FilterFacet.ContactTypes, @<div class="ms-3">
+            <label class="form-label">
+                <small class="text-muted">(none checked = all types)</small>
+            </label>
+            <div>
+                @foreach (var ct in Enum.GetValues<ContactType>())
+                {
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="checkbox"
+                               id="ct_@ct"
+                               checked="@_contactTypes.Contains(ct)"
+                               @onchange="(e) => { if (e.Value is bool b && b) _contactTypes.Add(ct); else _contactTypes.Remove(ct); ReportAppliedState(); }" />
+                        <label class="form-check-label" for="ct_@ct">@ct.ToLabel()</label>
                     </div>
-                </div>
+                }
+            </div>
+        </div>)
 
-                @* ── Analysis depth ──────────────────────────────────────────── *@
-                @* Union-of-clauses facet over BgDataTypes_Lib's AnalysisMode ×
-                   AnalysisLevel: three per-mode pairs, each a mode toggle plus its own
-                   level group. The panel binds the six raw-intent inputs (three bools,
-                   three level sets) verbatim and derives nothing — the mapping to
-                   AnalysisDepthFilter clauses (one clause per enabled toggle, empty
-                   level list = any level, all toggles off = facet off, inert level
-                   lists) lives only in FilterConfig.Build(); re-encoding it here would
-                   duplicate the SSOT and silently drift — see this panel's Pitfalls and
-                   XgFilter_Lib's Depth-facet block. Mode labels come from AnalysisMode's
-                   [Description]s via EnumLabel.ToLabel, never hardcoded. Levels render
-                   in Enum.GetValues declaration order (the lib's ascending-rigor order);
-                   Unknown is a first-class, selectable level.
+        @* ── Analysis depth ──────────────────────────────────────────────────
+           Union-of-clauses facet over BgDataTypes_Lib's AnalysisMode ×
+           AnalysisLevel: three per-mode pairs, each a mode toggle plus its own
+           level group. The panel binds the six raw-intent inputs (three bools,
+           three level sets) verbatim and derives nothing — the mapping to
+           AnalysisDepthFilter clauses (one clause per enabled toggle, empty
+           level list = any level, all toggles off = facet off, inert level
+           lists) lives only in FilterConfig.Build(); re-encoding it here would
+           duplicate the SSOT and silently drift — see this panel's Pitfalls and
+           XgFilter_Lib's Depth-facet block. Mode labels come from AnalysisMode's
+           [Description]s via EnumLabel.ToLabel, never hardcoded. Levels render
+           in Enum.GetValues declaration order (the lib's ascending-rigor order);
+           Unknown is a first-class, selectable level.
 
-                   Each level group is an honest disclosure in the #moreFilters idiom —
-                   real button, aria-expanded / aria-controls, children rendered only
-                   while expanded — but deliberately UNPERSISTED, unlike the panel-level
-                   disclosure's xg_moreFiltersExpanded key: while collapsed, the count
-                   badge ("any" / "N selected", the hidden-active-signal ruling) already
-                   carries everything the closed state hides, so remembering the open
-                   state buys no information and would cost three more localStorage keys.
-                   The badge reads the live buffer, so it is honest mid-edit and after
-                   restore / LoadConfig / Clear. Collapsing or expanding a group is
-                   navigation, not an edit — no ReportAppliedState.
+           Each level group is an honest disclosure in the facet rows' idiom one
+           tier down — real button, aria-expanded / aria-controls, children
+           rendered only while expanded — but deliberately UNPERSISTED, unlike
+           the rows' own DisclosureKey set: while collapsed, the count badge
+           ("any" / "N selected") already carries everything the closed state
+           hides, so remembering the open state buys no information and would
+           cost three more localStorage entries. The badge reads the live
+           buffer, so it is honest mid-edit and after restore / LoadConfig /
+           Clear. Collapsing or expanding a group is navigation, not an edit —
+           no ReportAppliedState, exactly as for the row above it.
 
-                   Unchecking a mode hides its level group but keeps the checked levels
-                   in the buffer (and in the emitted config): the lib guarantees a level
-                   list whose toggle is off is inert — no activation, no constraint — so
-                   re-toggling the mode restores the user's selection instead of
-                   punishing an exploratory untoggle. *@
-                <div class="mb-3">
-                    <label class="form-label">
-                        Analysis depth
-                        <small class="text-muted">(check the modes you want to see — checking more shows more; nothing checked means no depth filter)</small>
-                    </label>
-                    @foreach (var group in DepthGroups)
+           Unchecking a mode hides its level group but keeps the checked levels
+           in the buffer (and in the emitted config): the lib guarantees a level
+           list whose toggle is off is inert — no activation, no constraint — so
+           re-toggling the mode restores the user's selection instead of
+           punishing an exploratory untoggle. *@
+        @FacetRow(FilterFacet.AnalysisDepth, @<div class="ms-3">
+            <label class="form-label">
+                <small class="text-muted">(check the modes you want to see — checking more shows more; nothing checked means no depth filter)</small>
+            </label>
+            @foreach (var group in DepthGroups)
+            {
+                <div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox"
+                               id="md_@group.Mode"
+                               checked="@group.Include"
+                               @onchange="(e) => { group.Include = e.Value is bool b && b; ReportAppliedState(); }" />
+                        <label class="form-check-label" for="md_@group.Mode">@group.Mode.ToLabel()</label>
+                    </div>
+                    @if (group.Include)
                     {
-                        <div>
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox"
-                                       id="md_@group.Mode"
-                                       checked="@group.Include"
-                                       @onchange="(e) => { group.Include = e.Value is bool b && b; ReportAppliedState(); }" />
-                                <label class="form-check-label" for="md_@group.Mode">@group.Mode.ToLabel()</label>
-                            </div>
-                            @if (group.Include)
-                            {
-                                <div class="ms-4 mb-2">
-                                    <button type="button" id="lvlToggle_@group.Mode"
-                                            class="btn btn-link btn-sm p-0 text-decoration-none"
-                                            aria-expanded="@(group.LevelsExpanded ? "true" : "false")"
-                                            aria-controls="lvl_@group.Mode"
-                                            @onclick="() => group.LevelsExpanded = !group.LevelsExpanded">
-                                        Analysis level
-                                        @if (!group.LevelsExpanded)
+                        <div class="ms-4 mb-2">
+                            <button type="button" id="lvlToggle_@group.Mode"
+                                    class="btn btn-link btn-sm p-0 text-decoration-none"
+                                    aria-expanded="@(group.LevelsExpanded ? "true" : "false")"
+                                    aria-controls="lvl_@group.Mode"
+                                    @onclick="() => group.LevelsExpanded = !group.LevelsExpanded">
+                                Analysis level
+                                @if (!group.LevelsExpanded)
+                                {
+                                    <span id="lvlBadge_@group.Mode"
+                                          class="badge ms-1 @(group.Levels.Count > 0 ? "text-bg-primary" : "text-bg-secondary")">
+                                        @(group.Levels.Count > 0 ? $"{group.Levels.Count} selected" : "any")
+                                    </span>
+                                }
+                            </button>
+                            <div id="lvl_@group.Mode">
+                                @if (group.LevelsExpanded)
+                                {
+                                    <div>
+                                        @foreach (var level in Enum.GetValues<AnalysisLevel>())
                                         {
-                                            <span id="lvlBadge_@group.Mode"
-                                                  class="badge ms-1 @(group.Levels.Count > 0 ? "text-bg-primary" : "text-bg-secondary")">
-                                                @(group.Levels.Count > 0 ? $"{group.Levels.Count} selected" : "any")
-                                            </span>
-                                        }
-                                    </button>
-                                    <div id="lvl_@group.Mode">
-                                        @if (group.LevelsExpanded)
-                                        {
-                                            <div>
-                                                @foreach (var level in Enum.GetValues<AnalysisLevel>())
-                                                {
-                                                    <div class="form-check form-check-inline">
-                                                        <input class="form-check-input" type="checkbox"
-                                                               id="lv_@(group.Mode)_@level"
-                                                               checked="@group.Levels.Contains(level)"
-                                                               @onchange="(e) => { if (e.Value is bool b && b) group.Levels.Add(level); else group.Levels.Remove(level); ReportAppliedState(); }" />
-                                                        <label class="form-check-label" for="lv_@(group.Mode)_@level">@level.ToLabel()</label>
-                                                    </div>
-                                                }
+                                            <div class="form-check form-check-inline">
+                                                <input class="form-check-input" type="checkbox"
+                                                       id="lv_@(group.Mode)_@level"
+                                                       checked="@group.Levels.Contains(level)"
+                                                       @onchange="(e) => { if (e.Value is bool b && b) group.Levels.Add(level); else group.Levels.Remove(level); ReportAppliedState(); }" />
+                                                <label class="form-check-label" for="lv_@(group.Mode)_@level">@level.ToLabel()</label>
                                             </div>
-                                            <div class="form-text">None checked = any level. @group.LevelHint</div>
                                         }
                                     </div>
-                                </div>
-                            }
+                                    <div class="form-text">None checked = any level. @group.LevelHint</div>
+                                }
+                            </div>
                         </div>
                     }
                 </div>
-
-                @* ── Dice rolls ──────────────────────────────────────────────── *@
-                @* One checkbox per distinct roll, enumerated from DiceRoll.All — the lib
-                   owns both the 21-roll set and its ascending canonical order (11, 21, 22,
-                   31, … 66, the six doubles included), so the panel imposes no local roll
-                   list or sort rule. Labels are the roll's own canonical token
-                   (DiceRoll.ToString → "31"), rendered verbatim: display text stays owned
-                   by the type, exactly as the enum facets defer to ToLabel. (A hyphenated
-                   "3-1" presentation was considered; "31" keeps the panel free of any
-                   label-munging and matches the lib's token one-for-one.) Selections are
-                   stored raw in _diceRolls and handed to FilterConfig.Build() verbatim —
-                   the panel derives nothing. None checked = facet off (Build() skips the
-                   filter); the roll set is canonical/unordered, so checking "31" admits
-                   both dice orders, and cube rows (no roll) never pass an active filter. *@
-                <div class="mb-3">
-                    <label class="form-label">
-                        Dice rolls
-                        <small class="text-muted">(none checked = all rolls; cube decisions never match)</small>
-                    </label>
-                    <div>
-                        @foreach (var roll in DiceRoll.All)
-                        {
-                            <div class="form-check form-check-inline">
-                                <input class="form-check-input" type="checkbox"
-                                       id="dr_@roll"
-                                       checked="@_diceRolls.Contains(roll)"
-                                       @onchange="(e) => { if (e.Value is bool b && b) _diceRolls.Add(roll); else _diceRolls.Remove(roll); ReportAppliedState(); }" />
-                                <label class="form-check-label" for="dr_@roll">@roll</label>
-                            </div>
-                        }
-                    </div>
-                </div>
-
-                @* ── Position pattern ────────────────────────────────────────── *@
-                @* Per-location checker-range constraint, entered as the lib's raw bracket
-                   list until the board-grid widget replaces this field in a later arc.
-                   Parsed through BoardPattern.TryParse so half-typed input never throws
-                   out of the panel; while the text is non-blank and unparseable the
-                   field is marked invalid and Apply is disabled, so an invalid pattern
-                   can never silently drop the filter the user meant to set.
-
-                   The help text below documents the lib's location vocabulary — board
-                   indices plus the named borne-off tokens — but does not re-implement it:
-                   BoardPattern remains the single source of truth for what parses, and a
-                   wrong-signed borne-off bound (say [off,,-2]) fails TryParse and lands
-                   in the same invalid-field state as any other unparseable text. *@
-                <div class="mb-3">
-                    <label class="form-label" for="positionPattern">
-                        Position pattern
-                        <small class="text-muted">(checker ranges by location; blank = no pattern filter)</small>
-                    </label>
-                    <input id="positionPattern"
-                           class="form-control @(IsPositionPatternValid ? string.Empty : "is-invalid")"
-                           placeholder="e.g. [6,2,] [5,,-2] [opp-off,,-2]"
-                           value="@_positionPatternText"
-                           @oninput="e => { _positionPatternText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
-                    <div class="form-text">
-                        [location,min,max] per location; blank bound = unbounded; positive counts
-                        belong to the player on roll, negative to the opponent.
-                        Locations: points 1–24, bar 25 (player on roll) and bar 0 (opponent),
-                        plus borne off — off for the player on roll (bounds 0 to 15) and
-                        opp-off for the opponent (bounds -15 to 0).
-                        E.g. [6,2,] [5,,-2] [25,1,] [opp-off,,-2] [off,10,].
-                    </div>
-                    <div class="invalid-feedback">
-                        Not a valid bracket list — fix it to apply, or clear it for no pattern filter.
-                    </div>
-                </div>
             }
-        </div>
+        </div>)
+
+        @* ── Dice rolls ──────────────────────────────────────────────────────
+           One checkbox per distinct roll, enumerated from DiceRoll.All — the lib
+           owns both the 21-roll set and its ascending canonical order (11, 21, 22,
+           31, … 66, the six doubles included), so the panel imposes no local roll
+           list or sort rule. Labels are the roll's own canonical token
+           (DiceRoll.ToString → "31"), rendered verbatim: display text stays owned
+           by the type, exactly as the enum facets defer to ToLabel. (A hyphenated
+           "3-1" presentation was considered; "31" keeps the panel free of any
+           label-munging and matches the lib's token one-for-one.) Selections are
+           stored raw in _diceRolls and handed to FilterConfig.Build() verbatim —
+           the panel derives nothing. None checked = facet off (Build() skips the
+           filter); the roll set is canonical/unordered, so checking "31" admits
+           both dice orders, and cube rows (no roll) never pass an active filter. *@
+        @FacetRow(FilterFacet.DiceRolls, @<div class="ms-3">
+            <label class="form-label">
+                <small class="text-muted">(none checked = all rolls; cube decisions never match)</small>
+            </label>
+            <div>
+                @foreach (var roll in DiceRoll.All)
+                {
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="checkbox"
+                               id="dr_@roll"
+                               checked="@_diceRolls.Contains(roll)"
+                               @onchange="(e) => { if (e.Value is bool b && b) _diceRolls.Add(roll); else _diceRolls.Remove(roll); ReportAppliedState(); }" />
+                        <label class="form-check-label" for="dr_@roll">@roll</label>
+                    </div>
+                }
+            </div>
+        </div>)
+
+        @* ── Position pattern ────────────────────────────────────────────────
+           Per-location checker-range constraint, entered as the lib's raw bracket
+           list until the board-grid widget replaces this field in a later arc.
+           Parsed through BoardPattern.TryParse so half-typed input never throws
+           out of the panel; while the text is non-blank and unparseable the
+           field is marked invalid and Apply is disabled, so an invalid pattern
+           can never silently drop the filter the user meant to set.
+
+           The help text below documents the lib's location vocabulary — board
+           indices plus the named borne-off tokens — but does not re-implement it:
+           BoardPattern remains the single source of truth for what parses, and a
+           wrong-signed borne-off bound (say [off,,-2]) fails TryParse and lands
+           in the same invalid-field state as any other unparseable text. *@
+        @FacetRow(FilterFacet.PositionPattern, @<div class="ms-3">
+            <label class="form-label" for="positionPattern">
+                <small class="text-muted">(checker ranges by location; blank = no pattern filter)</small>
+            </label>
+            <input id="positionPattern"
+                   class="form-control @(IsPositionPatternValid ? string.Empty : "is-invalid")"
+                   placeholder="e.g. [6,2,] [5,,-2] [opp-off,,-2]"
+                   value="@_positionPatternText"
+                   @oninput="e => { _positionPatternText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
+            <div class="form-text">
+                [location,min,max] per location; blank bound = unbounded; positive counts
+                belong to the player on roll, negative to the opponent.
+                Locations: points 1–24, bar 25 (player on roll) and bar 0 (opponent),
+                plus borne off — off for the player on roll (bounds 0 to 15) and
+                opp-off for the opponent (bounds -15 to 0).
+                E.g. [6,2,] [5,,-2] [25,1,] [opp-off,,-2] [off,10,].
+            </div>
+            <div class="invalid-feedback">
+                Not a valid bracket list — fix it to apply, or clear it for no pattern filter.
+            </div>
+        </div>)
 
         @* ── Apply ────────────────────────────────────────────────────────────
            The commit button, alone on this row since "Clear filters" moved up
-           beside the disclosure toggle (halheinrich/backgammon#153). The flex
-           row stays: it keeps Apply shrink-to-content rather than letting the
-           button stretch, and it keeps the disabled-reason line reading as the
-           line under the button, which is how the help describes it.
+           to the row above the facet rows (halheinrich/backgammon#153). The
+           flex row stays: it keeps Apply shrink-to-content rather than letting
+           the button stretch, and it keeps the disabled-reason line reading as
+           the line under the button, which is how the help describes it.
            Apply is gated on CanApply: the position pattern must be committable
            AND the selection must differ from the last-committed config.
            ApplyDisabledReason explains the second case in the
            NamedEntriesPanel disabled-reason idiom (title + muted hint line);
            the first already explains itself in the pattern field's own
-           invalid-feedback line. Hoisted into a local like the hidden-active
-           signal above: both surfaces of the reason read the one evaluation. *@
+           invalid-feedback line. Hoisted into a local like the active-facet
+           set above: both surfaces of the reason read the one evaluation. *@
         @{ var applyDisabledReason = ApplyDisabledReason; }
         <div class="d-flex gap-2">
             <button class="btn btn-primary btn-sm"
@@ -619,18 +633,29 @@
     internal const string ConfigKey = "xg_filter_config";
 
     /// <summary>
-    /// The disclosure's expand/collapse choice, under its own key (camelCase after the
+    /// The set of expanded facet rows, under its own key (camelCase after the
     /// <c>xg_</c> prefix, per the sibling convention: <c>xg_quizMix</c>,
     /// <c>xg_xgpPattern</c>). User preference, not filter state — it never rides in the
     /// <see cref="ConfigKey"/> blob, and <see cref="LoadConfig"/> / Clear filters never
-    /// change it. Values are the literals <c>"true"</c> / <c>"false"</c>; restore treats
-    /// exactly <c>"true"</c> as expanded and anything else (missing, corrupt) as the
-    /// default-hidden posture.
+    /// change it. The value is a JSON array of <see cref="FilterFacet"/> member names,
+    /// written in row order; restore is all-or-nothing, so anything unreadable — not
+    /// an array, a name no row answers to, a numeric token — restores every row
+    /// collapsed rather than salvaging part of it. A display preference that resets
+    /// once is not data, which is also why the key this replaced is neither read nor
+    /// migrated.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <c>internal</c> for the same reason as <see cref="ConfigKey"/> — see its remarks.
+    /// </para>
+    /// <para>
+    /// This is the one value the panel does serialize itself, and the exception proves
+    /// the rule: the <see cref="ConfigKey"/> blob's shape is the lib's, so the panel
+    /// must never touch a serializer for it, while the set of open rows is the panel's
+    /// own view-state and belongs to no other party.
+    /// </para>
     /// </remarks>
-    internal const string DisclosureKey = "xg_moreFiltersExpanded";
+    internal const string DisclosureKey = "xg_expandedFilters";
 
     // Free-text / numeric buffers. These exist only because in-progress typing
     // needs a string distinct from the parsed value; they are transient
@@ -724,11 +749,46 @@
     // atomic — a plain bool is a sufficient guard, no locking.
     private bool _externalConfigLoaded;
 
-    // Disclosure state: default hidden. _disclosureTouched is the visibility
-    // counterpart of _externalConfigLoaded — true once the user has toggled
-    // this session, checked before and after the restore's await so a restore
-    // completing late can never clobber a fresh user choice.
-    private bool _moreFiltersExpanded;
+    // The facets that carry a row, in render order: FilterFacet declaration
+    // order minus ErrorRange, which is always visible above the rows, and
+    // minus the two UI-shelved facets (PositionTypes, PlayTypes), which an old
+    // saved config can still activate but which this panel offers no control
+    // for. It is the vocabulary of the persisted expanded-row set — a stored
+    // name outside it is corruption, not a row — and the order the set is
+    // written in.
+    //
+    // Deliberately NOT the source the markup loops over: each row's body is
+    // its own markup, so the eight FacetRow calls and this list are two
+    // statements of the same membership. FilterPanelTests pins them equal
+    // (the rendered #facetToggle_* ids against this list) rather than letting
+    // one silently outlive the other — a pin that is only meaningful because
+    // the two are genuinely separate.
+    private static readonly FilterFacet[] RowFacets =
+    [
+        FilterFacet.Players,
+        FilterFacet.DecisionType,
+        FilterFacet.MatchScores,
+        FilterFacet.MoveNumberRange,
+        FilterFacet.ContactTypes,
+        FilterFacet.AnalysisDepth,
+        FilterFacet.DiceRolls,
+        FilterFacet.PositionPattern,
+    ];
+
+    // The stored name → row lookup, built once from RowFacets. Restore reads
+    // names through this rather than Enum.TryParse: TryParse also accepts a
+    // numeric token ("0" would arrive as Players) and every FilterFacet member,
+    // row or not, so it would honour two kinds of value this panel never writes.
+    private static readonly IReadOnlyDictionary<string, FilterFacet> RowFacetsByName =
+        RowFacets.ToDictionary(f => f.ToString(), StringComparer.Ordinal);
+
+    // Which rows are open. Default: none — every row starts collapsed, the
+    // posture the hierarchy ruling asks for. _disclosureTouched is the
+    // visibility counterpart of _externalConfigLoaded — true once the user has
+    // opened or closed a row this session, checked before and after the
+    // restore's await so a restore completing late can never clobber a fresh
+    // user choice.
+    private HashSet<FilterFacet> _expandedFacets = [];
     private bool _disclosureTouched;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -740,25 +800,60 @@
     }
 
     // Deliberately not gated by _externalConfigLoaded: LoadConfig stages
-    // filter values, but the disclosure's visibility belongs to the user, so
-    // a host-driven load must not suppress restoring it.
+    // filter values, but which rows are open belongs to the user, so a
+    // host-driven load must not suppress restoring them.
     private async Task RestoreDisclosureAsync()
     {
         if (_disclosureTouched) return;
 
         var stored = await JS.InvokeAsync<string?>("localStorage.getItem", DisclosureKey);
 
-        // Re-check after the await: a toggle click that landed while the
-        // interop was in flight is a fresh user choice and must win.
+        // Re-check after the await: a row toggled while the interop was in
+        // flight is a fresh user choice and must win.
         if (_disclosureTouched) return;
 
-        // Tolerant restore: exactly "true" expands; anything else keeps the
-        // default-hidden posture.
-        if (stored == "true")
+        if (TryParseExpandedFacets(stored, out var restored))
         {
-            _moreFiltersExpanded = true;
+            _expandedFacets = restored;
             StateHasChanged();
         }
+    }
+
+    // Tolerant restore, all-or-nothing: the stored value must be a JSON array
+    // of names this panel could itself have written, and one element that is
+    // not discards the whole preference rather than salvaging the rest. The
+    // strict reading is the honest one — the panel only ever writes row names,
+    // so anything else is corruption or a hand edit, and half-honouring it
+    // would restore a set the user never chose. Returning false leaves the
+    // caller's default (every row collapsed) in place.
+    private static bool TryParseExpandedFacets(
+        string? stored, [NotNullWhen(true)] out HashSet<FilterFacet>? facets)
+    {
+        facets = null;
+
+        if (string.IsNullOrWhiteSpace(stored)) return false;
+
+        string?[]? names;
+        try
+        {
+            names = JsonSerializer.Deserialize<string?[]>(stored);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+
+        if (names is null) return false;
+
+        var parsed = new HashSet<FilterFacet>();
+        foreach (var name in names)
+        {
+            if (name is null || !RowFacetsByName.TryGetValue(name, out var facet)) return false;
+            parsed.Add(facet);
+        }
+
+        facets = parsed;
+        return true;
     }
 
     private async Task RestoreConfigAsync()
@@ -803,9 +898,9 @@
     /// reported as one. Calling this also suppresses the first-render
     /// <c>localStorage</c> restore, so a config loaded during host startup
     /// cannot be clobbered when the restore's interop completes afterwards.
-    /// The disclosure's visibility is deliberately untouched — a staged config
-    /// can activate hidden sections, which the toggle's hidden-active signal
-    /// reports, but expanding is the user's gesture, never this method's.
+    /// Which rows are open is deliberately untouched — a staged config can
+    /// activate facets whose rows are collapsed, which those rows' badges
+    /// report, but opening one is the user's gesture, never this method's.
     /// Must be called on the renderer's synchronization context (any event
     /// handler or lifecycle method qualifies), typically via <c>&#64;ref</c>.
     /// </summary>
@@ -862,8 +957,8 @@
     /// panel — the programmatic equivalent of the remount that "a new folder
     /// re-enables Apply" falls out of, for hosts that keep the panel mounted
     /// across a source change. The buffers, the persisted
-    /// <c>localStorage</c> state, and the disclosure are all untouched: the
-    /// user's selection stays on screen, it just no longer counts as
+    /// <c>localStorage</c> state, and which rows are open are all untouched:
+    /// the user's selection stays on screen, it just no longer counts as
     /// committed, so <see cref="OnAppliedStateChanged"/> re-reports through
     /// the normal path (necessarily <see langword="null"/> — the buffers can
     /// equal no committed config once there is none).
@@ -892,8 +987,8 @@
     /// unmount while the caller's applied state outlives it, so without this
     /// a remount arms Apply over a selection that is already applied: nothing
     /// to do, and the disabled-because-nothing-changed explanation missing
-    /// with it. The buffers, the persisted <c>localStorage</c> state, and the
-    /// disclosure are all untouched — this moves the reference point, never
+    /// with it. The buffers, the persisted <c>localStorage</c> state, and
+    /// which rows are open are all untouched — this moves the reference point, never
     /// the selection — and nothing is written: the committed config stays
     /// unpersisted by contract (see this panel's Pitfalls), derived at mount
     /// from what the caller already holds.
@@ -982,8 +1077,7 @@
     // "Clear filters" — the full-clear gesture: hydrate every edit buffer back
     // to defaults, then persist + raise the empty config (consumers treat it
     // as applied). Filter values only: the panel has no path to host state,
-    // and the disclosure's visibility is the user's choice, not this
-    // gesture's.
+    // and which rows are open is the user's choice, not this gesture's.
     private Task ClearFiltersAsync()
     {
         var cfg = new FilterConfig();
@@ -1009,27 +1103,58 @@
         await OnAppliedStateChanged.InvokeAsync(MatchedCommittedConfig);
     }
 
-    // Flip + persist the disclosure. Not an edit gesture: no
+    // Flip one row + persist the whole set. Not an edit gesture: no
     // OnAppliedStateChanged and no config write — the choice is remembered
     // immediately under its own key, independent of Apply.
-    private async Task ToggleMoreFiltersAsync()
+    private async Task ToggleFacetAsync(FilterFacet facet)
     {
         _disclosureTouched = true;
-        _moreFiltersExpanded = !_moreFiltersExpanded;
-        await JS.InvokeVoidAsync("localStorage.setItem", DisclosureKey,
-            _moreFiltersExpanded ? "true" : "false");
+        if (!_expandedFacets.Remove(facet)) _expandedFacets.Add(facet);
+        await JS.InvokeVoidAsync("localStorage.setItem", DisclosureKey, SerializeExpandedFacets());
     }
 
-    // The hidden-active signal's data: which disclosure-hidden sections
-    // currently hold active filters, in FilterFacet declaration order (which
-    // is Build()'s add order and, near enough, the panel's section order).
-    // Judged by the lib's activation predicates via GetActiveFacets() on the
-    // live buffers — the same build path Apply uses — never by re-inspecting
-    // config fields here. ErrorRange is excluded as the one always-visible
-    // facet. Recomputed per render; the cost is a buffer flush plus predicate
-    // sweep, accepted over caching.
-    private IReadOnlyList<FilterFacet> HiddenActiveFacets =>
-        BuildConfig().GetActiveFacets().Where(f => f != FilterFacet.ErrorRange).ToList();
+    // The open rows as the stored JSON array. Written in RowFacets order rather
+    // than the set's own enumeration order, so one arrangement of open rows has
+    // one spelling on disk: a hash-ordered array would differ run to run for
+    // the same user choice and make the stored value unreadable to a person
+    // inspecting it in devtools, which the help invites them to do.
+    private string SerializeExpandedFacets() =>
+        JsonSerializer.Serialize(
+            RowFacets.Where(_expandedFacets.Contains).Select(f => f.ToString()));
+
+    // Which facets currently hold active filters — the presence half of every
+    // row's badge. Judged by the lib's activation predicates via
+    // GetActiveFacets() on the live buffers, the same build path Apply commits
+    // through, never by re-inspecting a buffer or a config field here.
+    // Recomputed per render; the cost is a buffer flush plus predicate sweep,
+    // accepted over caching.
+    private IReadOnlySet<FilterFacet> ActiveFacets => BuildConfig().GetActiveFacets();
+
+    // The words on an active row's badge — the panel's display concern, and
+    // the only half of the badge that is. It says how much the collapsed row
+    // is hiding in the terms that facet is chosen in: a free-text or bounds
+    // facet is simply "set" (a count of boxes typed in would tell the user
+    // nothing they wanted), while a facet chosen by ticking options reports how
+    // many are ticked. Never asked of an inactive facet: the caller renders no
+    // badge at all in that state, which is why no member here answers "off".
+    private string FacetBadgeText(FilterFacet facet) => facet switch
+    {
+        FilterFacet.Players or FilterFacet.MatchScores
+            or FilterFacet.MoveNumberRange or FilterFacet.PositionPattern => "set",
+
+        // A radio group: exactly one option is ever chosen, and the facet is
+        // active only while that choice is not the inactive default — so the
+        // count is one by construction. A literal because that is what it is,
+        // not a number this panel could arrive at differently.
+        FilterFacet.DecisionType => "1 selected",
+
+        FilterFacet.ContactTypes => $"{_contactTypes.Count} selected",
+        FilterFacet.AnalysisDepth => $"{DepthGroups.Count(g => g.Include)} selected",
+        FilterFacet.DiceRolls => $"{_diceRolls.Count} selected",
+
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(facet), facet, "Not a facet this panel gives a row."),
+    };
 
     // Flush the current buffers / enum state into a single FilterConfig.
     private FilterConfig BuildConfig() => new()

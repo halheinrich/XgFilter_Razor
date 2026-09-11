@@ -45,7 +45,7 @@ public class FilterPanelTestStateTests : BunitContext
 
         FilterPanelTestState.SeedStoredSelection(JSInterop, stored);
         var cut = Render<FilterPanel>();
-        cut.Find("#moreFiltersToggle").Click();
+        cut.Find("#facetToggle_MoveNumberRange").Click();
 
         cut.WaitForAssertion(() =>
         {

@@ -21,26 +21,57 @@ public class FilterPanelTests : BunitContext
     }
 
     // The two localStorage keys the panel persists under: the whole
-    // FilterConfig as one serialized blob, and the disclosure's
-    // expand/collapse choice — user preference, deliberately outside the
-    // config blob.
+    // FilterConfig as one serialized blob, and the set of expanded facet rows
+    // — user preference, deliberately outside the config blob.
     private const string ConfigKey = "xg_filter_config";
-    private const string DisclosureKey = "xg_moreFiltersExpanded";
+    private const string DisclosureKey = "xg_expandedFilters";
 
-    // The disclosure hides every section except Error range at rest, so tests
-    // that touch a hidden control expand first — through the real toggle
-    // button, so every such test also exercises the disclosure's actual
-    // wiring rather than reaching around it.
-    private static void ExpandMoreFilters(IRenderedComponent<FilterPanel> cut) =>
-        cut.Find("#moreFiltersToggle").Click();
+    // Every facet the panel gives a row, in render order. An independent
+    // literal rather than a projection of anything the panel exposes: the
+    // membership and the order are the ruling (halheinrich/backgammon#193), so
+    // a facet gaining or losing a row must be ruled on here rather than
+    // followed silently — the same posture RuledLevelVocabulary keeps one tier
+    // down.
+    private static readonly FilterFacet[] RowFacets =
+    [
+        FilterFacet.Players,
+        FilterFacet.DecisionType,
+        FilterFacet.MatchScores,
+        FilterFacet.MoveNumberRange,
+        FilterFacet.ContactTypes,
+        FilterFacet.AnalysisDepth,
+        FilterFacet.DiceRolls,
+        FilterFacet.PositionPattern,
+    ];
 
-    // Render-and-expand, for the many tests whose subject controls live
-    // behind the disclosure.
-    private IRenderedComponent<FilterPanel> RenderExpanded(
-        Action<ComponentParameterCollectionBuilder<FilterPanel>>? parameters = null)
+    // Every row is collapsed at rest, so a test that touches a facet's
+    // controls opens that facet's row first — through the row's real toggle
+    // button, so every such test also exercises the disclosure's actual wiring
+    // rather than reaching around it. Each test names exactly the rows its
+    // subject lives in: opening all eight everywhere would hide a control that
+    // had quietly moved to another row.
+    private static void ExpandFacets(
+        IRenderedComponent<FilterPanel> cut, params FilterFacet[] facets)
     {
-        var cut = parameters is null ? Render<FilterPanel>() : Render<FilterPanel>(parameters);
-        ExpandMoreFilters(cut);
+        foreach (var facet in facets)
+            cut.Find($"#facetToggle_{facet}").Click();
+    }
+
+    // Render-and-open, for the many tests whose subject controls live inside a
+    // row.
+    private IRenderedComponent<FilterPanel> RenderExpanded(params FilterFacet[] facets)
+    {
+        var cut = Render<FilterPanel>();
+        ExpandFacets(cut, facets);
+        return cut;
+    }
+
+    private IRenderedComponent<FilterPanel> RenderExpanded(
+        Action<ComponentParameterCollectionBuilder<FilterPanel>> parameters,
+        params FilterFacet[] facets)
+    {
+        var cut = Render<FilterPanel>(parameters);
+        ExpandFacets(cut, facets);
         return cut;
     }
 
@@ -52,10 +83,11 @@ public class FilterPanelTests : BunitContext
         Render<FilterPanel>(parameters => parameters
             .Add(p => p.OnAppliedStateChanged, (FilterConfig? c) => { reports.Add(c); }));
 
-    private IRenderedComponent<FilterPanel> RenderExpandedReporting(List<FilterConfig?> reports)
+    private IRenderedComponent<FilterPanel> RenderExpandedReporting(
+        List<FilterConfig?> reports, params FilterFacet[] facets)
     {
         var cut = RenderReporting(reports);
-        ExpandMoreFilters(cut);
+        ExpandFacets(cut, facets);
         return cut;
     }
 
@@ -341,7 +373,7 @@ public class FilterPanelTests : BunitContext
     public async Task InvalidPositionPattern_DisablesApply_EvenWhileDirty()
     {
         var reports = new List<FilterConfig?>();
-        var cut = RenderExpandedReporting(reports);
+        var cut = RenderExpandedReporting(reports, FilterFacet.PositionPattern);
 
         cut.Find("#positionPattern").Input("[6,2,]");
         await Apply(cut).ClickAsync(new());
@@ -475,7 +507,7 @@ public class FilterPanelTests : BunitContext
     public void Render_LabelsUseLibDescriptions(Type enumType, string expectedLabel)
     {
         _ = enumType;  // present so failures cite the enum that caused them
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.DecisionType);
         Assert.Contains(expectedLabel, cut.Markup);
     }
 
@@ -489,7 +521,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void ShelvedGroups_PositionTypeAndPlayType_AreAbsentFromPanel()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.Players, FilterFacet.DecisionType, FilterFacet.MatchScores, FilterFacet.MoveNumberRange, FilterFacet.ContactTypes, FilterFacet.AnalysisDepth, FilterFacet.DiceRolls, FilterFacet.PositionPattern);
 
         Assert.DoesNotContain("Position type", cut.Markup);
         Assert.DoesNotContain("Play type", cut.Markup);
@@ -504,7 +536,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public async Task PersistedConfig_RoundTripsAcrossRemount()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.Players, FilterFacet.DecisionType, FilterFacet.ContactTypes);
 
         cut.Find("input[placeholder='e.g. Hal, Magriel']").Input("Hal, Magriel");
         cut.Find("#errorMin").Input("0.05");
@@ -521,7 +553,7 @@ public class FilterPanelTests : BunitContext
 
         // Feed it back through the getItem mock and mount a fresh panel.
         JSInterop.Setup<string?>("localStorage.getItem", ConfigKey).SetResult(stored);
-        var restored = RenderExpanded();
+        var restored = RenderExpanded(FilterFacet.Players, FilterFacet.DecisionType, FilterFacet.ContactTypes);
 
         Assert.Equal("Hal, Magriel", restored.Find("input[placeholder='e.g. Hal, Magriel']").GetAttribute("value"));
         Assert.Equal("0.05", restored.Find("#errorMin").GetAttribute("value"));
@@ -537,8 +569,10 @@ public class FilterPanelTests : BunitContext
     public async Task ContactTypeCheckbox_FlowsIntoEmittedConfig()
     {
         FilterConfig? capturedConfig = null;
-        var cut = RenderExpanded(parameters => parameters
-            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
+        var cut = RenderExpanded(
+            parameters => parameters
+                .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }),
+            FilterFacet.ContactTypes);
 
         cut.Find("#ct_Contact").Change(true);
         await cut.Find("button.btn-primary").ClickAsync(new());
@@ -554,7 +588,7 @@ public class FilterPanelTests : BunitContext
         [AnalysisMode.Evaluation, AnalysisMode.Rollout, AnalysisMode.BookRollout];
 
     // Check a mode's toggle and expand its level group through the group's real
-    // disclosure button — the depth twin of ExpandMoreFilters, exercising the
+    // disclosure button — the depth twin of ExpandFacets, exercising the
     // actual wiring rather than reaching around it.
     private static void CheckModeAndExpandLevels(
         IRenderedComponent<FilterPanel> cut, AnalysisMode mode)
@@ -571,7 +605,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void AnalysisDepthSection_RendersOneTogglePerSelectableMode()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.AnalysisDepth);
 
         foreach (var mode in SelectableModes)
         {
@@ -590,7 +624,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void ModeToggle_ShowsAndHidesItsOwnLevelGroup()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.AnalysisDepth);
 
         Assert.Empty(cut.FindAll("button[id^='lvlToggle_']"));
 
@@ -606,11 +640,11 @@ public class FilterPanelTests : BunitContext
     // A checked mode's level group starts collapsed behind an honest disclosure
     // — a real button carrying aria-expanded / aria-controls over the
     // always-rendered region, whose checkboxes are absent from the DOM until
-    // expanded (the #moreFilters idiom, one tier down).
+    // expanded (the facet rows' idiom, one tier down).
     [Fact]
     public void LevelGroup_DefaultCollapsed_ExpandsThroughHonestDisclosure()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.AnalysisDepth);
         cut.Find("#md_Evaluation").Change(true);
 
         var toggle = cut.Find("#lvlToggle_Evaluation");
@@ -674,7 +708,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void LevelGroup_RendersTheRuledVocabularyInTheRuledOrder()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.AnalysisDepth);
 
         foreach (var mode in SelectableModes)
         {
@@ -699,7 +733,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void LevelBadge_ReportsAnyOrCount_OnlyWhileCollapsed()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.AnalysisDepth);
         cut.Find("#md_Evaluation").Change(true);
 
         Assert.Equal("any", cut.Find("#lvlBadge_Evaluation").TextContent.Trim());
@@ -723,8 +757,10 @@ public class FilterPanelTests : BunitContext
     public async Task AnalysisDepth_CanonicalSelection_EmitsAllSixFieldsRaw()
     {
         FilterConfig? capturedConfig = null;
-        var cut = RenderExpanded(parameters => parameters
-            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
+        var cut = RenderExpanded(
+            parameters => parameters
+                .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }),
+            FilterFacet.AnalysisDepth);
 
         cut.Find("#md_Rollout").Change(true);
         CheckModeAndExpandLevels(cut, AnalysisMode.Evaluation);
@@ -748,8 +784,10 @@ public class FilterPanelTests : BunitContext
     public async Task LevelCheckbox_FlowsIntoItsOwnModesListOnly()
     {
         FilterConfig? capturedConfig = null;
-        var cut = RenderExpanded(parameters => parameters
-            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
+        var cut = RenderExpanded(
+            parameters => parameters
+                .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }),
+            FilterFacet.AnalysisDepth);
 
         CheckModeAndExpandLevels(cut, AnalysisMode.BookRollout);
         cut.Find("#lv_BookRollout_Unknown").Change(true);
@@ -773,8 +811,10 @@ public class FilterPanelTests : BunitContext
     public async Task LevelSelections_SurviveModeUntoggle()
     {
         FilterConfig? capturedConfig = null;
-        var cut = RenderExpanded(parameters => parameters
-            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
+        var cut = RenderExpanded(
+            parameters => parameters
+                .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }),
+            FilterFacet.AnalysisDepth);
 
         CheckModeAndExpandLevels(cut, AnalysisMode.Rollout);
         cut.Find("#lv_Rollout_Ply4").Change(true);
@@ -793,15 +833,15 @@ public class FilterPanelTests : BunitContext
 
     // Every depth edit control must report applied state so the parent can
     // disable Run until Apply — and neither disclosure tier may: expanding the
-    // panel's #moreFilters and expanding a level group are both navigation,
-    // not edits.
+    // opening the facet's own row and expanding a level group are both
+    // navigation, not edits.
     [Fact]
     public void AnalysisDepthControls_ReportAppliedState_DisclosuresDoNot()
     {
         var reports = new List<FilterConfig?>();
         var cut = RenderReporting(reports);
 
-        ExpandMoreFilters(cut);
+        ExpandFacets(cut, FilterFacet.AnalysisDepth);
         Assert.Empty(reports);
 
         cut.Find("#md_Rollout").Change(true);
@@ -826,7 +866,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void LevelGroupToggle_WritesNoLocalStorage()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.AnalysisDepth);
         cut.Find("#md_Rollout").Change(true);
 
         cut.Find("#lvlToggle_Rollout").Click();
@@ -845,8 +885,10 @@ public class FilterPanelTests : BunitContext
     public async Task AnalysisDepth_DeselectedToEmpty_EmitsInactiveState()
     {
         FilterConfig? capturedConfig = null;
-        var cut = RenderExpanded(parameters => parameters
-            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
+        var cut = RenderExpanded(
+            parameters => parameters
+                .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }),
+            FilterFacet.AnalysisDepth);
 
         CheckModeAndExpandLevels(cut, AnalysisMode.Rollout);
         cut.Find("#lv_Rollout_Ply3").Change(true);
@@ -871,8 +913,10 @@ public class FilterPanelTests : BunitContext
     public async Task ClearFilters_ResetsAllSixDepthFields()
     {
         FilterConfig? capturedConfig = null;
-        var cut = RenderExpanded(parameters => parameters
-            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
+        var cut = RenderExpanded(
+            parameters => parameters
+                .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }),
+            FilterFacet.AnalysisDepth);
 
         CheckModeAndExpandLevels(cut, AnalysisMode.Rollout);
         cut.Find("#lv_Rollout_Ply4").Change(true);
@@ -905,7 +949,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public async Task AnalysisDepth_RoundTripsAcrossRemount()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.AnalysisDepth);
 
         CheckModeAndExpandLevels(cut, AnalysisMode.BookRollout);
         cut.Find("#lv_BookRollout_Ply3").Change(true);
@@ -919,7 +963,7 @@ public class FilterPanelTests : BunitContext
         Assert.NotNull(stored);
 
         JSInterop.Setup<string?>("localStorage.getItem", ConfigKey).SetResult(stored);
-        var restored = RenderExpanded();
+        var restored = RenderExpanded(FilterFacet.AnalysisDepth);
 
         Assert.True(restored.Find("#md_BookRollout").HasAttribute("checked"));
         Assert.True(restored.Find("#md_Rollout").HasAttribute("checked"));
@@ -952,7 +996,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public async Task AnalysisDepth_Ply3Red_RoundTripsUnderItsOwnWireToken()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.AnalysisDepth);
 
         CheckModeAndExpandLevels(cut, AnalysisMode.Evaluation);
         cut.Find("#lv_Evaluation_Ply3Red").Change(true);
@@ -965,7 +1009,7 @@ public class FilterPanelTests : BunitContext
         Assert.Contains("\"Ply3Red\"", stored!);
 
         JSInterop.Setup<string?>("localStorage.getItem", ConfigKey).SetResult(stored);
-        var restored = RenderExpanded();
+        var restored = RenderExpanded(FilterFacet.AnalysisDepth);
 
         restored.Find("#lvlToggle_Evaluation").Click();
         Assert.True(restored.Find("#lv_Evaluation_Ply3Red").HasAttribute("checked"));
@@ -985,7 +1029,7 @@ public class FilterPanelTests : BunitContext
         JSInterop.Setup<string?>("localStorage.getItem", ConfigKey)
             .SetResult("{\"DecisionType\":\"Both\"}");
 
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.AnalysisDepth);
 
         foreach (var mode in SelectableModes)
             Assert.False(cut.Find($"#md_{mode}").HasAttribute("checked"));
@@ -1010,7 +1054,7 @@ public class FilterPanelTests : BunitContext
             .SetResult("{\"DecisionType\":\"Both\",\"IncludeEvaluations\":true," +
                 "\"EvaluationLevels\":[5]}");
 
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.AnalysisDepth);
 
         // Byte-identical to ConfigWithNamedLevel_Restores below except for the
         // one token, so this pair discriminates: that blob renders the toggle,
@@ -1030,7 +1074,7 @@ public class FilterPanelTests : BunitContext
             .SetResult("{\"DecisionType\":\"Both\",\"IncludeEvaluations\":true," +
                 "\"EvaluationLevels\":[\"XgRoller\"]}");
 
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.AnalysisDepth);
 
         cut.Find("#lvlToggle_Evaluation").Click();
         Assert.True(cut.Find("#lv_Evaluation_XgRoller").HasAttribute("checked"));
@@ -1049,7 +1093,7 @@ public class FilterPanelTests : BunitContext
                 "\"AnalysisDepthClasses\":[\"Ply3\",\"RolloutPly7\"]," +
                 "\"AnalysisLevels\":[\"Ply3\",\"XgRollerPlus\"]}");
 
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.AnalysisDepth);
 
         foreach (var mode in SelectableModes)
             Assert.False(cut.Find($"#md_{mode}").HasAttribute("checked"));
@@ -1069,7 +1113,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void DiceSection_RendersAll21RollsInCanonicalOrder()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.DiceRolls);
 
         Assert.Equal(
             new[]
@@ -1093,8 +1137,10 @@ public class FilterPanelTests : BunitContext
     public async Task DiceRollCheckbox_FlowsIntoEmittedConfig()
     {
         FilterConfig? capturedConfig = null;
-        var cut = RenderExpanded(parameters => parameters
-            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
+        var cut = RenderExpanded(
+            parameters => parameters
+                .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }),
+            FilterFacet.DiceRolls);
 
         cut.Find("#dr_31").Change(true);
         cut.Find("#dr_55").Change(true);
@@ -1114,7 +1160,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public async Task DiceRolls_RoundTripsAcrossRemount()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.DiceRolls);
 
         cut.Find("#dr_31").Change(true);
         cut.Find("#dr_66").Change(true);
@@ -1126,7 +1172,7 @@ public class FilterPanelTests : BunitContext
         Assert.NotNull(stored);
 
         JSInterop.Setup<string?>("localStorage.getItem", ConfigKey).SetResult(stored);
-        var restored = RenderExpanded();
+        var restored = RenderExpanded(FilterFacet.DiceRolls);
 
         Assert.True(restored.Find("#dr_31").HasAttribute("checked"));
         Assert.True(restored.Find("#dr_66").HasAttribute("checked"));
@@ -1141,8 +1187,10 @@ public class FilterPanelTests : BunitContext
     public async Task DiceRolls_DeselectedToEmpty_EmitsInactiveState()
     {
         FilterConfig? capturedConfig = null;
-        var cut = RenderExpanded(parameters => parameters
-            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
+        var cut = RenderExpanded(
+            parameters => parameters
+                .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }),
+            FilterFacet.DiceRolls);
 
         cut.Find("#dr_31").Change(true);
         cut.Find("#dr_31").Change(false);
@@ -1161,8 +1209,10 @@ public class FilterPanelTests : BunitContext
     public async Task PositionPattern_FlowsIntoEmittedConfig()
     {
         FilterConfig? capturedConfig = null;
-        var cut = RenderExpanded(parameters => parameters
-            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
+        var cut = RenderExpanded(
+            parameters => parameters
+                .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }),
+            FilterFacet.PositionPattern);
 
         cut.Find("#positionPattern").Input("[6,2,] [5,,-2]");
         await cut.Find("button.btn-primary").ClickAsync(new());
@@ -1182,8 +1232,10 @@ public class FilterPanelTests : BunitContext
     public async Task PositionPatternWithOffTokens_FlowsIntoEmittedConfigCanonicalized()
     {
         FilterConfig? capturedConfig = null;
-        var cut = RenderExpanded(parameters => parameters
-            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
+        var cut = RenderExpanded(
+            parameters => parameters
+                .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }),
+            FilterFacet.PositionPattern);
 
         cut.Find("#positionPattern").Input("[OFF,10,] [Opp-Off,,-2]");
         await cut.Find("button.btn-primary").ClickAsync(new());
@@ -1202,7 +1254,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void WrongSignedOffBound_MarksFieldAndGatesApply()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.PositionPattern);
 
         cut.Find("#positionPattern").Input("[off,,-2]");
 
@@ -1217,7 +1269,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public async Task PositionPattern_RoundTripsAcrossRemount()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.PositionPattern);
 
         cut.Find("#positionPattern").Input("[6,2,] [5,,-2]");
         await cut.Find("button.btn-primary").ClickAsync(new());
@@ -1228,7 +1280,7 @@ public class FilterPanelTests : BunitContext
         Assert.NotNull(stored);
 
         JSInterop.Setup<string?>("localStorage.getItem", ConfigKey).SetResult(stored);
-        var restored = RenderExpanded();
+        var restored = RenderExpanded(FilterFacet.PositionPattern);
 
         Assert.Equal("[6,2,] [5,,-2]", restored.Find("#positionPattern").GetAttribute("value"));
     }
@@ -1255,7 +1307,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void InvalidPositionPattern_MarksFieldAndGatesApply()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.PositionPattern);
 
         cut.Find("#positionPattern").Input("[6,2");
 
@@ -1275,7 +1327,7 @@ public class FilterPanelTests : BunitContext
     {
         JSInterop.Setup<string?>("localStorage.getItem", ConfigKey).SetResult("}{ not valid json");
 
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.Players, FilterFacet.DecisionType, FilterFacet.ContactTypes);
 
         Assert.Equal(string.Empty, cut.Find("input[placeholder='e.g. Hal, Magriel']").GetAttribute("value"));
         Assert.True(cut.Find("#dt_Both").HasAttribute("checked"));
@@ -1290,7 +1342,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void MatchScoreSection_RendersOnRollAnchoredHint()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.MatchScores);
 
         // Anchor to the match-score section's own hint, not just page markup,
         // so an unrelated mention of the convention elsewhere can't satisfy this.
@@ -1310,7 +1362,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void MatchScorePlaceholder_DoesNotAdvertiseInvalidDmpToken()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.MatchScores);
 
         var placeholder = MatchScores(cut).GetAttribute("placeholder")!;
 
@@ -1328,7 +1380,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void MatchScorePlaceholder_ExampleTokensAllParse()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.MatchScores);
 
         var placeholder = MatchScores(cut).GetAttribute("placeholder")!;
         var examples = placeholder
@@ -1368,7 +1420,7 @@ public class FilterPanelTests : BunitContext
     [InlineData(MatchScoreToken.RetiredMoney)]
     public void FaultedMatchScoreToken_MarksTheField_AndGatesApply(string token)
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.MatchScores);
 
         MatchScores(cut).Input(token);
 
@@ -1384,7 +1436,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void ValidMatchScoreTokens_LeaveTheFieldClean_AndApplyOffered()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.MatchScores);
 
         MatchScores(cut).Input(
             $"4a5a, 1a2aC, {MatchScoreToken.MoneyWithJacoby}, {MatchScoreToken.MoneyWithoutJacoby}");
@@ -1402,7 +1454,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void MalformedMatchScoreToken_VerdictNamesTheMoneyTokens_AndNoRetiredSpelling()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.MatchScores);
 
         MatchScores(cut).Input("not-a-score");
 
@@ -1420,7 +1472,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void RetiredMatchScoreToken_VerdictNamesTheTokenAndItsReplacements()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.MatchScores);
 
         MatchScores(cut).Input(MatchScoreToken.RetiredMoney);
 
@@ -1436,7 +1488,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void MatchScoreVerdicts_AreOneVoicePerFaultKind()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.MatchScores);
 
         MatchScores(cut).Input("not-a-score");
         var malformed = Assert.Single(MatchScoreVerdicts(cut));
@@ -1456,7 +1508,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void ManyFaultedTokensOfOneKind_SpeakWithOneVoice()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.MatchScores);
 
         MatchScores(cut).Input("not-a-score, 0a5a, 3a5aC");
 
@@ -1469,7 +1521,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void FixingFaultedMatchScoreToken_ClearsTheVerdict_AndReEnablesApply()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.MatchScores);
 
         MatchScores(cut).Input(MatchScoreToken.RetiredMoney);
         Assert.True(Apply(cut).HasAttribute("disabled"));
@@ -1490,7 +1542,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void FaultedMatchScoreToken_DrawsNoRangeFacetVerdict()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.MatchScores, FilterFacet.MoveNumberRange);
 
         MatchScores(cut).Input(MatchScoreToken.RetiredMoney);
 
@@ -1506,7 +1558,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void InvalidErrorBound_DrawsNoMatchScoreVerdict()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.MatchScores);
 
         ErrorMin(cut).Input("-1");
 
@@ -1524,7 +1576,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void MatchScoreFieldCopy_OffersNoRetiredSpelling()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.MatchScores);
 
         var placeholder = MatchScores(cut).GetAttribute("placeholder")!;
         var hint = MatchScores(cut).ParentElement!.QuerySelector(".form-text")!.TextContent;
@@ -1550,7 +1602,7 @@ public class FilterPanelTests : BunitContext
             .SetResult(new FilterConfig { MatchScores = [MatchScoreToken.RetiredMoney] }.ToJson());
 
         var cut = Render<FilterPanel>();
-        ExpandMoreFilters(cut);
+        ExpandFacets(cut, FilterFacet.MatchScores);
 
         Assert.Equal(MatchScoreToken.RetiredMoney, MatchScores(cut).GetAttribute("value"));
         Assert.Contains("is-invalid", MatchScores(cut).GetAttribute("class"));
@@ -1581,7 +1633,7 @@ public class FilterPanelTests : BunitContext
             ContactTypes = [ContactType.Race],
         };
         await cut.InvokeAsync(() => cut.Instance.LoadConfig(loaded));
-        ExpandMoreFilters(cut);
+        ExpandFacets(cut, FilterFacet.Players, FilterFacet.DecisionType, FilterFacet.ContactTypes);
 
         Assert.Equal("Magriel", cut.Find("input[placeholder='e.g. Hal, Magriel']").GetAttribute("value"));
         Assert.True(cut.Find("#dt_CubeOnly").HasAttribute("checked"));
@@ -1615,7 +1667,7 @@ public class FilterPanelTests : BunitContext
         // WaitForAssertion: the released continuation resumes asynchronously
         // relative to SetResult; only after it has run is "didn't clobber"
         // actually proven.
-        ExpandMoreFilters(cut);
+        ExpandFacets(cut, FilterFacet.Players);
         cut.WaitForAssertion(() => Assert.Equal(
             "Hal",
             cut.Find("input[placeholder='e.g. Hal, Magriel']").GetAttribute("value")));
@@ -1626,7 +1678,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void TryGetEditedConfig_UnappliedEdits_ReturnsLiveBuffers()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.Players, FilterFacet.ContactTypes);
 
         cut.Find("input[placeholder='e.g. Hal, Magriel']").Input("Hal");
         cut.Find("#ct_Race").Change(true);
@@ -1642,7 +1694,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void TryGetEditedConfig_InvalidPositionPattern_ReturnsFalseNull()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.PositionPattern);
 
         cut.Find("#positionPattern").Input("[6,2");
 
@@ -1663,7 +1715,7 @@ public class FilterPanelTests : BunitContext
     [InlineData(MatchScoreToken.RetiredMoney)]
     public void TryGetEditedConfig_FaultedMatchScoreToken_ReturnsFalseNull(string token)
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.MatchScores);
 
         MatchScores(cut).Input(token);
 
@@ -1753,7 +1805,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void InvalidErrorBound_DisablesApply_EvenWithValidPattern()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.PositionPattern);
 
         cut.Find("#positionPattern").Input("[6,2,]");
         Assert.False(Apply(cut).HasAttribute("disabled"));
@@ -1771,7 +1823,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void InvalidPositionPattern_DisablesApply_EvenWithValidErrorBounds()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.PositionPattern);
 
         ErrorMin(cut).Input("1");
         ErrorMax(cut).Input("2");
@@ -1857,7 +1909,7 @@ public class FilterPanelTests : BunitContext
     [InlineData("-3")]
     public void MoveNumberMinBelowOne_MarksMinField_AndGatesApply(string bound)
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.MoveNumberRange);
 
         MoveNumberMin(cut).Input(bound);
 
@@ -1873,7 +1925,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void MoveNumberMaxBelowOne_MarksOnlyTheMaxField()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.MoveNumberRange);
 
         MoveNumberMin(cut).Input("1");
         MoveNumberMax(cut).Input("0");
@@ -1889,7 +1941,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void MisorderedMoveNumberBounds_MarkBothFields()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.MoveNumberRange);
 
         MoveNumberMin(cut).Input("5");
         MoveNumberMax(cut).Input("2");
@@ -1907,7 +1959,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void ValidMoveNumberBounds_LeaveTheFacetUnmarkedAndSilent()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.MoveNumberRange);
 
         MoveNumberMin(cut).Input("1");
         MoveNumberMax(cut).Input("30");
@@ -1927,7 +1979,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void InvalidMoveNumberBound_DrawsNoOtherFacetVerdict()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.MatchScores, FilterFacet.MoveNumberRange);
 
         MoveNumberMin(cut).Input("0");
 
@@ -1942,7 +1994,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void InvalidErrorBound_DrawsNoMoveNumberVerdict()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.MoveNumberRange);
 
         ErrorMin(cut).Input("-1");
 
@@ -1957,7 +2009,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void FixingInvalidMoveNumberBound_ClearsMark_AndReEnablesApply()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.MoveNumberRange);
 
         MoveNumberMin(cut).Input("0");
         Assert.True(Apply(cut).HasAttribute("disabled"));
@@ -1976,7 +2028,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void TryGetEditedConfig_InvalidMoveNumberBound_ReturnsFalseNull()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.MoveNumberRange);
 
         MoveNumberMin(cut).Input("5");
         MoveNumberMax(cut).Input("2");
@@ -1998,7 +2050,7 @@ public class FilterPanelTests : BunitContext
         JSInterop.Setup<string?>("localStorage.getItem", ConfigKey)
             .SetResult(new FilterConfig { MoveNumberMin = 0, MoveNumberMax = 30 }.ToJson());
 
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.MoveNumberRange);
 
         Assert.Equal("0", MoveNumberMin(cut).GetAttribute("value"));
         Assert.Equal("30", MoveNumberMax(cut).GetAttribute("value"));
@@ -2015,7 +2067,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void InvalidBoundsInBothRangeFacets_MarkBothAndSpeakTwice()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.MoveNumberRange);
 
         ErrorMin(cut).Input("-1");
         MoveNumberMax(cut).Input("0");
@@ -2028,25 +2080,26 @@ public class FilterPanelTests : BunitContext
         Assert.Empty(cut.FindAll("#applyDisabledReason"));
     }
 
-    // ── Disclosure ─────────────────────────────────────────────────────────
+    // ── Facet rows ─────────────────────────────────────────────────────────
 
-    // The default-hidden information hierarchy: at rest the panel shows the
-    // error-range section, the disclosure row (the toggle with Clear filters
-    // beside it) and the Apply row — every other section's controls are
-    // absent from the DOM, not styled away. The toggle is an honest
-    // disclosure control: a real button carrying aria-expanded and
-    // aria-controls. Presence only here; the row order those two buttons
-    // now share is pinned in the Clear filters contract below.
+    // The at-rest information hierarchy: the error-range section, the Clear
+    // filters row, eight collapsed facet rows and the Apply row — and not one
+    // facet control, because a collapsed row's children are absent from the
+    // DOM rather than styled away. Presence only here; the ruled order is
+    // pinned next, and the badges below.
     [Fact]
-    public void Disclosure_DefaultHidden_OnlyErrorRangeToggleAndButtonsAtRest()
+    public void Rows_DefaultCollapsed_ShowOnlyErrorRangeAndTheButtons()
     {
         var cut = Render<FilterPanel>();
 
-        var toggle = cut.Find("#moreFiltersToggle");
-        Assert.Equal("BUTTON", toggle.TagName);
-        Assert.Equal("false", toggle.GetAttribute("aria-expanded"));
-        Assert.Equal("moreFilters", toggle.GetAttribute("aria-controls"));
-        Assert.NotNull(cut.Find("#moreFilters"));
+        foreach (var facet in RowFacets)
+        {
+            var toggle = cut.Find($"#facetToggle_{facet}");
+            Assert.Equal("BUTTON", toggle.TagName);
+            Assert.Equal("false", toggle.GetAttribute("aria-expanded"));
+            Assert.Equal($"facet_{facet}", toggle.GetAttribute("aria-controls"));
+            Assert.NotNull(cut.Find($"#facet_{facet}"));
+        }
 
         Assert.NotNull(cut.Find("#errorMin"));
         Assert.NotNull(cut.Find("button.btn-primary"));
@@ -2066,174 +2119,358 @@ public class FilterPanelTests : BunitContext
         Assert.Empty(cut.FindAll("#moveNumberMax"));
     }
 
-    // The toggle round-trips: expand shows the hidden sections and flips
-    // aria-expanded; a second click collapses back to the at-rest state.
+    // The ruled membership and order, against this suite's independent
+    // literal. Not a tautology: the panel writes its eight rows out one by one
+    // (each body is its own markup) and keeps a separate list for the stored
+    // vocabulary, so nothing in the product derives the rendered order from
+    // anything this compares it to. A row added, dropped or resequenced is a
+    // change to what the user sees, so it must be ruled on here rather than
+    // followed silently.
     [Fact]
-    public void DisclosureToggle_ExpandsAndCollapses()
+    public void Rows_RenderTheRuledFacetsInTheRuledOrder()
     {
         var cut = Render<FilterPanel>();
 
-        ExpandMoreFilters(cut);
-        Assert.Equal("true", cut.Find("#moreFiltersToggle").GetAttribute("aria-expanded"));
-        Assert.NotNull(cut.Find("#positionPattern"));
-        Assert.NotNull(cut.Find("input[id^='dr_']"));
+        Assert.Equal(
+            RowFacets.Select(f => f.ToString()),
+            cut.FindAll("button[id^='facetToggle_']")
+               .Select(el => el.Id!["facetToggle_".Length..]));
+    }
 
-        cut.Find("#moreFiltersToggle").Click();
-        Assert.Equal("false", cut.Find("#moreFiltersToggle").GetAttribute("aria-expanded"));
+    // Each row's name is the lib's, never a literal here: the button's text is
+    // the facet's [Description] via ToLabel(). The +/− glyph is decorative and
+    // says so — aria-expanded already carries which way the row sits — so it
+    // is excluded from the comparison the way a screen reader excludes it.
+    [Fact]
+    public void RowToggle_IsNamedByTheLibsFacetLabel()
+    {
+        var cut = Render<FilterPanel>();
+
+        foreach (var facet in RowFacets)
+        {
+            var toggle = cut.Find($"#facetToggle_{facet}");
+            var glyph = toggle.QuerySelector("[aria-hidden='true']");
+            Assert.NotNull(glyph);
+            Assert.Equal(facet.ToLabel(), toggle.TextContent.Replace(glyph!.TextContent, "").Trim());
+        }
+    }
+
+    // A row round-trips, and only that row: expanding one leaves its
+    // neighbours exactly as they were. This is the whole point of the ruling —
+    // eight independent rows, not one disclosure wearing eight headings.
+    [Fact]
+    public void Row_ExpandsAndCollapses_WithoutMovingItsNeighbours()
+    {
+        var cut = Render<FilterPanel>();
+
+        ExpandFacets(cut, FilterFacet.DiceRolls);
+        Assert.Equal("true", cut.Find("#facetToggle_DiceRolls").GetAttribute("aria-expanded"));
+        Assert.NotEmpty(cut.FindAll("input[id^='dr_']"));
         Assert.Empty(cut.FindAll("#positionPattern"));
+        Assert.Equal("false", cut.Find("#facetToggle_PositionPattern").GetAttribute("aria-expanded"));
+
+        ExpandFacets(cut, FilterFacet.DiceRolls);   // a second click collapses
+        Assert.Equal("false", cut.Find("#facetToggle_DiceRolls").GetAttribute("aria-expanded"));
         Assert.Empty(cut.FindAll("input[id^='dr_']"));
     }
 
-    // Toggling the disclosure is navigation, not an edit: OnAppliedStateChanged
+    // Opening or closing a row is navigation, not an edit: OnAppliedStateChanged
     // must not fire, in either direction.
     [Fact]
-    public void DisclosureToggle_DoesNotReportAppliedState()
+    public void RowToggle_DoesNotReportAppliedState()
     {
         var reports = new List<FilterConfig?>();
         var cut = RenderReporting(reports);
 
-        cut.Find("#moreFiltersToggle").Click();
-        cut.Find("#moreFiltersToggle").Click();
+        ExpandFacets(cut, FilterFacet.ContactTypes);
+        ExpandFacets(cut, FilterFacet.ContactTypes);
 
         Assert.Empty(reports);
     }
 
-    // Each toggle click persists the choice immediately under the disclosure's
-    // own key — "true"/"false" literals — and never writes the config blob's
-    // key: visibility is user preference, not filter state.
+    // Each click persists the whole open set immediately under the rows' own
+    // key — a JSON array of facet member names, written in row order however
+    // the user got there — and never writes the config blob's key: which rows
+    // are open is user preference, not filter state. The out-of-order clicks
+    // are the point of the ordering rule: one arrangement of open rows has one
+    // spelling on disk.
     [Fact]
-    public void DisclosureToggle_PersistsChoiceUnderOwnKey()
+    public void RowToggles_PersistTheOpenSetUnderTheirOwnKey()
     {
         var cut = Render<FilterPanel>();
 
-        cut.Find("#moreFiltersToggle").Click();
-        Assert.Equal("true", JSInterop.Invocations["localStorage.setItem"]
-            .Last(i => (string?)i.Arguments[0] == DisclosureKey).Arguments[1] as string);
+        ExpandFacets(cut, FilterFacet.DiceRolls);
+        Assert.Equal("[\"DiceRolls\"]", LastDisclosureWrite());
 
-        cut.Find("#moreFiltersToggle").Click();
-        Assert.Equal("false", JSInterop.Invocations["localStorage.setItem"]
-            .Last(i => (string?)i.Arguments[0] == DisclosureKey).Arguments[1] as string);
+        ExpandFacets(cut, FilterFacet.Players);
+        Assert.Equal("[\"Players\",\"DiceRolls\"]", LastDisclosureWrite());
+
+        ExpandFacets(cut, FilterFacet.DiceRolls);   // close it again
+        Assert.Equal("[\"Players\"]", LastDisclosureWrite());
 
         Assert.DoesNotContain(JSInterop.Invocations["localStorage.setItem"],
             i => (string?)i.Arguments[0] == ConfigKey);
     }
 
-    // The remembered choice restores across sessions: a stored "true" mounts
-    // the panel expanded, no click needed.
+    // The last value written under the rows' key.
+    private string? LastDisclosureWrite() =>
+        JSInterop.Invocations["localStorage.setItem"]
+                 .Last(i => (string?)i.Arguments[0] == DisclosureKey).Arguments[1] as string;
+
+    // The remembered set restores across sessions: the named rows mount open,
+    // no click needed, and the rows it does not name stay shut.
     [Fact]
-    public void StoredDisclosureTrue_MountsExpanded()
+    public void StoredOpenSet_MountsExactlyThoseRowsExpanded()
     {
-        JSInterop.Setup<string?>("localStorage.getItem", DisclosureKey).SetResult("true");
+        JSInterop.Setup<string?>("localStorage.getItem", DisclosureKey)
+            .SetResult("[\"Players\",\"PositionPattern\"]");
 
         var cut = Render<FilterPanel>();
 
-        Assert.Equal("true", cut.Find("#moreFiltersToggle").GetAttribute("aria-expanded"));
+        Assert.Equal("true", cut.Find("#facetToggle_Players").GetAttribute("aria-expanded"));
         Assert.NotNull(cut.Find("#positionPattern"));
+        Assert.Equal("false", cut.Find("#facetToggle_DiceRolls").GetAttribute("aria-expanded"));
+        Assert.Empty(cut.FindAll("input[id^='dr_']"));
     }
 
-    // Anything but the literal "true" — a corrupt value included — keeps the
-    // default-hidden posture; the tolerant-restore twin of
-    // CorruptStoredConfig_MountsWithDefaults.
-    [Fact]
-    public void StoredDisclosureCorrupt_MountsCollapsed()
+    // Restore is all-or-nothing, and these are the ways a stored value can
+    // fail: not JSON at all, not an array, a name no row answers to, a
+    // FilterFacet member the panel gives no row (ErrorRange is always visible;
+    // PositionTypes is UI-shelved), a numeric token that a careless
+    // Enum.TryParse would have honoured as an ordinal, and a good name beside
+    // a bad one — the case that decides all-or-nothing against salvaging the
+    // rest. Every one restores every row collapsed: the panel only ever writes
+    // row names, so anything else is corruption, and half-honouring it would
+    // open a set the user never chose.
+    [Theory]
+    [InlineData("}{ not valid json")]
+    [InlineData("\"Players\"")]
+    [InlineData("true")]
+    [InlineData("[\"NotAFacet\"]")]
+    [InlineData("[\"ErrorRange\"]")]
+    [InlineData("[\"PositionTypes\"]")]
+    [InlineData("[\"players\"]")]
+    [InlineData("[0]")]
+    [InlineData("[\"0\"]")]
+    [InlineData("[null]")]
+    [InlineData("[\"Players\",\"NotAFacet\"]")]
+    public void StoredOpenSetThatIsUnreadable_MountsEveryRowCollapsed(string stored)
     {
-        JSInterop.Setup<string?>("localStorage.getItem", DisclosureKey).SetResult("expanded!!");
+        JSInterop.Setup<string?>("localStorage.getItem", DisclosureKey).SetResult(stored);
 
         var cut = Render<FilterPanel>();
 
-        Assert.Equal("false", cut.Find("#moreFiltersToggle").GetAttribute("aria-expanded"));
-        Assert.Empty(cut.FindAll("#positionPattern"));
+        foreach (var facet in RowFacets)
+            Assert.Equal("false", cut.Find($"#facetToggle_{facet}").GetAttribute("aria-expanded"));
     }
 
-    // The disclosure twin of LoadConfig_DuringPendingStoredRestore: a toggle
-    // click landing while the getItem interop is in flight is a fresh user
-    // choice the late restore must not clobber. Expand-then-collapse while a
-    // stored "true" is pending; the released restore must yield — the panel
-    // stays collapsed.
+    // The rows' twin of LoadConfig_DuringPendingStoredRestore: a click landing
+    // while the getItem interop is in flight is a fresh user choice the late
+    // restore must not clobber. Open a row while a stored set naming a
+    // different one is pending; the released restore must yield whole — the
+    // user's row stays open and the stored one stays shut.
     [Fact]
-    public void Toggle_DuringPendingStoredRestore_UserChoiceWins()
+    public void RowToggle_DuringPendingStoredRestore_UserChoiceWins()
     {
         var pendingGet = JSInterop.Setup<string?>("localStorage.getItem", DisclosureKey);
 
         var cut = Render<FilterPanel>();
 
-        cut.Find("#moreFiltersToggle").Click();   // expand…
-        cut.Find("#moreFiltersToggle").Click();   // …and collapse: a settled choice
+        ExpandFacets(cut, FilterFacet.DiceRolls);
 
-        pendingGet.SetResult("true");
+        pendingGet.SetResult("[\"Players\"]");
 
-        cut.WaitForAssertion(() => Assert.Equal(
-            "false", cut.Find("#moreFiltersToggle").GetAttribute("aria-expanded")));
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Equal("true", cut.Find("#facetToggle_DiceRolls").GetAttribute("aria-expanded"));
+            Assert.Equal("false", cut.Find("#facetToggle_Players").GetAttribute("aria-expanded"));
+        });
     }
 
-    // ── Hidden-active signal ───────────────────────────────────────────────
+    // The facets whose section carries a bracketed hint — every row but
+    // Decision type, whose three options say everything a hint would.
+    private static readonly FilterFacet[] HintBearingFacets =
+        [.. RowFacets.Where(f => f != FilterFacet.DecisionType)];
 
-    // Nothing active, nothing signalled.
+    // The hint belongs to the expanded body and nowhere else: a collapsed row
+    // carries none of it, not even in its header, and an expanded one carries
+    // it inside the row's own region. Pinned structurally rather than by the
+    // words themselves — the wording is the panel's to change, where the hint
+    // may appear is not — which is this suite's standing posture.
     [Fact]
-    public void HiddenActiveSignal_AbsentOnDefaults()
+    public void RowHint_RendersOnlyInsideTheExpandedBody()
     {
         var cut = Render<FilterPanel>();
 
-        Assert.Empty(cut.FindAll("#hiddenActiveCount"));
-        Assert.Empty(cut.FindAll("#hiddenActiveNames"));
+        foreach (var facet in RowFacets)
+        {
+            var row = cut.Find($"#facetToggle_{facet}").ParentElement!;
+            Assert.Empty(row.QuerySelectorAll("small.text-muted"));
+        }
+
+        foreach (var facet in HintBearingFacets)
+        {
+            ExpandFacets(cut, facet);
+
+            var row = cut.Find($"#facetToggle_{facet}").ParentElement!;
+            var hints = row.QuerySelectorAll("small.text-muted");
+            Assert.NotEmpty(hints);
+            // …and every one of them sits inside the region, never in the header.
+            var region = cut.Find($"#facet_{facet}");
+            Assert.All(hints, h => Assert.True(region.Contains(h)));
+
+            ExpandFacets(cut, facet);   // close it again for the next facet
+        }
     }
 
-    // ErrorRange is the one always-visible facet — active error bounds must
-    // never light the hidden-active signal.
+    // ── Row badges ─────────────────────────────────────────────────────────
+
+    // Nothing active, nothing badged.
     [Fact]
-    public void HiddenActiveSignal_ErrorRangeExcluded()
+    public void Badges_AbsentOnDefaults()
+    {
+        var cut = Render<FilterPanel>();
+
+        Assert.Empty(cut.FindAll("span[id^='facetBadge_']"));
+    }
+
+    // Error range has no row, so nothing it does can badge one. The facet the
+    // old single disclosure had to special-case is now simply not in the
+    // vocabulary.
+    [Fact]
+    public void Badges_ErrorRangeBadgesNothing()
     {
         var cut = Render<FilterPanel>();
 
         cut.Find("#errorMin").Input("0.05");
 
-        Assert.Empty(cut.FindAll("#hiddenActiveCount"));
-        Assert.Empty(cut.FindAll("#hiddenActiveNames"));
+        Assert.Empty(cut.FindAll("span[id^='facetBadge_']"));
     }
 
-    // Staged values in hidden sections light the signal the moment the panel
-    // collapses — before any Apply, because the signal reads the live edit
-    // buffers through the same build path Apply uses (the deliberate mid-edit
-    // choice). The names are the lib's FilterFacet [Description] labels, in
-    // declaration order — exactly the section headings the user will find on
-    // expanding.
-    [Fact]
-    public void HiddenActiveSignal_CountsAndNamesHiddenFacets()
+    // Open a row, make its facet active, close it again — the state in which a
+    // badge is supposed to speak.
+    private IRenderedComponent<FilterPanel> RenderWithActiveCollapsedFacet(
+        FilterFacet facet, Action<IRenderedComponent<FilterPanel>> activate)
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(facet);
+        activate(cut);
+        ExpandFacets(cut, facet);
+        return cut;
+    }
 
-        cut.Find("input[placeholder='e.g. Hal, Magriel']").Input("Hal");
+    // The words, per facet: "set" for the facets chosen by typing into them,
+    // where a count of boxes filled would tell the user nothing, and "N
+    // selected" for the facets chosen by ticking options. Decision type reads
+    // one by construction — a radio group has exactly one choice, and the facet
+    // is active only while that choice is not the inactive default.
+    [Fact]
+    public void Badge_WordsSayHowMuchTheClosedRowIsHiding()
+    {
+        (FilterFacet Facet, Action<IRenderedComponent<FilterPanel>> Activate, string Expected)[] cases =
+        [
+            (FilterFacet.Players,
+             c => c.Find("input[placeholder='e.g. Hal, Magriel']").Input("Hal, Magriel"), "set"),
+            (FilterFacet.DecisionType,
+             c => c.Find("#dt_CheckerPlaysOnly").Change(true), "1 selected"),
+            (FilterFacet.MatchScores,
+             c => MatchScores(c).Input("4a5a, 1a1a"), "set"),
+            (FilterFacet.MoveNumberRange,
+             c => MoveNumberMin(c).Input("7"), "set"),
+            (FilterFacet.ContactTypes,
+             c => { c.Find("#ct_Race").Change(true); c.Find("#ct_Contact").Change(true); },
+             "2 selected"),
+            (FilterFacet.AnalysisDepth,
+             c => { c.Find("#md_Rollout").Change(true); c.Find("#md_Evaluation").Change(true); },
+             "2 selected"),
+            (FilterFacet.DiceRolls,
+             c => { c.Find("#dr_31").Change(true); c.Find("#dr_66").Change(true); },
+             "2 selected"),
+            (FilterFacet.PositionPattern,
+             c => c.Find("#positionPattern").Input("[6,2,]"), "set"),
+        ];
+
+        // Every row is covered: a facet that grew a row without a badge rule
+        // would fail here rather than badge whatever the switch fell through to.
+        Assert.Equal(RowFacets, cases.Select(x => x.Facet));
+
+        foreach (var (facet, activate, expected) in cases)
+        {
+            var cut = RenderWithActiveCollapsedFacet(facet, activate);
+
+            Assert.Equal(expected, cut.Find($"#facetBadge_{facet}").TextContent.Trim());
+        }
+    }
+
+    // A badge is a closed row's business: expanded, the controls themselves say
+    // everything it could, so it would be noise — the level groups' ruling one
+    // tier down, and the same reason.
+    [Fact]
+    public void Badge_RendersOnlyWhileTheRowIsCollapsed()
+    {
+        var cut = RenderExpanded(FilterFacet.ContactTypes);
+
         cut.Find("#ct_Race").Change(true);
+        Assert.Empty(cut.FindAll("#facetBadge_ContactTypes"));
+
+        ExpandFacets(cut, FilterFacet.ContactTypes);   // collapse
+        Assert.NotNull(cut.Find("#facetBadge_ContactTypes"));
+    }
+
+    // A badge lights on the value being staged, not on Apply: it reads the live
+    // edit buffers through the same build path Apply commits through, which is
+    // what makes it honest mid-edit. Only this row badges — the badge is per
+    // facet, never a panel-wide signal wearing eight ids.
+    [Fact]
+    public void Badge_LightsOnStagedValues_BeforeAnyApply()
+    {
+        var cut = RenderExpanded(FilterFacet.DiceRolls);
+
         cut.Find("#dr_31").Change(true);
-        cut.Find("#moreFiltersToggle").Click();   // collapse
+        ExpandFacets(cut, FilterFacet.DiceRolls);   // collapse
 
-        Assert.Equal("3", cut.Find("#hiddenActiveCount").TextContent.Trim());
-        Assert.Contains(
-            string.Join(", ",
-                FilterFacet.Players.ToLabel(),
-                FilterFacet.ContactTypes.ToLabel(),
-                FilterFacet.DiceRolls.ToLabel()),
-            cut.Find("#hiddenActiveNames").TextContent);
+        var badge = Assert.Single(cut.FindAll("span[id^='facetBadge_']"));
+        Assert.Equal("facetBadge_DiceRolls", badge.Id);
     }
 
-    // While expanded nothing is hidden, so the signal would be noise — it
-    // renders only while collapsed.
+    // The pin the badge's SSOT rests on: PRESENCE is the lib's ruling
+    // (GetActiveFacets on the live buffers), never a re-reading of the buffer
+    // behind the controls. These are the three states where the two answers
+    // genuinely differ, so a badge that consulted its buffer directly would
+    // light in each of them and fail here:
+    //
+    //   · position-pattern text that does not parse builds as "no pattern",
+    //     so the facet is off however much text is in the box;
+    //   · a depth level list whose mode toggle is off is inert by the lib's
+    //     guarantee — checked levels, facet still off;
+    //   · a player list of nothing but separators splits to no tokens.
+    //
+    // Each is a real state a user reaches by typing, not a contrivance.
     [Fact]
-    public void HiddenActiveSignal_NotRenderedWhileExpanded()
+    public void Badge_PresenceFollowsTheLibsActivationPredicate_NotTheBuffer()
     {
-        var cut = RenderExpanded();
+        var unparseable = RenderWithActiveCollapsedFacet(
+            FilterFacet.PositionPattern, c => c.Find("#positionPattern").Input("[6,2"));
+        Assert.Empty(unparseable.FindAll("#facetBadge_PositionPattern"));
 
-        cut.Find("#ct_Race").Change(true);
+        var inertLevels = RenderWithActiveCollapsedFacet(FilterFacet.AnalysisDepth, c =>
+        {
+            CheckModeAndExpandLevels(c, AnalysisMode.Rollout);
+            c.Find("#lv_Rollout_Ply4").Change(true);
+            c.Find("#md_Rollout").Change(false);   // levels kept, facet off
+        });
+        Assert.Empty(inertLevels.FindAll("#facetBadge_AnalysisDepth"));
 
-        Assert.Empty(cut.FindAll("#hiddenActiveCount"));
-        Assert.Empty(cut.FindAll("#hiddenActiveNames"));
+        var separatorsOnly = RenderWithActiveCollapsedFacet(
+            FilterFacet.Players,
+            c => c.Find("input[placeholder='e.g. Hal, Magriel']").Input(" , , "));
+        Assert.Empty(separatorsOnly.FindAll("#facetBadge_Players"));
     }
 
-    // A loaded saved filter can stage values into hidden sections. The signal
-    // must report them at rest — and staging must not move the disclosure:
-    // expanding is the user's gesture, never LoadConfig's.
+    // A loaded saved filter can stage values into collapsed rows. Their badges
+    // must report it at rest — and staging must not open anything: opening a
+    // row is the user's gesture, never LoadConfig's.
     [Fact]
-    public async Task LoadConfig_StagedHiddenFacets_LightSignal_WithoutExpanding()
+    public async Task LoadConfig_StagedFacets_LightBadges_WithoutOpeningRows()
     {
         var cut = Render<FilterPanel>();
 
@@ -2244,42 +2481,68 @@ public class FilterPanelTests : BunitContext
         };
         await cut.InvokeAsync(() => cut.Instance.LoadConfig(loaded));
 
-        Assert.Equal("false", cut.Find("#moreFiltersToggle").GetAttribute("aria-expanded"));
-        Assert.Equal("2", cut.Find("#hiddenActiveCount").TextContent.Trim());
-        var names = cut.Find("#hiddenActiveNames").TextContent;
-        Assert.Contains(FilterFacet.ContactTypes.ToLabel(), names);
-        Assert.Contains(FilterFacet.DiceRolls.ToLabel(), names);
+        foreach (var facet in RowFacets)
+            Assert.Equal("false", cut.Find($"#facetToggle_{facet}").GetAttribute("aria-expanded"));
+
+        Assert.Equal("1 selected", cut.Find("#facetBadge_ContactTypes").TextContent.Trim());
+        Assert.Equal("1 selected", cut.Find("#facetBadge_DiceRolls").TextContent.Trim());
+        Assert.Equal(2, cut.FindAll("span[id^='facetBadge_']").Count);
     }
 
-    // A restored session with hidden-section facets active shows the signal at
-    // rest — the first-render restore hydrates the buffers the signal reads.
+    // A restored session with active facets badges them at rest — the
+    // first-render restore hydrates the buffers the badges read.
     [Fact]
-    public void StoredConfigWithHiddenFacets_LightsSignalAtRest()
+    public void StoredConfigWithActiveFacets_LightsBadgesAtRest()
     {
         var stored = new FilterConfig { ContactTypes = [ContactType.Race] };
         JSInterop.Setup<string?>("localStorage.getItem", ConfigKey).SetResult(stored.ToJson());
 
         var cut = Render<FilterPanel>();
 
-        Assert.Equal("1", cut.Find("#hiddenActiveCount").TextContent.Trim());
-        Assert.Contains(FilterFacet.ContactTypes.ToLabel(),
-            cut.Find("#hiddenActiveNames").TextContent);
+        var badge = Assert.Single(cut.FindAll("span[id^='facetBadge_']"));
+        Assert.Equal("facetBadge_ContactTypes", badge.Id);
     }
 
-    // Clear filters empties every buffer, so the signal goes out with them.
+    // Clear filters empties every buffer, so every badge goes out with them.
     [Fact]
-    public async Task ClearFilters_ExtinguishesSignal()
+    public async Task ClearFilters_ExtinguishesEveryBadge()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.ContactTypes);
 
         cut.Find("#ct_Race").Change(true);
-        cut.Find("#moreFiltersToggle").Click();   // collapse
-        Assert.NotNull(cut.Find("#hiddenActiveCount"));
+        ExpandFacets(cut, FilterFacet.ContactTypes);   // collapse — the badge lights
+        Assert.NotNull(cut.Find("#facetBadge_ContactTypes"));
 
         await cut.Find("#clearFilters").ClickAsync(new());
 
-        Assert.Empty(cut.FindAll("#hiddenActiveCount"));
-        Assert.Empty(cut.FindAll("#hiddenActiveNames"));
+        Assert.Empty(cut.FindAll("span[id^='facetBadge_']"));
+    }
+
+    // Which rows are open is orthogonal to what Apply commits: the same
+    // selection applies to the same config whether it was typed into an open
+    // row or staged into a closed one, and opening a row after the fact does
+    // not disturb the commit.
+    [Fact]
+    public async Task Apply_IsUnaffectedByWhichRowsAreOpen()
+    {
+        FilterConfig? capturedConfig = null;
+        var cut = RenderExpanded(
+            parameters => parameters
+                .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }),
+            FilterFacet.ContactTypes);
+
+        cut.Find("#ct_Race").Change(true);
+        ExpandFacets(cut, FilterFacet.ContactTypes);   // collapse before applying
+        await Apply(cut).ClickAsync(new());
+
+        Assert.NotNull(capturedConfig);
+        Assert.Equal([ContactType.Race], capturedConfig!.ContactTypes);
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+
+        // Opening the row afterwards is navigation: nothing to re-apply.
+        ExpandFacets(cut, FilterFacet.ContactTypes);
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+        Assert.True(cut.Find("#ct_Race").HasAttribute("checked"));
     }
 
     // ── Clear filters contract ─────────────────────────────────────────────
@@ -2294,20 +2557,26 @@ public class FilterPanelTests : BunitContext
         Assert.DoesNotContain("Reset", cut.Markup);
     }
 
-    // The ruled placement (halheinrich/backgammon#153): Clear filters sits in
-    // the disclosure row, immediately after the Hide/Show toggle — which, in a
-    // default-direction flex row, is immediately to its right. Pinned as a DOM
-    // relationship, not a markup offset: nextElementSibling *is* the adjacency
-    // the ruling is about, so this asserts the intent rather than passing on an
-    // accident of document order.
+    // The ruled placement (halheinrich/backgammon#153) survives the toggle that
+    // used to share the row: Clear filters keeps the leftmost position on a row
+    // of its own, directly above the first facet row. Pinned as DOM
+    // relationships, not markup offsets — being first on its row and that row
+    // being the one before the rows *is* the placement the ruling is about, so
+    // this asserts the intent rather than passing on an accident of document
+    // order.
     [Fact]
-    public void ClearButton_SitsImmediatelyRightOfTheDisclosureToggle()
+    public void ClearButton_IsAloneAndLeftmostOnTheRowAboveTheFacetRows()
     {
         var cut = Render<FilterPanel>();
 
+        var clearRow = cut.Find("#clearFilters").ParentElement!;
+        var onlyButton = Assert.Single(clearRow.QuerySelectorAll("button"));
+        Assert.Equal("clearFilters", onlyButton.Id);
+        Assert.Equal("clearFilters", clearRow.FirstElementChild?.Id);
+
         Assert.Equal(
-            "clearFilters",
-            cut.Find("#moreFiltersToggle").NextElementSibling?.Id);
+            $"facetToggle_{RowFacets[0]}",
+            clearRow.NextElementSibling?.FirstElementChild?.Id);
     }
 
     // The other end of the same move: Clear left the commit row, so Apply is
@@ -2323,22 +2592,24 @@ public class FilterPanelTests : BunitContext
         Assert.Equal("Apply Filter", onlyButton.TextContent.Trim());
     }
 
-    // The adjacency survives the state most able to break it: collapsed with
-    // hidden filters active, the row also carries the hidden-active names.
-    // Clear stays welded to the toggle and the names trail the pair — the
-    // deliberate ordering, so Clear does not slide sideways as the signal
-    // comes and goes.
+    // The placement survives the state most able to move it: badges come and go
+    // on the rows below as filters are set and cleared, and Clear filters is on
+    // none of those rows, so nothing it does not own can slide it sideways.
+    // That independence is the whole reason the ruling's row is now its own.
     [Fact]
-    public void ClearButton_KeepsItsPlaceWhileTheHiddenActiveSignalShows()
+    public void ClearButton_KeepsItsPlaceWhileRowBadgesComeAndGo()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.ContactTypes);
 
         cut.Find("#ct_Race").Change(true);
-        cut.Find("#moreFiltersToggle").Click();   // collapse — the signal lights
+        ExpandFacets(cut, FilterFacet.ContactTypes);   // collapse — the badge lights
+        Assert.NotNull(cut.Find("#facetBadge_ContactTypes"));
 
-        var afterToggle = cut.Find("#moreFiltersToggle").NextElementSibling;
-        Assert.Equal("clearFilters", afterToggle?.Id);
-        Assert.Equal("hiddenActiveNames", afterToggle?.NextElementSibling?.Id);
+        var clearRow = cut.Find("#clearFilters").ParentElement!;
+        Assert.Equal("clearFilters", Assert.Single(clearRow.QuerySelectorAll("button")).Id);
+        Assert.Equal(
+            $"facetToggle_{RowFacets[0]}",
+            clearRow.NextElementSibling?.FirstElementChild?.Id);
     }
 
     // Clearing raises the empty config, judged by the lib's own predicates —
@@ -2347,8 +2618,10 @@ public class FilterPanelTests : BunitContext
     public async Task ClearFilters_RaisesEmptyConfig()
     {
         FilterConfig? capturedConfig = null;
-        var cut = RenderExpanded(parameters => parameters
-            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
+        var cut = RenderExpanded(
+            parameters => parameters
+                .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }),
+            FilterFacet.Players, FilterFacet.ContactTypes);
 
         cut.Find("input[placeholder='e.g. Hal, Magriel']").Input("Hal");
         cut.Find("#ct_Race").Change(true);
@@ -2360,24 +2633,25 @@ public class FilterPanelTests : BunitContext
         Assert.Empty(capturedConfig!.GetActiveFacets());
     }
 
-    // Clearing touches filter values only: the disclosure stays exactly where
-    // the user put it — expanded stays expanded…
+    // Clearing touches filter values only: every row stays exactly where the
+    // user put it — an open row stays open…
     [Fact]
-    public async Task ClearFilters_LeavesExpandedDisclosureExpanded()
+    public async Task ClearFilters_LeavesOpenRowsOpen()
     {
-        var cut = RenderExpanded();
+        var cut = RenderExpanded(FilterFacet.ContactTypes);
 
         cut.Find("#ct_Race").Change(true);
         await cut.Find("#clearFilters").ClickAsync(new());
 
-        Assert.Equal("true", cut.Find("#moreFiltersToggle").GetAttribute("aria-expanded"));
+        Assert.Equal("true", cut.Find("#facetToggle_ContactTypes").GetAttribute("aria-expanded"));
         Assert.False(cut.Find("#ct_Race").HasAttribute("checked"));
     }
 
-    // …and collapsed stays collapsed, even when the cleared values lived in
-    // hidden sections (staged via LoadConfig, so the panel was never expanded).
+    // …and a closed one stays closed, even when the cleared values lived
+    // inside it (staged via LoadConfig, so no row was ever opened). Its badge
+    // goes out, which is the row moving no further than the filter did.
     [Fact]
-    public async Task ClearFilters_LeavesCollapsedDisclosureCollapsed()
+    public async Task ClearFilters_LeavesClosedRowsClosed()
     {
         var cut = Render<FilterPanel>();
 
@@ -2386,12 +2660,12 @@ public class FilterPanelTests : BunitContext
 
         await cut.Find("#clearFilters").ClickAsync(new());
 
-        Assert.Equal("false", cut.Find("#moreFiltersToggle").GetAttribute("aria-expanded"));
-        Assert.Empty(cut.FindAll("#hiddenActiveCount"));
+        Assert.Equal("false", cut.Find("#facetToggle_ContactTypes").GetAttribute("aria-expanded"));
+        Assert.Empty(cut.FindAll("span[id^='facetBadge_']"));
     }
 
     // The gesture's whole persisted side-effect surface is one write: the
-    // empty config blob under ConfigKey. No disclosure-key write — and host
+    // empty config blob under ConfigKey. No open-rows write — and host
     // state (e.g. BgQuiz's picked folder) is structurally out of reach: the
     // panel has no parameter or interop path to any; the raised config is its
     // only channel to the host.
