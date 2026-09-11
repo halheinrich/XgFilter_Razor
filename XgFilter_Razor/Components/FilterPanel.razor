@@ -1210,7 +1210,7 @@
     // build path Apply commits through — so what the panel reds and what
     // Build() would throw on are one answer, not two encodings of it. Safe on
     // every render: GetInvalidFields never throws, judging a value not being
-    // using it. Recomputed per render like the hidden-active signal, at the
+    // using it. Recomputed per render like the active-facet set, at the
     // same accepted cost (a buffer flush plus a predicate sweep).
     private IReadOnlySet<FilterField> InvalidFields => BuildConfig().GetInvalidFields();
 
@@ -1239,9 +1239,10 @@
     // the parsed pattern. TryParse can only fail here for invalid text, which
     // the Apply gate (IsPositionPatternValid) already prevents from reaching
     // BuildConfig — the null fallback is a defensive belt, not a silent drop.
-    // (For the hidden-active signal's BuildConfig call the gate does not
-    // apply, so mid-edit unparseable text lands here as null — an inactive
-    // facet, which is the honest verdict for text Apply would refuse.)
+    // (For the row badges' BuildConfig call the gate does not apply, so
+    // mid-edit unparseable text lands here as null — an inactive facet,
+    // which is the honest verdict for text Apply would refuse, and the
+    // reason a badge never lights over a pattern that does not parse.)
     private static BoardPattern? ParsePositionPattern(string raw) =>
         string.IsNullOrWhiteSpace(raw)
             ? null

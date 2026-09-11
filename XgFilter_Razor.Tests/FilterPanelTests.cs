@@ -725,11 +725,11 @@ public class FilterPanelTests : BunitContext
         }
     }
 
-    // While collapsed, the group's badge is its hidden-active signal: "any"
-    // with no level checked (an unconstrained mode, styled neutral), "N
-    // selected" otherwise (styled primary, the hidden-active idiom). While
-    // expanded nothing is hidden, so no badge renders — same ruling as the
-    // panel-level signal.
+    // While collapsed, the group's badge says what the closed state hides:
+    // "any" with no level checked (an unconstrained mode, styled neutral), "N
+    // selected" otherwise (styled primary, the row-badge idiom). While
+    // expanded nothing is hidden, so no badge renders — the same ruling the
+    // facet rows keep one tier up.
     [Fact]
     public void LevelBadge_ReportsAnyOrCount_OnlyWhileCollapsed()
     {

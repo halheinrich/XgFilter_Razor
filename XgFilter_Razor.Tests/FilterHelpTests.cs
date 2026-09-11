@@ -54,7 +54,7 @@ public class FilterHelpTests : BunitContext
 
     // Every facet the panel offers gets a heading whose text is the lib's
     // FilterFacet [Description] (via ToLabel) — the same label the panel's
-    // section headings and the hidden-active signal use — under a stable
+    // row names and their badges use — under a stable
     // fh-* anchor id for embedding hosts to link to.
     [Fact]
     public void EveryOfferedFacet_HasAnchoredHeadingWithLibLabel()

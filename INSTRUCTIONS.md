@@ -178,7 +178,7 @@ toggle checkbox per selectable `AnalysisMode` (labelled from the enum's
 (real button, `aria-expanded` / `aria-controls`), collapsed by default and
 deliberately **unpersisted** (see Pitfalls); while collapsed it carries a
 count badge — "any" with no level checked, "N selected" otherwise — the
-hidden-active-signal ruling one tier down. The panel binds the six raw-intent
+facet rows' badge ruling one tier down. The panel binds the six raw-intent
 members (`IncludeEvaluations`+`EvaluationLevels`, `IncludeRollouts`+
 `RolloutLevels`, `IncludeBookRollouts`+`BookRolloutLevels`) verbatim and
 **never** derives the clause union — that SSOT is `FilterConfig.Build()`
@@ -240,30 +240,49 @@ The placeholder's examples, the hint line, and both verdicts all render
 `MatchScoreToken.MoneyWithJacoby` / `MoneyWithoutJacoby` /
 `RetiredMoney` — see Pitfalls.
 
-**Information hierarchy** (dogfooding-driven): the error-range section is
-first and always visible — it is the panel's most-used control. The other
-eight sections (player names, decision type, match scores, move number
-range, contact type, analysis depth, dice rolls, position pattern) sit
-behind a single disclosure, default hidden. The disclosure is an honest
-control — a real `<button>` carrying `aria-expanded` / `aria-controls`
-over an always-rendered `#moreFilters` region whose children render only
-while expanded (absent from the DOM when collapsed, not styled away).
-The expand/collapse choice is the user's, persisted under its own
-localStorage key (`xg_moreFiltersExpanded`, values `"true"`/`"false"`;
-anything else restores to the default-hidden posture) — never inside the
-config blob, and never moved by `LoadConfig` or Clear filters.
+**Information hierarchy** (dogfooding-driven, re-ruled in
+`halheinrich/backgammon#193`): the error-range section is first and always
+visible — it is the panel's most-used control. Each of the other eight
+facets is **its own collapsible row**, one tier, directly beneath it and in
+`FilterFacet` declaration order (player names, decision type, match scores,
+move number range, contact type, analysis depth, dice rolls, position
+pattern). Every row is an honest disclosure — a real `<button>`
+(`#facetToggle_<Facet>`) carrying `aria-expanded` / `aria-controls` over an
+always-rendered `#facet_<Facet>` region whose children render only while
+expanded (absent from the DOM when collapsed, not styled away), named by the
+facet's own `[Description]` via `ToLabel()`, with a decorative `+`/`−` glyph
+marked `aria-hidden` because `aria-expanded` already carries the state. Each
+section's bracketed `<small class="text-muted">` hint renders inside the
+expanded body and never in the collapsed row: the heading it used to sit
+beside is now the button's name, so nothing is said twice.
 
-**Hidden-active signal**: while collapsed, the toggle carries a count
-badge plus the names of any hidden sections holding active filters. It is
-computed from the live edit buffers through the same build path Apply
-uses — `BuildConfig().GetActiveFacets()` minus `FilterFacet.ErrorRange`
-(the always-visible facet) — never by re-inspecting config fields. The
-facet labels are the section headings by the lib's design (`FilterFacet`
-`[Description]`s via `ToLabel()`), so the signal names exactly the
-sections the user will find on expanding. Feeding from the live buffers
-makes it honest at rest after restore, Apply, Clear filters, and
-`LoadConfig` staging — and live mid-edit: it tracks staged values the
-moment they are typed, not on Apply.
+Which rows are open is the user's, persisted under its own localStorage key
+(`xg_expandedFilters`, a JSON array of `FilterFacet` member names written in
+row order) — never inside the config blob, and never moved by `LoadConfig`
+or Clear filters. Restore is **all-or-nothing**: anything that is not an
+array of names a row answers to — an unknown name, a `FilterFacet` with no
+row, a numeric token, malformed JSON — restores every row collapsed rather
+than salvaging part of it. The panel only ever writes row names, so anything
+else is corruption, and half-honouring it would open a set the user never
+chose. The key this replaced is neither read nor migrated: a display
+preference that resets once is not data.
+
+**Row badges**: while collapsed, a row carries a badge
+(`#facetBadge_<Facet>`) exactly when its facet holds an active filter. The
+badge divides in two. Its **presence** is the lib's ruling, computed from the
+live edit buffers through the same build path Apply uses —
+`BuildConfig().GetActiveFacets()` — never by re-inspecting config fields or
+the buffer behind the controls, which would be a second encoding of an
+activation predicate. Feeding from the live buffers makes it honest at rest
+after restore, Apply, Clear filters and `LoadConfig` staging — and live
+mid-edit: it tracks staged values the moment they are typed, not on Apply.
+Its **words** are the panel's display concern: `set` for the facets chosen by
+typing into them (player names, match scores, move number range, position
+pattern), where a count of boxes filled would say nothing, and `N selected`
+for the facets chosen by ticking options (decision type — one by
+construction — contact type, analysis depth's checked modes, dice rolls).
+Expanded, no badge renders: the controls themselves say everything it
+could — the level groups' ruling one tier down.
 
 The component emits filter results only on **Apply** (or **Clear
 filters**) — not on every keystroke. On Apply, the component:
@@ -326,7 +345,7 @@ they are exact mirrors:
 
 - `void ForgetCommitted()` — for a panel kept mounted across a source
   change: it drops the last-committed config (buffers, persisted state,
-  and disclosure all untouched) so Apply re-arms and
+  and open rows all untouched) so Apply re-arms and
   `OnAppliedStateChanged` re-reports (necessarily `null`) through the
   normal path.
 - `void SeedCommitted(FilterConfig)` — for a fresh mount resuming an
@@ -349,7 +368,7 @@ to a server send `cfg` as JSON. Single callback by design — see Pitfalls
 for the encapsulation rationale.
 
 `OnAfterRenderAsync(firstRender: true)` rehydrates both localStorage keys
-once on first render — the disclosure choice, then the config — and calls
+once on first render — the open-row set, then the config — and calls
 `StateHasChanged`. Each restore double-checks its guard
 (`_disclosureTouched` / `_externalConfigLoaded`) after its await, so a
 user toggle or a host `LoadConfig` landing mid-interop is never
@@ -370,8 +389,8 @@ buffer-affecting gesture (edit, `LoadConfig` staging, Clear filters) or a
 commit. Dismissal is one-way for the app lifetime, which is what makes a
 remount within a setup quiet after an edit while an untouched remount
 re-shows the same notice (navigation changes nothing, in both directions).
-Disclosure toggles are navigation and keep it; `ForgetCommitted` is
-choreography and keeps it (see Pitfalls).
+Row and level-group toggles are navigation and keep it; `ForgetCommitted`
+is choreography and keeps it (see Pitfalls).
 
 ### `NamedEntriesPanel` component
 
@@ -438,7 +457,7 @@ participating in it. Structured for embedding: one
 rendered from a named constant on the component, never a re-typed
 literal — facet heading text from the lib's `FilterFacet`
 `[Description]`s via `ToLabel()`, so help titles, panel section headings,
-and the hidden-active signal all name a facet identically. The depth section
+and the row badges all name a facet identically. The depth section
 explains the union semantics (each checked mode admits its decisions;
 more checked = more matched; nothing checked = facet off), the
 inner-level distinction per mode, and the per-mode **Analysis level**
@@ -457,12 +476,12 @@ their UI returns.
 The chrome section, **Setting and applying filters**
 (`fh-using-the-panel`), sits before the facets — it is the frame a reader
 needs in order to find and commit any of them. It documents the
-disclosure and its hidden-active signal (a filter set earlier is never
-quietly out of sight), Apply as the only commit and both of its disabled
+filter rows and their badges (a filter set earlier is never quietly out of
+sight), Apply as the only commit and both of its disabled
 states (nothing changed, which the panel says under the button; and a
 value that is not usable as a filter, which the offending box marks and
 explains where it was typed), and Clear filters as the one-gesture return
-to the unfiltered set that leaves the disclosure alone. The
+to the unfiltered set that leaves the open rows alone. The
 reject-and-explain posture is documented as behavior — *nothing is
 guessed at or quietly ignored* — while each rule stays with its facet:
 the error facet's own section carries the non-negative / ordered-bounds
@@ -480,7 +499,7 @@ A final non-facet section, **What the panel remembers**
 (`StorageSectionAnchorId`), is the storage-assurance copy: it states in
 user terms that the panel saves its settings in the reader's own browser
 on their own machine and uploads nothing, and it names both
-`localStorage` entries — the applied config and the disclosure
+`localStorage` entries — the applied config and the open-row
 preference — so a reader can verify them in devtools. Both key names are
 **rendered from `FilterPanel`'s own constants** (`ConfigKey` /
 `DisclosureKey`, `internal` for exactly this), never written as prose
@@ -710,7 +729,7 @@ saved-filters arc):
   `OnAppliedStateChanged` fires once — `null` normally, or the committed
   config when the load stages exactly it — and the first-render
   localStorage restore is suppressed so a host-startup load can't be
-  clobbered. Never moves the disclosure.
+  clobbered. Never opens or closes a row.
 - `bool TryGetEditedConfig(out FilterConfig?)` — snapshots the live
   buffers (including unapplied edits) for host-driven save-as. Gate is
   exactly Apply's validity gate (`IsCommittable`): fails on non-blank,
@@ -894,15 +913,15 @@ producer-side, so neither widens what consumers can see.
   it in a consumer as a silent-drift hazard. The panel must not pre-compute
   clauses or a mode list; it binds the six members verbatim and lets
   `Build()` own the semantics.
-- **Level-group disclosure state is deliberately unpersisted.** The
-  panel-level disclosure persists under `xg_moreFiltersExpanded` because its
-  collapsed state hides *which* sections hold what — the hidden-active signal
-  compresses that to a count-plus-names summary, and the user's chosen
-  layout is worth remembering across sessions. A level group's collapsed
-  state hides only one thing — which levels are checked — and its badge
-  ("any" / "N selected") already carries that in full, so remembering the
-  open state would buy no information at the cost of three more
-  localStorage keys and their interop. Each group therefore mounts
+- **Level-group disclosure state is deliberately unpersisted.** The facet
+  rows persist under `xg_expandedFilters` because which rows a user works in
+  is a chosen layout worth remembering across sessions, and a closed row
+  hides a whole facet's controls — the badge compresses that to `set` /
+  `N selected`, not to what is in them. A level group's collapsed state hides
+  only one thing — which levels are checked — and its badge ("any" /
+  "N selected") already carries that in full, so remembering the open state
+  would buy no information at the cost of three more localStorage keys and
+  their interop. Each group therefore mounts
   collapsed, and toggling it is navigation: no `OnAppliedStateChanged`, no
   write.
 - **Unchecking a mode keeps its checked levels.** The buffer (and the
@@ -968,8 +987,8 @@ producer-side, so neither widens what consumers can see.
   the panel's own keys is producer-owned too — a host states its own
   data ownership and points into the storage section for the panel's
   half, linking with `FilterHelp.StorageSectionAnchorId` rather than a
-  literal. **It covers the chrome as well as the facets**: the disclosure
-  and its hidden-active signal, Apply's two disabled states, Clear
+  literal. **It covers the chrome as well as the facets**: the filter
+  rows and their badges, Apply's two disabled states, Clear
   filters. Those are the panel's behavior, not the app's, so a host
   describing them is the same drift hazard one tier up — app-level
   framing means *where the panel sits in this app and what pressing Apply
@@ -991,31 +1010,40 @@ producer-side, so neither widens what consumers can see.
   needs to wrap `FilterConfig` with output-format options (CSV / PPTX
   selection, output paths, etc.) defines that wrapper in the consumer,
   not here. `FilterConfig` is purely the filter selection.
-- **Disclosure state never goes into `xg_filter_config`.** The panel
+- **Which rows are open never goes into `xg_filter_config`.** The panel
   persists under two keys with different owners: `xg_filter_config` is
-  the wire-traveling `FilterConfig` DTO whose JSON shape the lib owns,
-  and `xg_moreFiltersExpanded` is UI preference owned by this panel.
-  Folding visibility into the config blob would make a saved or loaded
-  filter drag the disclosure around — expanding is the user's gesture,
-  never the config's.
-- **The hidden-active signal is computed from `GetActiveFacets()`, never
-  by re-inspecting config fields or edit buffers.** The activation
-  predicates are the lib's SSOT (the `FacetRules` table behind both
-  `Build()` and `GetActiveFacets()` — the `DecisionFilterSet.IsEmpty`
-  ruling); the panel only excludes `ErrorRange` as the always-visible
-  facet. The signal reads the live buffers via `BuildConfig()`, so it is
-  honest for everything the panel can apply. The shelved facets
-  (`PositionTypes` / `PlayTypes`) are outside that scope by pre-existing
-  panel behavior — `HydrateFrom` / `BuildConfig` ignore them — so a stale
-  `xg_filter_config` blob carrying them is not surfaced by the signal;
-  since the panel is the only apply path, they also can never become
-  active through it.
+  the wire-traveling `FilterConfig` DTO whose JSON shape the lib owns — so
+  the panel never touches a serializer for it — and `xg_expandedFilters` is
+  UI preference owned by this panel, which is the one value it *does*
+  serialize itself, because the shape is nobody else's. Folding visibility
+  into the config blob would make a saved or loaded filter drag the rows
+  around — opening one is the user's gesture, never the config's.
+- **A row badge's presence is computed from `GetActiveFacets()`, never by
+  re-inspecting config fields or the edit buffer behind the controls.** The
+  activation predicates are the lib's SSOT (the `FacetRules` table behind
+  both `Build()` and `GetActiveFacets()` — the `DecisionFilterSet.IsEmpty`
+  ruling), and a badge that read its own buffer would be a second encoding
+  of one of them. The states where the two answers differ are real and
+  reachable by typing, which is what makes this a live hazard rather than a
+  style rule: position-pattern text that does not parse builds as "no
+  pattern", a depth level list whose mode toggle is off is inert by the
+  lib's guarantee, and a player list of nothing but separators splits to no
+  tokens — in each the buffer is non-empty and the facet is off. The badge
+  reads the live buffers via `BuildConfig()`, so it is honest for everything
+  the panel can apply. `ErrorRange` needs no exclusion any more: it has no
+  row, so nothing it does can badge one. The shelved facets
+  (`PositionTypes` / `PlayTypes`) have no row either and are outside scope by
+  pre-existing panel behavior — `HydrateFrom` / `BuildConfig` ignore them —
+  so a stale `xg_filter_config` blob carrying them badges nothing; since the
+  panel is the only apply path, they also can never become active through
+  it. The badge's *words* are the opposite kind of fact — panel-owned
+  display copy, chosen per facet — and live in `FacetBadgeText`.
 - **Clear filters touches filter values only.** It hydrates the buffers
   to defaults and persists + raises the empty config — nothing else. No
   host state (the panel has no parameter or interop path to any — e.g.
   BgQuiz's picked folder is out of reach by construction; keep it that
-  way) and no disclosure movement. `LoadConfig` likewise stages values
-  without moving the disclosure; visibility changes only on the user's
+  way) and no row movement. `LoadConfig` likewise stages values without
+  opening or closing a row; which rows are open changes only on the user's
   toggle.
 - **The saved-filters file names are `public` — deliberately opposite to
   the internal storage-key rule.** `FilterPanel.ConfigKey` /
@@ -1255,8 +1283,8 @@ producer-side, so neither widens what consumers can see.
   one. Three properties are load-bearing:
   - **Dismissal is one-way per app lifetime and rides on user gestures
     only** — buffer edits, `LoadConfig` staging, and commits dismiss;
-    disclosure toggles (navigation) and `ForgetCommitted` (source-change
-    choreography) do not. The `ForgetCommitted` half matters for host
+    row and level-group toggles (navigation) and `ForgetCommitted`
+    (source-change choreography) do not. The `ForgetCommitted` half matters for host
     symmetry: a gated host's source change crosses an unmount and runs no
     panel code, so if the in-place rule dismissed, the notice's fate would
     differ by host mechanics. Hence the panel's
