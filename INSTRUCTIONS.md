@@ -256,6 +256,17 @@ section's bracketed `<small class="text-muted">` hint renders inside the
 expanded body and never in the collapsed row: the heading it used to sit
 beside is now the button's name, so nothing is said twice.
 
+Every id in a row is built from the facet's enum member name — one mould,
+`facetToggle_`, `facet_`, `facetBadge_`, and `facetHint_` where a hint is
+referenced — which is what lets a control **name itself by reference** to its
+own header rather than repeating the heading. `#positionPattern` does exactly
+that (`aria-labelledby` at the header, `aria-describedby` at the hint), and
+its hint's wrapper is a plain container: a `<label for>` whose text is the
+hint would have made the hint the field's *name*. It is the only input on the
+panel with an accessible name; the others have none, which predates this arc
+and is booked as `halheinrich/backgammon#196`. The regions deliberately carry
+no `role="group"` — unruled, and the level groups do not carry it either.
+
 Which rows are open is the user's, persisted under its own localStorage key
 (`xg_expandedFilters`, a JSON array of `FilterFacet` member names written in
 row order) — never inside the config blob, and never moved by `LoadConfig`

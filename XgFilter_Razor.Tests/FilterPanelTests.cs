@@ -2151,8 +2151,86 @@ public class FilterPanelTests : BunitContext
             var toggle = cut.Find($"#facetToggle_{facet}");
             var glyph = toggle.QuerySelector("[aria-hidden='true']");
             Assert.NotNull(glyph);
-            Assert.Equal(facet.ToLabel(), toggle.TextContent.Replace(glyph!.TextContent, "").Trim());
+            Assert.Equal(facet.ToLabel(), HeaderName(toggle));
         }
+    }
+
+    // A row header's name as an assistive technology would compute it: the
+    // element's text with its aria-hidden decoration left out. bUnit has no
+    // accessible-name implementation, so the exclusion is done here — which is
+    // the whole reason the glyph carries aria-hidden in the first place.
+    private static string HeaderName(IElement header) =>
+        header.TextContent
+              .Replace(header.QuerySelector("[aria-hidden='true']")?.TextContent ?? string.Empty,
+                       string.Empty)
+              .Trim();
+
+    // The position-pattern field takes its name by reference from the row's
+    // own header, so the name a user hears is the facet's label — the lib's,
+    // via ToLabel() — and not the hint sitting above the box. The hint is its
+    // description instead. Both halves are resolved through the DOM the way a
+    // screen reader would resolve them (follow the id, read the target), never
+    // by asserting the attribute string against a literal: a typo'd id would
+    // satisfy a string comparison while naming nothing at all.
+    //
+    // The described-by half is pinned as identity, not as words — the target
+    // must BE the row's hint element — because the wording is the panel's to
+    // change and this suite pins structure, never copy.
+    [Fact]
+    public void PositionPatternInput_IsNamedByItsRowHeader_AndDescribedByItsHint()
+    {
+        var cut = RenderExpanded(FilterFacet.PositionPattern);
+
+        var input = cut.Find("#positionPattern");
+
+        var namedBy = cut.Find($"#{input.GetAttribute("aria-labelledby")}");
+        Assert.Equal(FilterFacet.PositionPattern.ToLabel(), HeaderName(namedBy));
+
+        var describedBy = cut.Find($"#{input.GetAttribute("aria-describedby")}");
+        // Identity by id rather than by instance: bUnit hands back a fresh
+        // wrapper per Find, so two lookups of one node are never the same
+        // object. The claim still holds — the element the row's hint selector
+        // reaches is the one aria-describedby names.
+        var hint = cut.Find($"#facet_{FilterFacet.PositionPattern} small.text-muted");
+        Assert.Equal(hint.Id, describedBy.Id);
+        Assert.NotEmpty(describedBy.TextContent.Trim());
+
+        // The lie being removed: no label may claim to name this field, since
+        // the only label near it carries the hint.
+        Assert.Empty(cut.FindAll("label[for='positionPattern']"));
+    }
+
+    // Every id an aria attribute points at must actually exist: a dangling
+    // reference costs the control its name or its description silently, which
+    // is precisely the failure the name-by-reference idiom risks and the one
+    // no rendering check would show. Swept over the whole panel with every row
+    // open and every depth mode checked, so the level groups' aria-controls
+    // are in scope too.
+    [Fact]
+    public void EveryAriaReference_ResolvesToAnElementInTheDom()
+    {
+        var cut = RenderExpanded(RowFacets);
+        foreach (var mode in SelectableModes)
+            cut.Find($"#md_{mode}").Change(true);
+
+        var references =
+            from attribute in new[] { "aria-controls", "aria-labelledby", "aria-describedby" }
+            from element in cut.FindAll($"[{attribute}]")
+            from id in element.GetAttribute(attribute)!.Split(
+                ' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            select (element.Id, attribute, id);
+
+        var swept = 0;
+        foreach (var (from, attribute, id) in references)
+        {
+            Assert.True(cut.FindAll($"#{id}").Count == 1,
+                $"{from}'s {attribute} names '{id}', which resolves to no single element.");
+            swept++;
+        }
+
+        // The sweep found something to sweep: eight row toggles plus the
+        // pattern field's two references, at a minimum.
+        Assert.True(swept >= RowFacets.Length + 2, $"only {swept} references swept");
     }
 
     // A row round-trips, and only that row: expanding one leaves its

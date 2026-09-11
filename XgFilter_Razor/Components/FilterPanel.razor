@@ -149,6 +149,11 @@
            button's own aria-expanded already says which way the row sits. The
            button's accessible name is the facet's own label — the lib's
            FilterFacet [Description] via ToLabel(), never a literal here.
+           Every id here is built from the facet's enum member name
+           (facetToggle_, facet_, facetBadge_, and facetHint_ where a row's
+           hint is referenced), one mould, so a control inside a row can name
+           itself by pointing at its header instead of repeating the heading —
+           which is exactly what the position-pattern field does.
 
            The badge divides in two, deliberately. Its PRESENCE is the lib's
            ruling: a row badges exactly when GetActiveFacets() names its facet,
@@ -507,13 +512,25 @@
            indices plus the named borne-off tokens — but does not re-implement it:
            BoardPattern remains the single source of truth for what parses, and a
            wrong-signed borne-off bound (say [off,,-2]) fails TryParse and lands
-           in the same invalid-field state as any other unparseable text. *@
+           in the same invalid-field state as any other unparseable text.
+
+           The one input on the panel with an accessible name, and it gets it
+           by reference rather than from a label: the row's header button
+           already carries the facet's name, so aria-labelledby points at it
+           and aria-describedby points at the hint. The wrapper below is a
+           plain container now — its `for` is gone, because a label whose text
+           is the hint would have made the hint the field's name, which is the
+           lie this replaces. The other seven rows' inputs carry no accessible
+           name at all; that predates this arc and is booked as
+           halheinrich/backgammon#196, not fixed here. *@
         @FacetRow(FilterFacet.PositionPattern, @<div class="ms-3">
-            <label class="form-label" for="positionPattern">
-                <small class="text-muted">(checker ranges by location; blank = no pattern filter)</small>
+            <label class="form-label">
+                <small class="text-muted" id="facetHint_PositionPattern">(checker ranges by location; blank = no pattern filter)</small>
             </label>
             <input id="positionPattern"
                    class="form-control @(IsPositionPatternValid ? string.Empty : "is-invalid")"
+                   aria-labelledby="facetToggle_PositionPattern"
+                   aria-describedby="facetHint_PositionPattern"
                    placeholder="e.g. [6,2,] [5,,-2] [opp-off,,-2]"
                    value="@_positionPatternText"
                    @oninput="e => { _positionPatternText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
