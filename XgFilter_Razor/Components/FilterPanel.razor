@@ -1144,7 +1144,8 @@
     // metadata, never a reflection-bound JsonSerializer overload: this
     // assembly is trimmable, and a trimmed host (BgQuiz) refuses the
     // reflection path at publish — halheinrich/backgammon#193 shipped it once
-    // and broke that publish.
+    // and broke that publish. The trim analyzer in this project's own build
+    // now refuses it first, as IL2026 under TreatWarningsAsErrors.
     private string SerializeExpandedFacets() =>
         JsonSerializer.Serialize(
             RowFacets.Where(_expandedFacets.Contains).Select(f => f.ToString()).ToArray(),

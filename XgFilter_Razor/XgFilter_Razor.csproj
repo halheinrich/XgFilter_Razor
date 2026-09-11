@@ -9,6 +9,19 @@
     <SupportedPlatform Include="browser" />
   </ItemGroup>
 
+  <!-- This library's half of the trim gate (halheinrich/backgammon#129, taken
+       up here in halheinrich/backgammon#193): the assembly declares itself
+       trim-compatible and runs the trim analyzer in its own build, so a
+       reflection-serialization regression becomes a build error *here*
+       (TreatWarningsAsErrors) rather than a publish-time failure in BgQuiz,
+       which is where that arc's first leg was caught. Per-project deliberately —
+       the test project is not a shipped surface. IsTrimmable is pinned by
+       XgFilterRazorTrimPostureTests. -->
+  <PropertyGroup>
+    <IsTrimmable>true</IsTrimmable>
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+  </PropertyGroup>
+
   <ItemGroup>
     <!-- Test-only. FilterPanel's localStorage keys are internal so FilterHelp can
          render them in user copy from the one constant; the wiring test that pins

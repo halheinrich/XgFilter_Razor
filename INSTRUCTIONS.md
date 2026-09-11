@@ -1029,6 +1029,19 @@ producer-side, so neither widens what consumers can see.
   serialize itself, because the shape is nobody else's. Folding visibility
   into the config blob would make a saved or loaded filter drag the rows
   around — opening one is the user's gesture, never the config's.
+- **Anything this project serializes goes through `XgFilterRazorJsonContext`,
+  never a reflection-bound `JsonSerializer` overload.** The assembly is
+  `IsTrimmable` and runs the trim analyzer in its own build
+  (`halheinrich/backgammon#129`'s gate, this project's half), so a
+  `JsonSerializer.Serialize<T>(value)` / `Deserialize<T>(json)` call is
+  IL2026 and, under `TreatWarningsAsErrors`, a build error here. That is the
+  point: the row set first shipped on those overloads
+  (`halheinrich/backgammon#193`), this build said nothing because it had no
+  analyzer, and BgQuiz's trimmed publish is where it failed. A new value
+  gets a `[JsonSerializable]` root on the context (internal; metadata-only
+  generation, which `XgFilterRazorTrimPostureTests` pins alongside
+  `IsTrimmable`) and a `JsonTypeInfo` overload at the call site. Types whose shape the lib owns
+  still go through the lib's own document trio, never through this context.
 - **A row badge's presence is computed from `GetActiveFacets()`, never by
   re-inspecting config fields or the edit buffer behind the controls.** The
   activation predicates are the lib's SSOT (the `FacetRules` table behind
