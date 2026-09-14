@@ -94,10 +94,10 @@ resulting `FilterConfig` via an `EventCallback`.
 
 ### `FilterSurface` component — the consumer surface
 
-The one component hosts embed (umbrella arc #63/#78 Step 2): it owns
-`FilterPanel` + the saved-filters mount of `NamedEntriesPanel`, the
-`NamedEntriesSurface` preset that mount renders, and the interaction
-wiring end to end —
+The one component hosts embed (umbrella arc halheinrich/backgammon#63 /
+halheinrich/backgammon#78 Step 2): it owns `FilterPanel` + the saved-filters
+mount of `NamedEntriesPanel`, the `NamedEntriesSurface` preset that mount
+renders, and the interaction wiring end to end —
 load→stage, save/save-as→snapshot-or-refuse, delete, applied-state
 mediation onto the host's `AppliedFilter` holder, the saved-filters degrade
 notices, and the source-change rule. Hosts bind the holder (host-registered,
@@ -124,15 +124,15 @@ the context — nothing else** (ruled pin): a remount over an unchanged
 source leaves an already-applied holder untouched and the host's gate
 armed, which is the holder's whole purpose.
 
-**The first-mount reconcile** (#82) is the other half of that survival.
-The panel's committed config dies each mount while the holder does not, so
-a remount over an already-filtered source would restore the applied
-selection as merely *staged* and re-arm Apply with nothing to do. At its
-first render the composite seeds the panel's committed config from the
-holder — `SeedCommitted`, the mirror of the source-change rule's
-`ForgetCommitted` — via the keyed lookup `ConfigFor(Source)`, which yields
-a config exactly when one is applied *and* it belongs to the current
-`Source`. It runs from
+**The first-mount reconcile** (halheinrich/backgammon#82) is the other
+half of that survival. The panel's committed config dies each mount while
+the holder does not, so a remount over an already-filtered source would
+restore the applied selection as merely *staged* and re-arm Apply with
+nothing to do. At its first render the composite seeds the panel's
+committed config from the holder — `SeedCommitted`, the mirror of the
+source-change rule's `ForgetCommitted` — via the keyed lookup
+`ConfigFor(Source)`, which yields a config exactly when one is applied
+*and* it belongs to the current `Source`. It runs from
 `OnAfterRenderAsync(firstRender: true)`, not the first parameters-set,
 because `@ref` is null until after the first render. The seed is
 **silent** (no `OnAppliedStateChanged`) and comes **from the holder, never
@@ -412,20 +412,20 @@ the queued mix-saves document are two mounts of one component
 from what is bound to `Document`; nothing spells them at a mount site.
 The panel owns no document state and mutates nothing: every gesture is
 raised as a request — `OnLoadRequested`, `OnSaveRequested` (per-row Save,
-#38), `OnSaveAsRequested`, `OnDeleteRequested`, each carrying the name —
-for the host to mediate. The host calls `With` / `Without`, persists
-wherever it persists, and passes the **new** collection instance back
-down through `Document`; the reference change is also the panel's
-confirmation channel (it cancels pending inline confirms and clears the
-typed save-as name). Selection is deliberately stateless — the "current"
-value lives in whatever editor the host wires up (for filters,
-`FilterPanel`'s edit buffers), so a highlighted row would be a second
-source of truth that lies. Every destructive gesture runs through an
-inline confirm in the panel — a row's Save, a save-as under an existing
-name, and delete; `Contains` keeps the case-insensitive name rule in
-the lib. A row's Save overwrites that entry with the current value — the
-same live-edit snapshot save-as takes, the name coming from the row
-instead of the input — and its confirm copy says so ("Overwrite
+halheinrich/backgammon#38), `OnSaveAsRequested`, `OnDeleteRequested`,
+each carrying the name — for the host to mediate. The host calls `With` /
+`Without`, persists wherever it persists, and passes the **new**
+collection instance back down through `Document`; the reference change is
+also the panel's confirmation channel (it cancels pending inline confirms
+and clears the typed save-as name). Selection is deliberately stateless —
+the "current" value lives in whatever editor the host wires up (for
+filters, `FilterPanel`'s edit buffers), so a highlighted row would be a
+second source of truth that lies. Every destructive gesture runs through
+an inline confirm in the panel — a row's Save, a save-as under an
+existing name, and delete; `Contains` keeps the case-insensitive name
+rule in the lib. A row's Save overwrites that entry with the current
+value — the same live-edit snapshot save-as takes, the name coming from
+the row instead of the input — and its confirm copy says so ("Overwrite
 '\<name\>' with \<the surface's noun\>?"), deliberately distinguishable
 from the save-as overwrite prompt ("Overwrite
 '\<name\>'?"). A row holds one confirm slot: requesting Save supersedes a
@@ -529,8 +529,9 @@ Plain C# beside the components — namespace `XgFilter_Razor` (root), while
 components stay in `XgFilter_Razor.Components`. Hoisted from BgQuiz's
 app-side originals (its `AppliedFilter` / `SavedFiltersStore`) so both
 consumer apps share one encoding of the filter interaction lifecycle
-(umbrella arc #63 / #78 / #38); hosts register these at whatever lifetime
-their gates must survive (BgQuiz: Scoped), and `FilterSurface` drives them.
+(umbrella arc halheinrich/backgammon#63 / halheinrich/backgammon#78 /
+halheinrich/backgammon#38); hosts register these at whatever lifetime their
+gates must survive (BgQuiz: Scoped), and `FilterSurface` drives them.
 
 - **`AppliedFilter`** — holder for the config the user deliberately
   applied, **keyed to the source it was applied against**: one nullable
@@ -773,10 +774,10 @@ Parameters (all callbacks `[EditorRequired]`, as are `Document` and
 - `EventCallback<string> OnLoadRequested` / `OnSaveRequested` /
   `OnSaveAsRequested` / `OnDeleteRequested` — request-only gestures
   carrying the entry name; the panel mutates nothing. `OnSaveRequested`
-  is the per-row Save (#38): overwrite that entry with the host editor's
-  current live state — the host mediates it exactly as save-as (for
-  filters, `TryGetEditedConfig` → `With` → persist), the name coming from
-  the row.
+  is the per-row Save (halheinrich/backgammon#38): overwrite that entry
+  with the host editor's current live state — the host mediates it
+  exactly as save-as (for filters, `TryGetEditedConfig` → `With` →
+  persist), the name coming from the row.
 - `bool CanPersist` (default `true`) + `string? PersistDisabledReason` —
   gate Save/Save-as/Delete as one switch when the host cannot persist;
   Load stays enabled.
@@ -1201,19 +1202,19 @@ producer-side, so neither widens what consumers can see.
   source actually changed. A host whose source is derived from facts it
   restores asynchronously must withhold the composite until that derivation
   is settled rather than mount it against a placeholder;
-  `ExtractFromXgToCsv`'s `_restoreComplete` gate (#85) is the consumer-side
-  statement of this rule.
+  `ExtractFromXgToCsv`'s `_restoreComplete` gate
+  (halheinrich/backgammon#85) is the consumer-side statement of this rule.
 - **The first-mount reconcile seeds from the holder — NEVER from
-  `localStorage`** (ruled, #82). Apply is offered only when there is
-  something to do: a filter change or a source change. A remount over an
-  already-filtered source has neither, so the composite seeds the fresh
-  panel's committed config from `AppliedFilter` at its first render. The
-  tempting shortcut — seed from the restored `localStorage` selection,
-  which the panel already has in hand — is a **lock-out**. That blob
-  survives a full browser reload; the holder deliberately does not. After a
-  reload, storage-seeding would disable Apply while nothing is applied:
-  the host's start gate closed and the one control that could re-open it
-  greyed out. Pinned from the other side by
+  `localStorage`** (ruled, halheinrich/backgammon#82). Apply is offered
+  only when there is something to do: a filter change or a source change. A
+  remount over an already-filtered source has neither, so the composite
+  seeds the fresh panel's committed config from `AppliedFilter` at its
+  first render. The tempting shortcut — seed from the restored
+  `localStorage` selection, which the panel already has in hand — is a
+  **lock-out**. That blob survives a full browser reload; the holder
+  deliberately does not. After a reload, storage-seeding would disable
+  Apply while nothing is applied: the host's start gate closed and the one
+  control that could re-open it greyed out. Pinned from the other side by
   `Mount_EmptyHolder_WithRestorableStorage_LeavesApplyEnabled`, which is
   exactly the test that fails if anyone ever makes that swap.
   Three more properties are load-bearing:
@@ -1236,7 +1237,7 @@ producer-side, so neither widens what consumers can see.
   because cleanliness is an equality comparison re-evaluated by the
   restore's `StateHasChanged`, not a latched flag — one more reason that
   comparison must never become a flag.
-  **Reachability note** (re-checked after #85, and the reason the keyed
+  **Reachability note** (re-checked after halheinrich/backgammon#85, and the reason the keyed
   lookup's decline path is defence in depth rather than the load-bearing
   part): neither host can present a fresh mount with a holder keyed to a
   *different* source — but each for its own host-side reason, and in
@@ -1244,7 +1245,7 @@ producer-side, so neither widens what consumers can see.
   `HasFiles`, so every source change crosses an unmount, and
   `EndCurrentSetupAsync` — which runs at the pick click, not after it —
   clears the holder first. ExtractFromXgToCsv clears the mismatched holder
-  itself: since #85 its first-render restore calls `AppliedFilter.Clear()`
+  itself: since halheinrich/backgammon#85 its first-render restore calls `AppliedFilter.Clear()`
   whenever the holder carries nothing keyed to the source it just restored,
   and that restore completes *before* the page lets the composite mount
   (`_restoreComplete`). So the holder the composite meets on its first
@@ -1270,13 +1271,13 @@ producer-side, so neither widens what consumers can see.
   cannot clear a host-registered `AppliedFilter` holder that outlives the
   page, so such a host must keep an `AppliedFilter.Clear()` at its
   setup-ending gesture (BgQuiz's `EndCurrentSetupAsync` is the precedent).
-  Since #82 that `Clear()` also carries the re-arm: the fresh mount
-  reconciles from the holder, so a holder left applied would keep Apply
-  disabled for the *new* source. Both hosts clear a mismatched holder
-  before any fresh mount can see it — at different moments, by different
-  mechanisms — which is why the reconcile cannot adopt a stale config; see
-  the reachability note in the reconcile entry above, and the two gate
-  shapes below.
+  Since halheinrich/backgammon#82 that `Clear()` also carries the re-arm:
+  the fresh mount reconciles from the holder, so a holder left applied
+  would keep Apply disabled for the *new* source. Both hosts clear a
+  mismatched holder before any fresh mount can see it — at different
+  moments, by different mechanisms — which is why the reconcile cannot
+  adopt a stale config; see the reachability note in the reconcile entry
+  above, and the two gate shapes below.
   Two gate shapes exist and only one of them is this bullet's subject.
   BgQuiz's is *ongoing*: the `@if` tracks source existence for the page's
   whole life, so every source change crosses an unmount. Extract's
@@ -1284,11 +1285,12 @@ producer-side, so neither widens what consumers can see.
   composite until the restore has settled `Source`, then mounts it and
   leaves it mounted. `Source` going null afterwards — the user blanks the
   folder path — unmounts nothing, so Extract remains an always-mounted host
-  for every rule in #78 and the in-place source-change rule still owns its
-  source changes. Do not read the one-shot gate as buying remount-for-free.
-  Nor does it excuse the `Clear()`: a DI-scoped holder outlives the page in
-  either host, and nothing else drops a config keyed to a source this
-  visit no longer has, so Extract owes the same line and since #85 carries
+  for every rule in halheinrich/backgammon#78 and the in-place
+  source-change rule still owns its source changes. Do not read the
+  one-shot gate as buying remount-for-free. Nor does it excuse the
+  `Clear()`: a DI-scoped holder outlives the page in either host, and
+  nothing else drops a config keyed to a source this visit no longer has,
+  so Extract owes the same line and since halheinrich/backgammon#85 carries
   it inside the restore. Read the pair as gated-ongoing plus `Clear()` at
   the setup-ending gesture (BgQuiz), or always-mounted plus `Clear()` in
   the mount-time restore (Extract) — neither host gets to skip it. Leave

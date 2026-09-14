@@ -120,7 +120,7 @@ public class NamedEntriesPanelTests : BunitContext
         Assert.NotNull(FindRowButton(cut, "Race", "Delete"));
     }
 
-    // ── Per-row Save (#38) ──────────────────────────────────────────────────
+    // ── Per-row Save (halheinrich/backgammon#38) ──────────────────────────────────────────────────
     // Each row's Save overwrites that saved filter with the current filters —
     // the same live-edit-buffers snapshot save-as takes, with the name coming
     // from the row instead of the input.
@@ -704,7 +704,7 @@ public class NamedEntriesPanelTests : BunitContext
         await button.ClickAsync(new());
     }
 
-    // The save-as button is found by id: since #38 every row carries a Save
+    // The save-as button is found by id: since halheinrich/backgammon#38 every row carries a Save
     // button of its own, so text alone no longer identifies the save-as one.
     private static AngleSharp.Dom.IElement FindSaveButton(
         IRenderedComponent<EntriesPanel> cut) =>

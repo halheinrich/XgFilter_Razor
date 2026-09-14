@@ -134,7 +134,7 @@ public class FilterSurfaceTests : BunitContext
         Assert.Empty(_committed);
     }
 
-    // ── The first-mount reconcile (#82) ─────────────────────────────────────
+    // ── The first-mount reconcile (halheinrich/backgammon#82) ─────────────────────────────────────
 
     // The navigate-back case the reconcile exists for: the holder outlived the
     // previous mount still carrying the config applied for this source, and
