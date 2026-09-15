@@ -39,46 +39,47 @@ https://github.com/halheinrich/XgFilter_Razor — branch `main`.
   owns both the set and its order, so the panel enumerates `All` and never
   builds a local roll list.
 
-## Directory tree
+## Layout
 
-```
-XgFilter_Razor.slnx
-Directory.Packages.props
-XgFilter_Razor/
-  XgFilter_Razor.csproj
-  _Imports.razor
-  Components/
-    FilterSurface.razor              — THE consumer surface: panels + wiring
-    FilterPanel.razor                — filter form (.Internal — not consumer surface)
-    NamedEntriesPanel.razor          — generic pick list over any NamedCollection
-    FilterHelp.razor                 — producer-owned facet + storage documentation
-  Model/
-    AppliedFilter.cs                 — applied-config holder, keyed to its source
-    FilterRestoreNotice.cs           — restored-selection notice state, app-scoped
-    FilterSourceToken.cs             — opaque host-minted source identity
-    NamedEntriesSurface.cs           — a pick-list mount's copy and element ids
-    IDocumentStorage.cs              — host storage-adapter seam
-    DocumentStorageException.cs      — the seam's one failure type
-    NamedDocumentStatus.cs           — named-document context condition
-    NamedDocumentStore.cs            — named-document lifecycle over the seam
-    SavedFiltersDocument.cs          — canonical/legacy file names + migration rule
-    SavedFiltersStore.cs             — the saved-filters specialization: identity only
-  wwwroot/
-XgFilter_Razor.Testing/
-  XgFilter_Razor.Testing.csproj
-  FilterPanelTestState.cs            — stored-selection seeding for host test suites
-XgFilter_Razor.Tests/
-  XgFilter_Razor.Tests.csproj
-  AppliedFilterTests.cs              — holder source-keyed applied contract
-  FakeDocumentStorage.cs             — shared recording fake over the seam
-  FilterPanelTests.cs                — bUnit tests for FilterPanel
-  FilterPanelTestStateTests.cs       — the seeding seam, pinned against a real render
-  FilterSourceTokenTests.cs          — token equality rules
-  FilterSurfaceTests.cs              — bUnit wire tests for the composite
-  NamedEntriesPanelTests.cs          — bUnit tests for NamedEntriesPanel
-  SavedFiltersStoreTests.cs          — store transitions over a fake storage seam
-  FilterHelpTests.cs                 — bUnit tests for FilterHelp
-```
+Three of this repo's projects under `XgFilter_Razor.slnx` (which also carries
+the dependency projects), governed by repo-root `Directory.Build.props`
+(TFM, `TreatWarningsAsErrors`, XML doc generation) and
+`Directory.Packages.props` (Central Package Management).
+
+**`XgFilter_Razor/`** — the Razor class library. It ships no static assets.
+Three areas:
+
+- **Components** — `Components/`: `FilterSurface`, the one consumer-facing
+  filter component, owning the panel, the saved-filters pick list and the
+  interaction wiring end to end; `FilterPanel`, the filter form it owns, in
+  the `.Internal` namespace and banned from host use; `NamedEntriesPanel`,
+  the generic pick list over any `NamedCollection` document, which a host may
+  mount directly; `FilterHelp`, the producer-owned documentation of every
+  facet, the panel chrome and what the panel persists.
+- **Model** — `Model/`, the non-visual types hosts bind: `AppliedFilter`
+  (the applied-config holder, keyed to its source), `FilterSourceToken` (the
+  opaque host-minted source identity) and `FilterRestoreNotice` (the
+  restored-selection notice's state); the named-document machinery —
+  `IDocumentStorage` (the host storage seam) and `DocumentStorageException`
+  (its one failure type), `NamedDocumentStore` (the document lifecycle over
+  the seam) and `NamedDocumentStatus` (its condition), `NamedEntriesSurface`
+  (a pick-list mount's copy and element ids); and the saved-filters
+  specialization, `SavedFiltersDocument` (the canonical and legacy file
+  names and the migration rule) and `SavedFiltersStore` (identity only).
+- **Serialization** — `XgFilterRazorJsonContext`: the source-generated JSON
+  metadata for the one value this project serializes itself, the panel's
+  expanded facet rows.
+
+**`XgFilter_Razor.Testing/`** — producer-owned test support for host suites:
+`FilterPanelTestState` seeds the browser state the panel restores from. Not
+packable.
+
+**`XgFilter_Razor.Tests/`** — bUnit over xUnit: one class per component
+(the composite's as wire tests), the applied holder, the source token and
+the saved-filters store, plus the seeding seam pinned against a real render
+and the trim-posture pins. `FakeDocumentStorage`
+is the recording fake over the storage seam the store and composite tests
+share.
 
 ## Architecture
 
