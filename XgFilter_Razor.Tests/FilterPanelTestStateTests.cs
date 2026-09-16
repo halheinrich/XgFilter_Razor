@@ -45,6 +45,14 @@ public class FilterPanelTestStateTests : BunitContext
 
         FilterPanelTestState.SeedStoredSelection(JSInterop, stored);
         var cut = Render<FilterPanel>();
+        // The facet rows are folded behind the More filters container
+        // (halheinrich/backgammon#231), so the row's toggle is reached through
+        // it — and the open is waited on, because the container's handler
+        // persists the choice through interop before the render that puts the
+        // rows in the DOM lands.
+        cut.Find("#moreFiltersToggle").Click();
+        cut.WaitForAssertion(() => Assert.Equal(
+            "true", cut.Find("#moreFiltersToggle").GetAttribute("aria-expanded")));
         cut.Find("#facetToggle_MoveNumberRange").Click();
 
         cut.WaitForAssertion(() =>

@@ -56,10 +56,14 @@
         <p>
             Only <em>Error range</em> is shown open at first — it is the one
             most people reach for. Every other filter sits on its own row that
-            you open and close, and the rows you left open are open again next
+            you open and close, and those rows are themselves folded away
+            behind <em>More filters</em>, so at rest the panel is the error
+            range and the buttons. Whatever you left open — <em>More
+            filters</em> itself, and the rows inside it — is open again next
             time. While a row is closed, a badge on it says the filter inside
-            is set, so a filter you set earlier can never be quietly out of
-            sight.
+            is set, and while <em>More filters</em> is folded, a badge on it
+            counts how many of the filters behind it are set, so a filter you
+            set earlier can never be quietly out of sight.
         </p>
         <p>
             Nothing you type or check takes effect until you press <em>Apply
@@ -74,8 +78,8 @@
         <p>
             <em>Clear filters</em> empties every filter and applies that
             immediately, giving you the unfiltered set back in one gesture. It
-            changes only the filters — which rows you have open is left
-            exactly as you had it.
+            changes only the filters — what you have open, rows and
+            <em>More filters</em> alike, is left exactly as you had it.
         </p>
     </section>
 
@@ -245,7 +249,7 @@
             you analyzed.
         </p>
         <p>
-            There are two saved entries, both kept in your browser's local
+            There are three saved entries, all kept in your browser's local
             storage for this site. They survive reloading the page and closing
             the browser, and they are tied to this browser and this site — so
             another browser, or another machine, starts fresh:
@@ -261,6 +265,13 @@
                 you have open. That is a display preference, kept apart from
                 your filters: it is not part of the saved filter settings, and
                 Clear filters never changes it.
+            </li>
+            <li>
+                <code>@FilterPanel.MoreFiltersKey</code> — whether
+                <em>More filters</em>, the fold those rows sit behind, is open.
+                A display preference in the same way, and kept in its own entry
+                because it is its own choice: folding the panel away does not
+                disturb which rows you left open inside it.
             </li>
         </ul>
         <p>

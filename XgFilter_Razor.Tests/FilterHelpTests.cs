@@ -105,7 +105,9 @@ public class FilterHelpTests : BunitContext
                       .Select(e => e.TextContent.Trim())
                       .ToArray();
 
-        Assert.Equal(new[] { FilterPanel.ConfigKey, FilterPanel.DisclosureKey }, keys);
+        Assert.Equal(
+            new[] { FilterPanel.ConfigKey, FilterPanel.DisclosureKey, FilterPanel.MoreFiltersKey },
+            keys);
     }
 
     // Same posture, same reason, one section down. The match-scores section

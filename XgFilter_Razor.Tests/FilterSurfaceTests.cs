@@ -45,6 +45,18 @@ public class FilterSurfaceTests : BunitContext
             .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => _committed.Add(c))
             .Add(p => p.OnAppliedStateChanged, (FilterConfig? c) => _reports.Add(c)));
 
+    // The panel's facet rows are folded behind its More filters container
+    // (halheinrich/backgammon#231), so a surface test that reaches a row opens
+    // the container first — through its real toggle, and waiting on
+    // aria-expanded, because the handler persists the choice through interop
+    // before the render that puts the rows in the DOM lands.
+    private static void OpenMoreFilters(IRenderedComponent<FilterSurface> cut)
+    {
+        cut.Find("#moreFiltersToggle").Click();
+        cut.WaitForAssertion(() => Assert.Equal(
+            "true", cut.Find("#moreFiltersToggle").GetAttribute("aria-expanded")));
+    }
+
     private static string CollectionJson(params (string Name, FilterConfig Config)[] entries)
     {
         var filters = NamedFilterCollection.Empty;
@@ -261,6 +273,10 @@ public class FilterSurfaceTests : BunitContext
         var cut = RenderSurface(TokenA, new FakeDocumentStorage());
         cut.WaitForAssertion(() => cut.Find("#filterRestoredNotice"));
 
+        // The rows are folded behind the More filters container
+        // (halheinrich/backgammon#231) — opening it is navigation too, so the
+        // notice must survive both gestures.
+        OpenMoreFilters(cut);
         cut.Find("#facetToggle_DiceRolls").Click();
 
         Assert.NotNull(cut.Find("#filterRestoredNotice"));
@@ -484,6 +500,7 @@ public class FilterSurfaceTests : BunitContext
         // Stage an unparseable position pattern (inside its own filter row),
         // then attempt a row Save: TryGetEditedConfig refuses, so the composite
         // must say why instead of no-opping silently.
+        OpenMoreFilters(cut);   // the rows are behind it
         cut.Find("#facetToggle_PositionPattern").Click();
         cut.Find("#positionPattern").Input("not a bracket list");
         await ClickRowButtonAsync(cut, "Race", "Save");

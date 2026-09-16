@@ -20,11 +20,13 @@ public class FilterPanelTests : BunitContext
         JSInterop.Mode = JSRuntimeMode.Loose;
     }
 
-    // The two localStorage keys the panel persists under: the whole
-    // FilterConfig as one serialized blob, and the set of expanded facet rows
-    // — user preference, deliberately outside the config blob.
+    // The three localStorage keys the panel persists under: the whole
+    // FilterConfig as one serialized blob, the set of expanded facet rows, and
+    // whether the container over those rows is open — the last two user
+    // preference, deliberately outside the config blob.
     private const string ConfigKey = "xg_filter_config";
     private const string DisclosureKey = "xg_expandedFilters";
+    private const string MoreFiltersKey = "xg_moreFiltersOpen";
 
     // Every facet the panel gives a row, in render order. An independent
     // literal rather than a projection of anything the panel exposes: the
@@ -44,15 +46,40 @@ public class FilterPanelTests : BunitContext
         FilterFacet.PositionPattern,
     ];
 
+    // The rows are folded behind the More filters container
+    // (halheinrich/backgammon#231) and the container is folded at rest, so a
+    // test that reaches any row — its toggle, its badge or its controls —
+    // opens the container first. Through the container's real toggle, like the
+    // rows' own, so every such test exercises the disclosure's actual wiring
+    // rather than reaching around it. Idempotent by the aria-expanded read,
+    // because the button is a toggle: a second call on an open container would
+    // fold it again, and a stored preference can mount it open.
+    // Waiting on aria-expanded rather than returning straight from the click is
+    // what makes this an open rather than a dispatch: the handler persists the
+    // choice through interop before the render that puts the rows in the DOM
+    // lands, so a Find for a row on the next line can outrun it. The read is
+    // also the assertion the hosts' own row helpers make for the same reason.
+    private static void OpenMoreFilters(IRenderedComponent<FilterPanel> cut)
+    {
+        if (cut.Find("#moreFiltersToggle").GetAttribute("aria-expanded") == "true") return;
+
+        cut.Find("#moreFiltersToggle").Click();
+        cut.WaitForAssertion(() => Assert.Equal(
+            "true", cut.Find("#moreFiltersToggle").GetAttribute("aria-expanded")));
+    }
+
     // Every row is collapsed at rest, so a test that touches a facet's
     // controls opens that facet's row first — through the row's real toggle
     // button, so every such test also exercises the disclosure's actual wiring
     // rather than reaching around it. Each test names exactly the rows its
     // subject lives in: opening all eight everywhere would hide a control that
-    // had quietly moved to another row.
+    // had quietly moved to another row. The container above them is opened
+    // here too: a row's toggle is not in the DOM until it is.
     private static void ExpandFacets(
         IRenderedComponent<FilterPanel> cut, params FilterFacet[] facets)
     {
+        OpenMoreFilters(cut);
+
         foreach (var facet in facets)
             cut.Find($"#facetToggle_{facet}").Click();
     }
@@ -857,12 +884,12 @@ public class FilterPanelTests : BunitContext
         Assert.Equal(3, reports.Count);
     }
 
-    // The level-group disclosure is deliberately unpersisted — unlike the
-    // panel-level disclosure with its own localStorage key, toggling a level
-    // group writes nothing: the collapsed badge already carries everything the
-    // closed state hides, so there is no choice worth remembering. The only
-    // permitted write in this scenario is the panel disclosure's own key from
-    // the RenderExpanded click.
+    // The level-group disclosure is deliberately unpersisted — unlike the two
+    // disclosures above it, each with its own localStorage key, toggling a
+    // level group writes nothing: the collapsed badge already carries
+    // everything the closed state hides, so there is no choice worth
+    // remembering. The only permitted writes in this scenario are those two
+    // keys, from the clicks RenderExpanded needs to reach the row.
     [Fact]
     public void LevelGroupToggle_WritesNoLocalStorage()
     {
@@ -873,7 +900,9 @@ public class FilterPanelTests : BunitContext
         cut.Find("#lvlToggle_Rollout").Click();
 
         Assert.DoesNotContain(JSInterop.Invocations, i =>
-            i.Identifier == "localStorage.setItem" && (string?)i.Arguments[0] != DisclosureKey);
+            i.Identifier == "localStorage.setItem"
+            && (string?)i.Arguments[0] != DisclosureKey
+            && (string?)i.Arguments[0] != MoreFiltersKey);
     }
 
     // Deselecting everything back to nothing must emit the inactive state —
@@ -2080,17 +2109,296 @@ public class FilterPanelTests : BunitContext
         Assert.Empty(cut.FindAll("#applyDisabledReason"));
     }
 
-    // ── Facet rows ─────────────────────────────────────────────────────────
+    // ── More filters container ─────────────────────────────────────────────
 
-    // The at-rest information hierarchy: the error-range section, eight
-    // collapsed facet rows and the Apply/Clear row — and not one facet
-    // control, because a collapsed row's children are absent from the DOM
-    // rather than styled away. Presence only here; the ruled order is pinned
-    // next, and the badges below.
+    // Fold the container again, OpenMoreFilters' twin and waited on for the
+    // same reason.
+    private static void FoldMoreFilters(IRenderedComponent<FilterPanel> cut)
+    {
+        if (cut.Find("#moreFiltersToggle").GetAttribute("aria-expanded") == "false") return;
+
+        cut.Find("#moreFiltersToggle").Click();
+        cut.WaitForAssertion(() => Assert.Equal(
+            "false", cut.Find("#moreFiltersToggle").GetAttribute("aria-expanded")));
+    }
+
+    // The last value written under a given key.
+    private string? LastWrite(string key) =>
+        JSInterop.Invocations["localStorage.setItem"]
+                 .Last(i => (string?)i.Arguments[0] == key).Arguments[1] as string;
+
+    // The at-rest panel is what the container exists to make it
+    // (halheinrich/backgammon#231): the error range, the container, and the
+    // two buttons — and not one facet row, because the container's children
+    // are absent from the DOM while it is folded rather than styled away. The
+    // region it controls is rendered either way, so the aria-controls it
+    // carries folded is never dangling.
     [Fact]
-    public void Rows_DefaultCollapsed_ShowOnlyErrorRangeAndTheButtons()
+    public void MoreFilters_DefaultFolded_LeavesTheErrorRangeAndTheButtons()
     {
         var cut = Render<FilterPanel>();
+
+        var toggle = cut.Find("#moreFiltersToggle");
+        Assert.Equal("BUTTON", toggle.TagName);
+        Assert.Equal("false", toggle.GetAttribute("aria-expanded"));
+        Assert.Equal("moreFilters", toggle.GetAttribute("aria-controls"));
+        Assert.NotNull(cut.Find("#moreFilters"));
+
+        Assert.NotNull(cut.Find("#errorMin"));
+        Assert.NotNull(cut.Find("button.btn-primary"));
+        Assert.NotNull(cut.Find("#clearFilters"));
+
+        Assert.Empty(cut.FindAll("button[id^='facetToggle_']"));
+        Assert.Empty(cut.FindAll("#moreFilters *"));
+    }
+
+    // Its name is the ruled label and nothing else — the +/− glyph is
+    // decorative and says so, the rows' idiom one tier up.
+    [Fact]
+    public void MoreFiltersToggle_IsNamedByItsRuledLabel()
+    {
+        var cut = Render<FilterPanel>();
+
+        var toggle = cut.Find("#moreFiltersToggle");
+        Assert.NotNull(toggle.QuerySelector("[aria-hidden='true']"));
+        Assert.Equal("More filters", HeaderName(toggle));
+    }
+
+    // Opening it reveals the rows themselves, ids and order untouched, and
+    // every one of them inside the region the toggle names: what the container
+    // changes is where the rows are reached from, never what they are.
+    [Fact]
+    public void MoreFilters_Opened_RevealsTheRowsUnchanged_InsideItsRegion()
+    {
+        var cut = Render<FilterPanel>();
+        OpenMoreFilters(cut);
+
+        Assert.Equal(
+            RowFacets.Select(f => f.ToString()),
+            cut.Find("#moreFilters")
+               .QuerySelectorAll("button[id^='facetToggle_']")
+               .Select(el => el.Id!["facetToggle_".Length..]));
+    }
+
+    // The container answers to none of the rows' id prefixes. Those prefixes
+    // are surveyed as "the rows" — here, and in both hosts — so a container
+    // that answered to one would report itself as a ninth row.
+    [Fact]
+    public void MoreFiltersIds_DoNotAnswerToTheRowPrefixes()
+    {
+        var cut = Render<FilterPanel>();
+
+        Assert.NotNull(cut.Find("#moreFiltersToggle"));
+        Assert.Empty(cut.FindAll(
+            "[id^='facetToggle_'], [id^='facet_'], [id^='facetBadge_'], [id^='facetHint_']"));
+    }
+
+    // The badge counts the rows whose facet is set — the lib's ruling
+    // (GetActiveFacets on the live buffers) that the rows' own badges read,
+    // never a second count of this panel's own — and it speaks only while the
+    // container is folded: open, each row's own badge says it in more detail.
+    [Fact]
+    public void MoreFiltersBadge_CountsTheSetRows_OnlyWhileFolded()
+    {
+        var cut = RenderExpanded(FilterFacet.ContactTypes, FilterFacet.DiceRolls);
+
+        cut.Find("#ct_Race").Change(true);
+        cut.Find("#dr_31").Change(true);
+        Assert.Empty(cut.FindAll("#moreFiltersBadge"));
+
+        FoldMoreFilters(cut);
+
+        Assert.Equal("2 set", cut.Find("#moreFiltersBadge").TextContent.Trim());
+    }
+
+    // Nothing set, nothing counted.
+    [Fact]
+    public void MoreFiltersBadge_AbsentWhenNoRowIsSet()
+    {
+        var cut = Render<FilterPanel>();
+
+        Assert.Empty(cut.FindAll("#moreFiltersBadge"));
+    }
+
+    // The error range is not behind this fold, so it is never in the count:
+    // an active error range leaves the badge away, which is the same division
+    // that keeps ErrorRange out of the rows' vocabulary.
+    [Fact]
+    public void MoreFiltersBadge_NeverCountsTheErrorRange()
+    {
+        var cut = Render<FilterPanel>();
+
+        cut.Find("#errorMin").Input("0.05");
+
+        Assert.Empty(cut.FindAll("#moreFiltersBadge"));
+    }
+
+    // PRESENCE follows the lib's activation predicate, not the buffer behind
+    // the control: pattern text that does not parse builds as "no pattern", so
+    // the row is not set and the count does not move for it. The rows' own
+    // badge pin, one tier up.
+    [Fact]
+    public void MoreFiltersBadge_FollowsTheLibsActivationPredicate_NotTheBuffer()
+    {
+        var cut = RenderExpanded(FilterFacet.PositionPattern, FilterFacet.ContactTypes);
+
+        cut.Find("#positionPattern").Input("[6,2");   // unparseable — facet off
+        cut.Find("#ct_Race").Change(true);            // genuinely set
+        FoldMoreFilters(cut);
+
+        Assert.Equal("1 set", cut.Find("#moreFiltersBadge").TextContent.Trim());
+    }
+
+    // A host-staged selection lands in collapsed rows behind a folded
+    // container; the badge reports it at rest, without anything opening.
+    [Fact]
+    public async Task LoadConfig_StagedFacets_CountOnTheFoldedContainer()
+    {
+        var cut = Render<FilterPanel>();
+
+        await cut.InvokeAsync(() => cut.Instance.LoadConfig(new FilterConfig
+        {
+            ContactTypes = [ContactType.Race],
+            DiceRolls = [new DiceRoll(3, 1)],
+        }));
+
+        Assert.Equal("false", cut.Find("#moreFiltersToggle").GetAttribute("aria-expanded"));
+        Assert.Equal("2 set", cut.Find("#moreFiltersBadge").TextContent.Trim());
+    }
+
+    // Folding or unfolding is navigation, not an edit — no applied-state
+    // report, in either direction, exactly as for a row.
+    [Fact]
+    public void MoreFiltersToggle_DoesNotReportAppliedState()
+    {
+        var reports = new List<FilterConfig?>();
+        var cut = RenderReporting(reports);
+
+        OpenMoreFilters(cut);
+        FoldMoreFilters(cut);
+
+        Assert.Empty(reports);
+    }
+
+    // Each click persists the one bit immediately under the container's own
+    // key — never the rows' key, never the config blob: the two preferences
+    // are separate because the rows' key speaks a vocabulary of FilterFacet
+    // names and this container is not a facet.
+    [Fact]
+    public void MoreFiltersToggle_PersistsUnderItsOwnKeyAlone()
+    {
+        var cut = Render<FilterPanel>();
+
+        OpenMoreFilters(cut);
+        Assert.Equal("true", LastWrite(MoreFiltersKey));
+
+        FoldMoreFilters(cut);
+        Assert.Equal("false", LastWrite(MoreFiltersKey));
+
+        Assert.DoesNotContain(JSInterop.Invocations["localStorage.setItem"],
+            i => (string?)i.Arguments[0] == ConfigKey
+              || (string?)i.Arguments[0] == DisclosureKey);
+    }
+
+    // The remembered state restores across sessions: stored open mounts open,
+    // with the rows in the DOM and no click needed.
+    [Fact]
+    public void StoredOpenContainer_MountsOpen()
+    {
+        JSInterop.Setup<string?>("localStorage.getItem", MoreFiltersKey).SetResult("true");
+
+        var cut = Render<FilterPanel>();
+
+        Assert.Equal("true", cut.Find("#moreFiltersToggle").GetAttribute("aria-expanded"));
+        Assert.NotEmpty(cut.FindAll("button[id^='facetToggle_']"));
+    }
+
+    // And the value survives a round trip byte for byte: restored, then
+    // written again by a pair of gestures that leave it as they found it, it
+    // is the same literal that went in. The literal is written out by hand
+    // here, so a change of mechanism that also changed the wire fails here
+    // rather than silently refolding every user's panel.
+    [Fact]
+    public void StoredContainerState_RoundTripsByteIdentical()
+    {
+        JSInterop.Setup<string?>("localStorage.getItem", MoreFiltersKey).SetResult("true");
+
+        var cut = Render<FilterPanel>();
+        FoldMoreFilters(cut);   // close…
+        OpenMoreFilters(cut);   // …and reopen
+
+        Assert.Equal("true", LastWrite(MoreFiltersKey));
+    }
+
+    // Restore is tolerant and one-way: the panel writes only these two
+    // literals, so anything else — a stored "false", a blank, a word that is
+    // not one, the rows' own JSON arriving under the wrong key — leaves the
+    // container folded, which is also what a fresh visit gets.
+    [Theory]
+    [InlineData("false")]
+    [InlineData("")]
+    [InlineData("yes")]
+    [InlineData("1")]
+    [InlineData("[\"Players\"]")]
+    public void StoredContainerStateThatIsNotTrue_MountsFolded(string stored)
+    {
+        JSInterop.Setup<string?>("localStorage.getItem", MoreFiltersKey).SetResult(stored);
+
+        var cut = Render<FilterPanel>();
+
+        Assert.Equal("false", cut.Find("#moreFiltersToggle").GetAttribute("aria-expanded"));
+        Assert.Empty(cut.FindAll("button[id^='facetToggle_']"));
+    }
+
+    // The rows' pending-restore pin, one tier up: a click landing while the
+    // getItem interop is in flight is a fresh user choice, and the late
+    // restore must yield to it rather than clobber it.
+    [Fact]
+    public void MoreFiltersToggle_DuringPendingStoredRestore_UserChoiceWins()
+    {
+        var pendingGet = JSInterop.Setup<string?>("localStorage.getItem", MoreFiltersKey);
+
+        var cut = Render<FilterPanel>();
+
+        OpenMoreFilters(cut);
+
+        pendingGet.SetResult("false");
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            "true", cut.Find("#moreFiltersToggle").GetAttribute("aria-expanded")));
+    }
+
+    // Neither gesture that moves filter values moves the container: staging a
+    // saved filter is the host's, clearing is the user's, and which
+    // disclosures are open is neither's — the rows' own rule, one tier up.
+    [Fact]
+    public async Task LoadConfigAndClearFilters_LeaveTheContainerWhereItWas()
+    {
+        var cut = Render<FilterPanel>();
+        OpenMoreFilters(cut);
+
+        await cut.InvokeAsync(() => cut.Instance.LoadConfig(
+            new FilterConfig { ContactTypes = [ContactType.Race] }));
+        Assert.Equal("true", cut.Find("#moreFiltersToggle").GetAttribute("aria-expanded"));
+
+        await cut.Find("#clearFilters").ClickAsync(new());
+        Assert.Equal("true", cut.Find("#moreFiltersToggle").GetAttribute("aria-expanded"));
+    }
+
+    // ── Facet rows ─────────────────────────────────────────────────────────
+
+    // The rows' own at-rest state, with the container over them opened to see
+    // it: eight collapsed rows and not one facet control, because a collapsed
+    // row's children are absent from the DOM rather than styled away. The
+    // error range and the buttons are outside the container and visible
+    // either way. Presence only here; the ruled order is pinned next, the
+    // badges below, and the container's own resting state with the container
+    // pins.
+    [Fact]
+    public void Rows_DefaultCollapsed_ShowNoFacetControls()
+    {
+        var cut = Render<FilterPanel>();
+        OpenMoreFilters(cut);
 
         foreach (var facet in RowFacets)
         {
@@ -2130,6 +2438,7 @@ public class FilterPanelTests : BunitContext
     public void Rows_RenderTheRuledFacetsInTheRuledOrder()
     {
         var cut = Render<FilterPanel>();
+        OpenMoreFilters(cut);
 
         Assert.Equal(
             RowFacets.Select(f => f.ToString()),
@@ -2145,6 +2454,7 @@ public class FilterPanelTests : BunitContext
     public void RowToggle_IsNamedByTheLibsFacetLabel()
     {
         var cut = Render<FilterPanel>();
+        OpenMoreFilters(cut);
 
         foreach (var facet in RowFacets)
         {
@@ -2306,6 +2616,7 @@ public class FilterPanelTests : BunitContext
         JSInterop.Setup<string?>("localStorage.getItem", DisclosureKey).SetResult(stored);
 
         var cut = Render<FilterPanel>();
+        OpenMoreFilters(cut);
         Assert.Equal("true", cut.Find("#facetToggle_MoveNumberRange").GetAttribute("aria-expanded"));
 
         ExpandFacets(cut, FilterFacet.MoveNumberRange);   // close…
@@ -2320,7 +2631,10 @@ public class FilterPanelTests : BunitContext
                  .Last(i => (string?)i.Arguments[0] == DisclosureKey).Arguments[1] as string;
 
     // The remembered set restores across sessions: the named rows mount open,
-    // no click needed, and the rows it does not name stay shut.
+    // no click needed, and the rows it does not name stay shut. Opening the
+    // container to look is not what opened them — it carries its own key and
+    // this scenario seeds only the rows' — which is the independence the two
+    // keys buy.
     [Fact]
     public void StoredOpenSet_MountsExactlyThoseRowsExpanded()
     {
@@ -2328,6 +2642,7 @@ public class FilterPanelTests : BunitContext
             .SetResult("[\"Players\",\"PositionPattern\"]");
 
         var cut = Render<FilterPanel>();
+        OpenMoreFilters(cut);
 
         Assert.Equal("true", cut.Find("#facetToggle_Players").GetAttribute("aria-expanded"));
         Assert.NotNull(cut.Find("#positionPattern"));
@@ -2361,6 +2676,7 @@ public class FilterPanelTests : BunitContext
         JSInterop.Setup<string?>("localStorage.getItem", DisclosureKey).SetResult(stored);
 
         var cut = Render<FilterPanel>();
+        OpenMoreFilters(cut);
 
         foreach (var facet in RowFacets)
             Assert.Equal("false", cut.Find($"#facetToggle_{facet}").GetAttribute("aria-expanded"));
@@ -2403,6 +2719,7 @@ public class FilterPanelTests : BunitContext
     public void RowHint_RendersOnlyInsideTheExpandedBody()
     {
         var cut = Render<FilterPanel>();
+        OpenMoreFilters(cut);
 
         foreach (var facet in RowFacets)
         {
@@ -2427,11 +2744,14 @@ public class FilterPanelTests : BunitContext
 
     // ── Row badges ─────────────────────────────────────────────────────────
 
-    // Nothing active, nothing badged.
+    // Nothing active, nothing badged. The container is opened first, so the
+    // rows are in the DOM to go unbadged — folded, the claim would hold for
+    // the wrong reason.
     [Fact]
     public void Badges_AbsentOnDefaults()
     {
         var cut = Render<FilterPanel>();
+        OpenMoreFilters(cut);
 
         Assert.Empty(cut.FindAll("span[id^='facetBadge_']"));
     }
@@ -2443,6 +2763,7 @@ public class FilterPanelTests : BunitContext
     public void Badges_ErrorRangeBadgesNothing()
     {
         var cut = Render<FilterPanel>();
+        OpenMoreFilters(cut);
 
         cut.Find("#errorMin").Input("0.05");
 
@@ -2582,6 +2903,7 @@ public class FilterPanelTests : BunitContext
             DiceRolls = [new DiceRoll(3, 1)],
         };
         await cut.InvokeAsync(() => cut.Instance.LoadConfig(loaded));
+        OpenMoreFilters(cut);
 
         foreach (var facet in RowFacets)
             Assert.Equal("false", cut.Find($"#facetToggle_{facet}").GetAttribute("aria-expanded"));
@@ -2600,6 +2922,7 @@ public class FilterPanelTests : BunitContext
         JSInterop.Setup<string?>("localStorage.getItem", ConfigKey).SetResult(stored.ToJson());
 
         var cut = Render<FilterPanel>();
+        OpenMoreFilters(cut);
 
         var badge = Assert.Single(cut.FindAll("span[id^='facetBadge_']"));
         Assert.Equal("facetBadge_ContactTypes", badge.Id);
@@ -2727,6 +3050,7 @@ public class FilterPanelTests : BunitContext
             new FilterConfig { ContactTypes = [ContactType.Race] }));
 
         await cut.Find("#clearFilters").ClickAsync(new());
+        OpenMoreFilters(cut);
 
         Assert.Equal("false", cut.Find("#facetToggle_ContactTypes").GetAttribute("aria-expanded"));
         Assert.Empty(cut.FindAll("span[id^='facetBadge_']"));
