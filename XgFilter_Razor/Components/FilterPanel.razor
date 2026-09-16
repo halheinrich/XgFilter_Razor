@@ -78,9 +78,25 @@
            its own here — only the words for it. *@
         @{ var invalidFields = InvalidFields; }
         <div class="mb-3">
+            @* The heading and its hint carry ids of their own because the two
+               boxes below name themselves by reference off them
+               (halheinrich/backgammon#196), exactly as a row's controls name
+               themselves off the row's toggle and hint. The id is on the
+               heading WORDS rather than on the label element around them: a
+               reference to the whole label would pull the hint into the name
+               and make "(inclusive; blank = no bound)" part of what the box is
+               called, which is the lie the position-pattern field's own
+               comment records dropping. A `for`-label per input was the other
+               way offered and is refused for the same reason it was there:
+               one label cannot serve two boxes, and splitting it into visible
+               Min / Max labels would redesign the row to say what the
+               placeholders already say. The heading itself is the lib's label
+               via ToLabel() now that it is what a screen reader reads out —
+               the rows' rule, which this section was the last literal to keep
+               outside. *@
             <label class="form-label">
-                Error range
-                <small class="text-muted">(inclusive; blank = no bound)</small>
+                <span id="errorRangeLabel">@FilterFacet.ErrorRange.ToLabel()</span>
+                <small class="text-muted" id="errorRangeHint">(inclusive; blank = no bound)</small>
             </label>
             @* Both range facets carry the same Min/Max placeholders, so the
                boxes carry ids: a handle that says which facet it belongs to,
@@ -90,6 +106,8 @@
                 <input id="errorMin"
                        class="form-control @(invalidFields.Contains(FilterField.ErrorMin) ? "is-invalid" : string.Empty)"
                        style="max-width:140px"
+                       aria-labelledby="errorRangeLabel"
+                       aria-describedby="errorRangeHint"
                        type="number" step="0.001" placeholder="Min"
                        value="@_errorMinText"
                        @oninput="e => { _errorMinText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
@@ -97,6 +115,8 @@
                 <input id="errorMax"
                        class="form-control @(invalidFields.Contains(FilterField.ErrorMax) ? "is-invalid" : string.Empty)"
                        style="max-width:140px"
+                       aria-labelledby="errorRangeLabel"
+                       aria-describedby="errorRangeHint"
                        type="number" step="0.001" placeholder="Max"
                        value="@_errorMaxText"
                        @oninput="e => { _errorMaxText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
@@ -253,9 +273,11 @@
                     @* ── Player ──────────────────────────────────────────────── *@
                     @FacetRow(FilterFacet.Players, @<div class="ms-3">
                         <label class="form-label">
-                            <small class="text-muted">(comma-separated; blank = all players)</small>
+                            <small class="text-muted" id="facetHint_Players">(comma-separated; blank = all players)</small>
                         </label>
                         <input class="form-control"
+                               aria-labelledby="facetToggle_Players"
+                               aria-describedby="facetHint_Players"
                                placeholder="e.g. Hal, Magriel"
                                value="@_playerText"
                                @oninput="e => { _playerText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
@@ -304,9 +326,11 @@
                        (halheinrich/backgammon#121). *@
                     @FacetRow(FilterFacet.MatchScores, @<div class="ms-3">
                         <label class="form-label">
-                            <small class="text-muted">(comma-separated; blank = all scores)</small>
+                            <small class="text-muted" id="facetHint_MatchScores">(comma-separated; blank = all scores)</small>
                         </label>
                         <input class="form-control @(invalidFields.Contains(FilterField.MatchScores) ? "is-invalid" : string.Empty)"
+                               aria-labelledby="facetToggle_MatchScores"
+                               aria-describedby="facetHint_MatchScores"
                                placeholder="e.g. 4a5a, 1a1a, 1a2aC, @MatchScoreToken.MoneyWithJacoby, @MatchScoreToken.MoneyWithoutJacoby"
                                value="@_matchScoreText"
                                @oninput="e => { _matchScoreText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
@@ -364,12 +388,14 @@
                        words it. *@
                     @FacetRow(FilterFacet.MoveNumberRange, @<div class="ms-3">
                         <label class="form-label">
-                            <small class="text-muted">(inclusive; blank = no bound; non-standard-start games are excluded)</small>
+                            <small class="text-muted" id="facetHint_MoveNumberRange">(inclusive; blank = no bound; non-standard-start games are excluded)</small>
                         </label>
                         <div class="d-flex gap-2 align-items-center">
                             <input id="moveNumberMin"
                                    class="form-control @(invalidFields.Contains(FilterField.MoveNumberMin) ? "is-invalid" : string.Empty)"
                                    style="max-width:140px"
+                                   aria-labelledby="facetToggle_MoveNumberRange"
+                                   aria-describedby="facetHint_MoveNumberRange"
                                    type="number" step="1" min="1" placeholder="Min"
                                    value="@_moveNumberMinText"
                                    @oninput="e => { _moveNumberMinText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
@@ -377,6 +403,8 @@
                             <input id="moveNumberMax"
                                    class="form-control @(invalidFields.Contains(FilterField.MoveNumberMax) ? "is-invalid" : string.Empty)"
                                    style="max-width:140px"
+                                   aria-labelledby="facetToggle_MoveNumberRange"
+                                   aria-describedby="facetHint_MoveNumberRange"
                                    type="number" step="1" min="1" placeholder="Max"
                                    value="@_moveNumberMaxText"
                                    @oninput="e => { _moveNumberMaxText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
@@ -559,15 +587,15 @@
                        wrong-signed borne-off bound (say [off,,-2]) fails TryParse and lands
                        in the same invalid-field state as any other unparseable text.
 
-                       The one input on the panel with an accessible name, and it gets it
-                       by reference rather than from a label: the row's header button
-                       already carries the facet's name, so aria-labelledby points at it
-                       and aria-describedby points at the hint. The wrapper below is a
-                       plain container now — its `for` is gone, because a label whose text
-                       is the hint would have made the hint the field's name, which is the
-                       lie this replaces. The other seven rows' inputs carry no accessible
-                       name at all; that predates this arc and is booked as
-                       halheinrich/backgammon#196, not fixed here. *@
+                       Named by reference rather than from a label: the row's header
+                       button already carries the facet's name, so aria-labelledby points
+                       at it and aria-describedby points at the hint. The wrapper below is
+                       a plain container now — its `for` is gone, because a label whose
+                       text is the hint would have made the hint the field's name, which
+                       is the lie this replaces. This was the panel's only named input
+                       until halheinrich/backgammon#196 made the pair of references the
+                       rule for every text and number box on the screen; it is the
+                       precedent the others follow, not a special case. *@
                     @FacetRow(FilterFacet.PositionPattern, @<div class="ms-3">
                         <label class="form-label">
                             <small class="text-muted" id="facetHint_PositionPattern">(checker ranges by location; blank = no pattern filter)</small>

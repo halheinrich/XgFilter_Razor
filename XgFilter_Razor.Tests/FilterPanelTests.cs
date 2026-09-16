@@ -2475,39 +2475,102 @@ public class FilterPanelTests : BunitContext
                        string.Empty)
               .Trim();
 
-    // The position-pattern field takes its name by reference from the row's
-    // own header, so the name a user hears is the facet's label — the lib's,
-    // via ToLabel() — and not the hint sitting above the box. The hint is its
-    // description instead. Both halves are resolved through the DOM the way a
-    // screen reader would resolve them (follow the id, read the target), never
-    // by asserting the attribute string against a literal: a typo'd id would
-    // satisfy a string comparison while naming nothing at all.
+    // Every text and number box inside a row takes its name by reference from
+    // the row's own header, so the name a user hears is the facet's label —
+    // the lib's, via ToLabel() — and not the hint sitting above the box. The
+    // hint is its description instead. The position-pattern field was the
+    // first to do this and halheinrich/backgammon#196 made it the rule for
+    // all of them, so they are pinned together: a box that grew here without
+    // the pair of references would have to be added to this list to escape it.
     //
-    // The described-by half is pinned as identity, not as words — the target
-    // must BE the row's hint element — because the wording is the panel's to
-    // change and this suite pins structure, never copy.
-    [Fact]
-    public void PositionPatternInput_IsNamedByItsRowHeader_AndDescribedByItsHint()
+    // Both halves are resolved through the DOM the way a screen reader would
+    // resolve them (follow the id, read the target), never by asserting the
+    // attribute string against a literal: a typo'd id would satisfy a string
+    // comparison while naming nothing at all. The described-by half is pinned
+    // as identity, not as words — the target must BE the row's hint element —
+    // because the wording is the panel's to change and this suite pins
+    // structure, never copy.
+    [Theory]
+    [InlineData(FilterFacet.Players, "input[placeholder='e.g. Hal, Magriel']")]
+    [InlineData(FilterFacet.MatchScores, "input[placeholder^='e.g. 4a5a']")]
+    [InlineData(FilterFacet.MoveNumberRange, "#moveNumberMin")]
+    [InlineData(FilterFacet.MoveNumberRange, "#moveNumberMax")]
+    [InlineData(FilterFacet.PositionPattern, "#positionPattern")]
+    public void RowInput_IsNamedByItsRowHeader_AndDescribedByItsHint(
+        FilterFacet facet, string inputSelector)
     {
-        var cut = RenderExpanded(FilterFacet.PositionPattern);
+        var cut = RenderExpanded(facet);
 
-        var input = cut.Find("#positionPattern");
+        var input = cut.Find(inputSelector);
 
         var namedBy = cut.Find($"#{input.GetAttribute("aria-labelledby")}");
-        Assert.Equal(FilterFacet.PositionPattern.ToLabel(), HeaderName(namedBy));
+        Assert.Equal($"facetToggle_{facet}", namedBy.Id);
+        Assert.Equal(facet.ToLabel(), HeaderName(namedBy));
 
         var describedBy = cut.Find($"#{input.GetAttribute("aria-describedby")}");
         // Identity by id rather than by instance: bUnit hands back a fresh
         // wrapper per Find, so two lookups of one node are never the same
         // object. The claim still holds — the element the row's hint selector
         // reaches is the one aria-describedby names.
-        var hint = cut.Find($"#facet_{FilterFacet.PositionPattern} small.text-muted");
+        var hint = cut.Find($"#facet_{facet} small.text-muted");
         Assert.Equal(hint.Id, describedBy.Id);
         Assert.NotEmpty(describedBy.TextContent.Trim());
 
-        // The lie being removed: no label may claim to name this field, since
-        // the only label near it carries the hint.
-        Assert.Empty(cut.FindAll("label[for='positionPattern']"));
+        // The lie the references replace: no label in one of these rows may
+        // claim to name a box, because the only label near one carries the
+        // hint. (Rows chosen by ticking options are not on this list, and
+        // their per-option labels are exactly right.)
+        Assert.Empty(cut.Find($"#facet_{facet}").QuerySelectorAll("label[for]"));
+    }
+
+    // The error range sits outside the rows, so it names its two boxes off its
+    // own heading — and off the heading WORDS, not the label element around
+    // them: a reference to the label would pull the hint into the name and
+    // make "(inclusive; blank = no bound)" part of what the box is called. The
+    // words themselves are the lib's, like every other facet heading on the
+    // panel.
+    [Theory]
+    [InlineData("#errorMin")]
+    [InlineData("#errorMax")]
+    public void ErrorRangeInput_IsNamedByItsOwnHeading_AndDescribedByItsHint(
+        string inputSelector)
+    {
+        var cut = Render<FilterPanel>();
+
+        var input = cut.Find(inputSelector);
+
+        var namedBy = cut.Find($"#{input.GetAttribute("aria-labelledby")}");
+        Assert.Equal(FilterFacet.ErrorRange.ToLabel(), namedBy.TextContent.Trim());
+
+        var describedBy = cut.Find($"#{input.GetAttribute("aria-describedby")}");
+        Assert.NotEmpty(describedBy.TextContent.Trim());
+
+        // The two are separate elements, and the name does not swallow the
+        // description — the whole reason the id sits on the heading span
+        // rather than on the label around both.
+        Assert.NotEqual(namedBy.Id, describedBy.Id);
+        Assert.DoesNotContain(
+            describedBy.TextContent.Trim(), namedBy.TextContent.Trim(), StringComparison.Ordinal);
+    }
+
+    // Nothing the user can type into is left unnamed: every text and number
+    // box on the panel, with every row open, carries both references. The
+    // sweep is what makes the two pins above a rule rather than a list — a box
+    // added tomorrow with no name fails here without anyone remembering to
+    // extend a theory.
+    [Fact]
+    public void EveryTextAndNumberInput_CarriesBothReferences()
+    {
+        var cut = RenderExpanded(RowFacets);
+
+        var boxes = cut.FindAll("input[type='number'], input:not([type])").ToArray();
+
+        Assert.Equal(7, boxes.Length);
+        Assert.All(boxes, box =>
+        {
+            Assert.NotNull(cut.Find($"#{box.GetAttribute("aria-labelledby")}"));
+            Assert.NotNull(cut.Find($"#{box.GetAttribute("aria-describedby")}"));
+        });
     }
 
     // Every id an aria attribute points at must actually exist: a dangling
