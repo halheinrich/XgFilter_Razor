@@ -2082,11 +2082,11 @@ public class FilterPanelTests : BunitContext
 
     // ── Facet rows ─────────────────────────────────────────────────────────
 
-    // The at-rest information hierarchy: the error-range section, the Clear
-    // filters row, eight collapsed facet rows and the Apply row — and not one
-    // facet control, because a collapsed row's children are absent from the
-    // DOM rather than styled away. Presence only here; the ruled order is
-    // pinned next, and the badges below.
+    // The at-rest information hierarchy: the error-range section, eight
+    // collapsed facet rows and the Apply/Clear row — and not one facet
+    // control, because a collapsed row's children are absent from the DOM
+    // rather than styled away. Presence only here; the ruled order is pinned
+    // next, and the badges below.
     [Fact]
     public void Rows_DefaultCollapsed_ShowOnlyErrorRangeAndTheButtons()
     {
@@ -2659,59 +2659,25 @@ public class FilterPanelTests : BunitContext
         Assert.DoesNotContain("Reset", cut.Markup);
     }
 
-    // The ruled placement (halheinrich/backgammon#153) survives the toggle that
-    // used to share the row: Clear filters keeps the leftmost position on a row
-    // of its own, directly above the first facet row. Pinned as DOM
-    // relationships, not markup offsets — being first on its row and that row
-    // being the one before the rows *is* the placement the ruling is about, so
-    // this asserts the intent rather than passing on an accident of document
-    // order.
+    // The ruled placement (halheinrich/backgammon#230): the panel's two
+    // gestures share one row, Apply first and Clear immediately to its right.
+    // Pinned once, as the row's button order — the ruling is about which
+    // buttons sit on the commit row and in what order, so this reads exactly
+    // that off the DOM rather than asserting markup offsets or a chain of
+    // sibling hops. The row is reached through Apply, the control whose class
+    // identifies it, and Clear is found on it by id: the pin fails if Clear
+    // leaves the row, if a third control joins it, or if the two swap.
     [Fact]
-    public void ClearButton_IsAloneAndLeftmostOnTheRowAboveTheFacetRows()
-    {
-        var cut = Render<FilterPanel>();
-
-        var clearRow = cut.Find("#clearFilters").ParentElement!;
-        var onlyButton = Assert.Single(clearRow.QuerySelectorAll("button"));
-        Assert.Equal("clearFilters", onlyButton.Id);
-        Assert.Equal("clearFilters", clearRow.FirstElementChild?.Id);
-
-        Assert.Equal(
-            $"facetToggle_{RowFacets[0]}",
-            clearRow.NextElementSibling?.FirstElementChild?.Id);
-    }
-
-    // The other end of the same move: Clear left the commit row, so Apply is
-    // the only control there. Its own test rather than a second assertion on
-    // the adjacency pin — one intent each, so each keeps its own failure.
-    [Fact]
-    public void ApplyRow_CarriesApplyAlone()
+    public void ApplyRow_CarriesApplyThenClear()
     {
         var cut = Render<FilterPanel>();
 
         var applyRow = cut.Find("button.btn-primary").ParentElement!;
-        var onlyButton = Assert.Single(applyRow.QuerySelectorAll("button"));
-        Assert.Equal("Apply Filter", onlyButton.TextContent.Trim());
-    }
 
-    // The placement survives the state most able to move it: badges come and go
-    // on the rows below as filters are set and cleared, and Clear filters is on
-    // none of those rows, so nothing it does not own can slide it sideways.
-    // That independence is the whole reason the ruling's row is now its own.
-    [Fact]
-    public void ClearButton_KeepsItsPlaceWhileRowBadgesComeAndGo()
-    {
-        var cut = RenderExpanded(FilterFacet.ContactTypes);
-
-        cut.Find("#ct_Race").Change(true);
-        ExpandFacets(cut, FilterFacet.ContactTypes);   // collapse — the badge lights
-        Assert.NotNull(cut.Find("#facetBadge_ContactTypes"));
-
-        var clearRow = cut.Find("#clearFilters").ParentElement!;
-        Assert.Equal("clearFilters", Assert.Single(clearRow.QuerySelectorAll("button")).Id);
         Assert.Equal(
-            $"facetToggle_{RowFacets[0]}",
-            clearRow.NextElementSibling?.FirstElementChild?.Id);
+            ["Apply Filter", "Clear filters"],
+            applyRow.QuerySelectorAll("button").Select(b => b.TextContent.Trim()));
+        Assert.Equal("clearFilters", applyRow.QuerySelectorAll("button")[1].Id);
     }
 
     // Clearing raises the empty config, judged by the lib's own predicates —

@@ -122,22 +122,6 @@
             }
         </div>
 
-        @* ── Clear filters ────────────────────────────────────────────────────
-           Alone on its own row now, in the leftmost position the disclosure
-           toggle used to hold — the placement ruled in
-           halheinrich/backgammon#153, which the toggle's removal does not
-           re-rule. It is the full-clear gesture under an honest name: it
-           clears filter values only (buffers to defaults, persist + raise the
-           empty config) — it never touches host state, and never opens or
-           closes a row, so it claims nothing about what is on screen. *@
-        <div class="mb-3 d-flex gap-2 align-items-center">
-            <button type="button" id="clearFilters"
-                    class="btn btn-outline-secondary btn-sm"
-                    @onclick="ClearFiltersAsync">
-                Clear filters
-            </button>
-        </div>
-
         @* ── Facet rows ───────────────────────────────────────────────────────
            One collapsible row per offered facet, one tier, directly under the
            always-visible error range and in the lib's FilterFacet declaration
@@ -547,19 +531,33 @@
             </div>
         </div>)
 
-        @* ── Apply ────────────────────────────────────────────────────────────
-           The commit button, alone on this row since "Clear filters" moved up
-           to the row above the facet rows (halheinrich/backgammon#153). The
-           flex row stays: it keeps Apply shrink-to-content rather than letting
-           the button stretch, and it keeps the disabled-reason line reading as
-           the line under the button, which is how the help describes it.
+        @* ── Apply and Clear ──────────────────────────────────────────────────
+           The panel's two gestures on one row, Apply first and "Clear filters"
+           immediately to its right at the flex row's standard gap — the
+           placement ruled in halheinrich/backgammon#230. Clear sat alone above
+           the facet rows from halheinrich/backgammon#153 until then, in the
+           seat it shared with the Hide/Show toggle; halheinrich/backgammon#193
+           removed that toggle, so the seat outlived its reason and the two
+           gestures now read where the user commits, left to right in the order
+           they are reached for.
+
+           The flex row keeps both buttons shrink-to-content rather than letting
+           either stretch, and it keeps the disabled-reason line reading as the
+           line under the buttons, which is how the help describes it.
+
            Apply is gated on CanApply: the position pattern must be committable
            AND the selection must differ from the last-committed config.
            ApplyDisabledReason explains the second case in the
            NamedEntriesPanel disabled-reason idiom (title + muted hint line);
            the first already explains itself in the pattern field's own
            invalid-feedback line. Hoisted into a local like the active-facet
-           set above: both surfaces of the reason read the one evaluation. *@
+           set above: both surfaces of the reason read the one evaluation.
+
+           Clear is the full-clear gesture under an honest name and is never
+           gated: it clears filter values only (buffers to defaults, persist +
+           raise the empty config) — it never touches host state, and never
+           opens or closes a row, so it claims nothing about what is on
+           screen. *@
         @{ var applyDisabledReason = ApplyDisabledReason; }
         <div class="d-flex gap-2">
             <button class="btn btn-primary btn-sm"
@@ -567,6 +565,11 @@
                     title="@applyDisabledReason"
                     @onclick="ApplyAsync">
                 Apply Filter
+            </button>
+            <button type="button" id="clearFilters"
+                    class="btn btn-outline-secondary btn-sm"
+                    @onclick="ClearFiltersAsync">
+                Clear filters
             </button>
         </div>
         @if (applyDisabledReason is not null)
