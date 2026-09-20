@@ -244,11 +244,20 @@
         </p>
     </section>
 
-    @* Storage copy — the two keys are rendered from FilterPanel's own internal
-       constants, never written here as prose literals, so the names a reader
+    @* Storage copy — every key is rendered from FilterPanel's own internal
+       constant, never written here as a prose literal, so the names a reader
        verifies in devtools cannot drift from the names the panel actually
        writes. Scope is exactly what FilterPanel itself persists: a sibling key
-       belonging to a host app is that host's to document, not this panel's. *@
+       belonging to a host app is that host's to document, not this panel's.
+
+       The prose around the list never says how MANY entries there are, and
+       must not start (halheinrich/backgammon#231). The list is the count: a
+       sentence that restates it is a second copy of a fact the reader can see,
+       and it goes stale the moment a key is added — which is exactly what
+       happened when the container's key arrived and left this one section
+       saying "three" above the list and "both" below it. Point at the list
+       ("the entries below", "these entries") and the next key cannot re-break
+       the copy. *@
     <section>
         @Heading(SectionLevel, StorageSectionAnchorId, StorageSectionHeading)
         <p>
@@ -259,10 +268,10 @@
             you analyzed.
         </p>
         <p>
-            There are three saved entries, all kept in your browser's local
-            storage for this site. They survive reloading the page and closing
-            the browser, and they are tied to this browser and this site — so
-            another browser, or another machine, starts fresh:
+            The entries below are kept in your browser's local storage for this
+            site. They survive reloading the page and closing the browser, and
+            they are tied to this browser and this site — so another browser,
+            or another machine, starts fresh:
         </p>
         <ul>
             <li>
@@ -285,7 +294,7 @@
             </li>
         </ul>
         <p>
-            You can see both entries under local storage for this site in your
+            You can see these entries under local storage for this site in your
             browser's developer tools, and delete them there whenever you like.
         </p>
     </section>

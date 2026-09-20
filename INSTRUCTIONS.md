@@ -242,12 +242,15 @@ The placeholder's examples, the hint line, and both verdicts all render
 `RetiredMoney` — see Pitfalls.
 
 **Information hierarchy** (dogfooding-driven, re-ruled in
-`halheinrich/backgammon#193`): the error-range section is first and always
+`halheinrich/backgammon#193`, folded once more in
+`halheinrich/backgammon#231`): the error-range section is first and always
 visible — it is the panel's most-used control. Each of the other eight
-facets is **its own collapsible row**, one tier, directly beneath it and in
-`FilterFacet` declaration order (player names, decision type, match scores,
-move number range, contact type, analysis depth, dice rolls, position
-pattern). Every row is an honest disclosure — a real `<button>`
+facets is **its own collapsible row**, one tier, in `FilterFacet`
+declaration order (player names, decision type, match scores, move number
+range, contact type, analysis depth, dice rolls, position pattern), and all
+eight rows sit **behind one further disclosure** — the container described
+below — so the panel at rest is the error range and the two buttons. Every
+row is an honest disclosure — a real `<button>`
 (`#facetToggle_<Facet>`) carrying `aria-expanded` / `aria-controls` over an
 always-rendered `#facet_<Facet>` region whose children render only while
 expanded (absent from the DOM when collapsed, not styled away), named by the
@@ -268,6 +271,55 @@ panel with an accessible name; the others have none, which predates this arc
 and is booked as `halheinrich/backgammon#196`. The regions deliberately carry
 no `role="group"` — unruled, and the level groups do not carry it either.
 
+**The container over the rows** (`halheinrich/backgammon#231`) is the rows'
+own idiom one tier up: a real `<button>` (`#moreFiltersToggle`) carrying
+`aria-expanded` / `aria-controls` over an always-rendered `#moreFilters`
+region whose children render only while expanded, with the same decorative
+`aria-hidden` `+`/`−` glyph. **Folded is the resting state.** Its ids are the
+rows' mould without the per-facet suffix a singleton has no use for —
+`moreFiltersToggle`, `moreFilters`, `moreFiltersBadge` — and deliberately
+*not* `facetToggle_` / `facet_` / `facetBadge_` shaped: those prefixes are
+surveyed as "the rows", here and in both hosts, so a container answering to
+one would misreport itself as a ninth row. Its badge counts the rows whose
+facet is set (`RowFacets.Count(ActiveFacets.Contains)`, the rows' own lib
+ruling, never a second count) and speaks only while folded; `ErrorRange` is
+never in it, because it is not behind this fold.
+
+**Its name flips with the fold** (`halheinrich/backgammon#239`): *More
+filters* folded, *Fewer filters* expanded, so the control says what the next
+click does rather than describing the state the reader is looking at. The two
+words and the rule that picks between them have **one owner** —
+`MoreFiltersFoldedLabel`, `MoreFiltersExpandedLabel` and the private
+`MoreFiltersLabel` on `FilterPanel` — and nothing else spells either: the
+markup renders `MoreFiltersLabel`, `FilterHelp` names the control once by
+both constants and says "the fold" thereafter, and a source survey in the
+suite holds each literal to that one definition. The accessible name follows
+because it *is* the visible label — the button's own text, with only the
+glyph held out of it.
+
+**The container reads as the rows' parent, and that is drawn, not merely
+meant** (`halheinrich/backgammon#239` — shipped flat in `1.11.0`'s candidate,
+where the toggle sat at the rows' left edge, size, weight and colour and the
+user read it as no collapse widget at all). Three structural marks: the
+`#moreFilters` region indents its rows as a group with `ms-3`, the step a
+row's own body already takes under its header, so the panel says "inside" one
+way at both tiers; the toggle takes header weight (`fw-bold`, the card
+header's `<strong>` in utility form) and **drops `btn-sm`**, which was the
+rows' tier borrowed — the small scale marks the repeated tier and the control
+over it is not of it; and the region takes an `mt-3` gap after the toggle
+while it is open. No colour is added — `btn-link`'s blue already says
+"activates". It stays a `<button>`, **never a heading element**: what outline
+the panel sits in is the host's to know, which is why `FilterHelp` takes a
+`HeadingLevel` and this guesses none.
+
+**Row spacing is the body's, not the row's** (`halheinrich/backgammon#239`).
+The row wrapper carries no margin, so a stack of one-line headers reads as
+one list; the `mb-3` step rides on the `#facet_<Facet>` region and **only
+while that region has children**, so an expanded body keeps space beneath it
+without putting a blank line back between collapsed headers. The container's
+own gap is conditional for the same reason: folded, it keeps its tight line
+to the buttons below.
+
 Which rows are open is the user's, persisted under its own localStorage key
 (`xg_expandedFilters`, a JSON array of `FilterFacet` member names written in
 row order) — never inside the config blob, and never moved by `LoadConfig`
@@ -278,6 +330,20 @@ than salvaging part of it. The panel only ever writes row names, so anything
 else is corruption, and half-honouring it would open a set the user never
 chose. The key this replaced is neither read nor migrated: a display
 preference that resets once is not data.
+
+Whether the **container** is open is the user's in the same way, and it
+persists under **its own** key (`xg_moreFiltersOpen`) rather than joining the
+rows' set: that set's vocabulary is `FilterFacet` member names and the
+container is not a facet, so a sentinel name in it would be exactly the
+corruption its all-or-nothing restore exists to refuse. The value is the
+literal `true` or `false` — one bit needs no serializer, which leaves the
+rows' key the only value this panel serializes itself — and anything
+unreadable leaves the container folded, the posture a fresh visit gets.
+`LoadConfig` and Clear filters never move it, and toggling it is navigation,
+not an edit (no `OnAppliedStateChanged`). A row the user left open is still
+open when the container is next opened, whether or not the container was
+folded over it in between — which is the whole reason the two preferences are
+two keys.
 
 **Row badges**: while collapsed, a row carries a badge
 (`#facetBadge_<Facet>`) exactly when its facet holds an active filter. The
@@ -510,14 +576,21 @@ level (pinned).
 A final non-facet section, **What the panel remembers**
 (`StorageSectionAnchorId`), is the storage-assurance copy: it states in
 user terms that the panel saves its settings in the reader's own browser
-on their own machine and uploads nothing, and it names both
-`localStorage` entries — the applied config and the open-row
-preference — so a reader can verify them in devtools. Both key names are
-**rendered from `FilterPanel`'s own constants** (`ConfigKey` /
-`DisclosureKey`, `internal` for exactly this), never written as prose
-literals, so the copy cannot drift from what the panel actually writes.
-Scope is exactly what `FilterPanel` persists: a sibling `xg_*` key
-belonging to a host app is that host's to document. A host with its own
+on their own machine and uploads nothing, and it names each `localStorage`
+entry the panel writes — the applied config, the open-row preference, and
+whether the fold over those rows is open — so a reader can verify them in
+devtools. Every key name is **rendered from `FilterPanel`'s own constants**
+(`ConfigKey` / `DisclosureKey` / `MoreFiltersKey`, `internal` for exactly
+this), never written as prose literals, so the copy cannot drift from what
+the panel actually writes. **The prose around that list never counts it**
+(`halheinrich/backgammon#231`): the list is the count, so a sentence saying
+how many entries there are is a second copy of a fact the reader can see, and
+it goes stale the day a key is added — which is what happened when the
+container's key arrived and left the one section saying "three" above the
+list and "both" below it. The copy points at the list instead ("the entries
+below", "these entries"), so the next key cannot re-break it. Scope is
+exactly what `FilterPanel` persists: a sibling `xg_*` key belonging to a host
+app is that host's to document. A host with its own
 data-ownership copy points *into* this section rather than restating it
 (BgQuiz's Help does that) — the same one-owner rule as the facet prose.
 That link is a code contract, not a prose one: the section's id and its
@@ -756,6 +829,21 @@ are deliberately `internal` — `FilterSurface` is their only intended
 caller (its source-change rule and its first-mount reconcile
 respectively), so neither is host-facing surface (see Architecture and
 Pitfalls).
+
+Five `internal const string`s, and **`internal` is the whole point of
+them**: `FilterHelp` is their only reader, so the copy it renders and the
+thing the panel actually does have one source. Not `public` — no consumer
+may see, let alone depend on, this panel's storage keys or name its chrome.
+
+- `ConfigKey` (`xg_filter_config`) / `DisclosureKey`
+  (`xg_expandedFilters`) / `MoreFiltersKey` (`xg_moreFiltersOpen`) — the
+  three `localStorage` entries, rendered into the help's storage section
+  as the names a reader verifies in devtools.
+- `MoreFiltersFoldedLabel` (*More filters*) / `MoreFiltersExpandedLabel`
+  (*Fewer filters*) — the container toggle's two names, rendered into the
+  markup through the private `MoreFiltersLabel` rule and into the help's
+  one naming sentence. The rule stays `private`: only the panel renders
+  *a* label, and the help names both and leaves the choosing alone.
 
 ### `NamedEntriesPanel<TValue, TSelf>`
 
@@ -1007,7 +1095,8 @@ producer-side, so neither widens what consumers can see.
   framing means *where the panel sits in this app and what pressing Apply
   unlocks here*, never what the controls do.
 - **The storage keys are a documented surface now — `internal`, and no
-  wider.** `ConfigKey` / `DisclosureKey` on `FilterPanel` are `internal`
+  wider.** `ConfigKey` / `DisclosureKey` / `MoreFiltersKey` on
+  `FilterPanel` are `internal`
   solely so `FilterHelp` can render the names it tells users to look for
   in devtools from the one constant. Two consequences. (1) Renaming a
   key is a user-facing copy change as well as a storage-format change:
@@ -1073,8 +1162,8 @@ producer-side, so neither widens what consumers can see.
   toggle.
 - **The saved-filters file names are `public` — deliberately opposite to
   the internal storage-key rule.** `FilterPanel.ConfigKey` /
-  `DisclosureKey` stay `internal` because no consumer may know or depend
-  on this panel's localStorage keys. `SavedFiltersDocument.FileName` /
+  `DisclosureKey` / `MoreFiltersKey` stay `internal` because no consumer
+  may know or depend on this panel's localStorage keys. `SavedFiltersDocument.FileName` /
   `LegacyFileName` are the opposite kind of fact: the shared file name is
   user-facing copy every host must render — help pages, the composite's
   degrade notices — so one public source is the SSOT move, and each host
@@ -1119,16 +1208,29 @@ producer-side, so neither widens what consumers can see.
   `RetiredMoney` (and `RetiredMoneyReplacements` for what to offer in
   place of the retired one) across the placeholder, the hint line, both
   verdicts, and `FilterHelp`'s match-scores prose; `FilterPanel.ConfigKey`
-  / `DisclosureKey` for the storage names; `FilterFacet` / enum
+  / `DisclosureKey` / `MoreFiltersKey` for the storage names;
+  `FilterPanel.MoreFiltersFoldedLabel` / `MoreFiltersExpandedLabel` for
+  the container toggle's two names, in the markup and in the help alike;
+  `FilterFacet` / enum
   `[Description]`s via `ToLabel()` for every label. A second literal
   agrees today and drifts silently the day the grammar respells a token —
   which is exactly what the bare money token did in
   `halheinrich/backgammon#121`, and the reason those constants are
-  exported at all. **The rule binds the tests too**: a pin that re-types
-  the spelling is a third copy, and it would keep passing through the
-  drift it exists to catch. Where an *absence* must be pinned and a
-  substring check cannot serve — the retired spelling is a prefix of both
-  live ones — ask the grammar word by word (`GetFault`) rather than
+  exported at all. **The rule binds the tests too, with one carve-out that
+  is not an exception to it**: a pin that re-types a spelling *it is
+  following* is a third copy, and it would keep passing through the drift
+  it exists to catch — so a pin on what the panel renders asks the owner.
+  But a pin on what the panel was **ruled** to say is an oracle, and an
+  oracle that imports the constant under test asserts only that the
+  constant equals itself: it passes against an emptied one. The two ruled
+  container labels are pinned as independent literals in
+  `FilterPanelTests` for exactly that reason
+  (`halheinrich/backgammon#239`), as `RowFacets` is, and a source survey
+  in the same suite holds every *other* spelling of them in the tree to
+  the one definition on `FilterPanel` — which is what keeps the oracle
+  from quietly becoming a second owner. Where an *absence* must be pinned
+  and a substring check cannot serve — the retired spelling is a prefix of
+  both live ones — ask the grammar word by word (`GetFault`) rather than
   reaching for a literal.
 - **`TryGetEditedConfig` is Apply's validity gate, and must stay exactly
   that.** Both directions matter. Stricter, and save-as refuses a
