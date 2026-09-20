@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using AngleSharp.Dom;
 using Bunit;
@@ -27,6 +28,17 @@ public class FilterPanelTests : BunitContext
     private const string ConfigKey = "xg_filter_config";
     private const string DisclosureKey = "xg_expandedFilters";
     private const string MoreFiltersKey = "xg_moreFiltersOpen";
+
+    // The two words the container's toggle wears, and which fold each belongs
+    // to — the user's ruling (halheinrich/backgammon#239). Independent
+    // literals rather than a read of the panel's own constants, RowFacets'
+    // posture for RowFacets' reason: what the control is CALLED is the
+    // ruling, so respelling it has to be ruled on here rather than followed
+    // silently — a pin that rendered the constant would agree with whatever
+    // word the panel chose next. The survey at the foot of this file is what
+    // keeps these the only other copies in the tree.
+    private const string FoldedLabel = "More filters";
+    private const string ExpandedLabel = "Fewer filters";
 
     // Every facet the panel gives a row, in render order. An independent
     // literal rather than a projection of anything the panel exposes: the
@@ -2152,16 +2164,127 @@ public class FilterPanelTests : BunitContext
         Assert.Empty(cut.FindAll("#moreFilters *"));
     }
 
-    // Its name is the ruled label and nothing else — the +/− glyph is
-    // decorative and says so, the rows' idiom one tier up.
+    // Its name is the ruled label for the fold it is currently in, and
+    // nothing else — the +/− glyph is decorative and says so, the rows' idiom
+    // one tier up. The label the panel shows is also the name a screen reader
+    // computes, because it is the same text: nothing here sets an aria-label
+    // that could say one thing while the button says another.
+    //
+    // Both states are read off ONE panel across real toggles rather than off
+    // two fresh mounts: what the ruling asks for is that the words move when
+    // the fold does, and a pin that mounted each state separately would pass a
+    // panel whose label never moved at all. The return trip is pinned too — a
+    // label that flipped once and stuck would be the same defect one click
+    // later.
     [Fact]
-    public void MoreFiltersToggle_IsNamedByItsRuledLabel()
+    public void MoreFiltersToggle_IsNamedByTheRuledLabelForItsState()
     {
         var cut = Render<FilterPanel>();
 
+        var folded = cut.Find("#moreFiltersToggle");
+        Assert.NotNull(folded.QuerySelector("[aria-hidden='true']"));
+        Assert.Null(folded.GetAttribute("aria-label"));
+        Assert.Equal(FoldedLabel, HeaderName(folded));
+
+        OpenMoreFilters(cut);
+
+        var opened = cut.Find("#moreFiltersToggle");
+        Assert.NotNull(opened.QuerySelector("[aria-hidden='true']"));
+        Assert.Null(opened.GetAttribute("aria-label"));
+        Assert.Equal(ExpandedLabel, HeaderName(opened));
+
+        FoldMoreFilters(cut);
+
+        Assert.Equal(FoldedLabel, HeaderName(cut.Find("#moreFiltersToggle")));
+    }
+
+    // The hierarchy this container was rejected for not drawing
+    // (halheinrich/backgammon#239): shipped flat, its toggle sat at the rows'
+    // own left edge, size and weight, so the control that folds the panel read
+    // as the first of nine identical links. Two marks fix it, and this pins
+    // both as a DIFFERENCE from a row rather than as a class list in
+    // isolation — what the ruling asks for is that the two be told apart on
+    // sight, so a row's own toggle is the other half of every assertion.
+    [Fact]
+    public void MoreFiltersToggle_ReadsAsTheRowsParent_NotAsANinthRow()
+    {
+        // The first row is opened too, so the body whose indentation the
+        // region's borrows is on screen to be compared against.
+        var cut = RenderExpanded(RowFacets[0]);
+
         var toggle = cut.Find("#moreFiltersToggle");
-        Assert.NotNull(toggle.QuerySelector("[aria-hidden='true']"));
-        Assert.Equal("More filters", HeaderName(toggle));
+        var row = cut.Find($"#facetToggle_{RowFacets[0]}");
+
+        // Header weight, the card header's <strong> in utility form.
+        Assert.Contains("fw-bold", toggle.ClassList);
+        Assert.DoesNotContain("fw-bold", row.ClassList);
+
+        // And not the rows' scale: btn-sm is what marks the repeated tier, and
+        // the control over that tier is not of it.
+        Assert.DoesNotContain("btn-sm", toggle.ClassList);
+        Assert.Contains("btn-sm", row.ClassList);
+
+        // The rows indent under it as a group — the region's mark, and the
+        // same step a row's own body already takes under its header, so the
+        // panel says "inside" one way at both tiers.
+        Assert.Contains("ms-3", cut.Find("#moreFilters").ClassList);
+        Assert.Contains("ms-3", cut.Find($"#facet_{RowFacets[0]}").FirstElementChild!.ClassList);
+
+        // None of it costs the disclosure its honesty: still a real button
+        // carrying its own state, never a heading element — what outline this
+        // panel sits in is the host's to know.
+        Assert.Equal("BUTTON", toggle.TagName);
+        Assert.Equal("true", toggle.GetAttribute("aria-expanded"));
+        Assert.Equal("moreFilters", toggle.GetAttribute("aria-controls"));
+    }
+
+    // The gap the ruling asks for sits between the toggle and the first row,
+    // and it is the region's: nothing stands between the two but that margin,
+    // and it is there only while the region has rows in it — folded, the
+    // control keeps its tight line to the buttons below.
+    [Fact]
+    public void TheGap_SitsAfterTheToggle_AndOnlyWhileTheRowsShow()
+    {
+        var cut = Render<FilterPanel>();
+
+        var folded = cut.Find("#moreFilters");
+        Assert.Contains("ms-3", folded.ClassList);
+        Assert.DoesNotContain("mt-3", folded.ClassList);
+
+        OpenMoreFilters(cut);
+
+        var opened = cut.Find("#moreFilters");
+        Assert.Contains("mt-3", opened.ClassList);
+        Assert.Equal("moreFiltersToggle", opened.PreviousElementSibling!.Id);
+    }
+
+    // The rows themselves pack tightly: the wrapper that used to draw a blank
+    // line between every pair of them carries no margin at all now, in either
+    // state of the row. Pinned over all eight, because the wrapper is one
+    // RenderFragment and a margin creeping back would creep back everywhere.
+    [Fact]
+    public void RowWrapper_DrawsNoSeparatingMargin()
+    {
+        var cut = RenderExpanded(RowFacets[0]);
+
+        foreach (var facet in RowFacets)
+            Assert.Empty(cut.Find($"#facetToggle_{facet}").ParentElement!.ClassList);
+    }
+
+    // What still needs space beneath it is an expanded BODY, so the next row's
+    // header does not land against the controls above it — so the step rides
+    // on the row's region and only while that region has children. The
+    // collapsed half is the other side of the same ruling: a margin on the
+    // empty region would put the blank line straight back between the headers.
+    [Fact]
+    public void ExpandedRowBody_KeepsSpaceBeneathIt_ACollapsedRowNone()
+    {
+        var cut = RenderExpanded(RowFacets[0]);
+
+        Assert.Contains("mb-3", cut.Find($"#facet_{RowFacets[0]}").ClassList);
+
+        foreach (var collapsed in RowFacets.Skip(1))
+            Assert.Empty(cut.Find($"#facet_{collapsed}").ClassList);
     }
 
     // Opening it reveals the rows themselves, ids and order untouched, and
@@ -3137,5 +3260,93 @@ public class FilterPanelTests : BunitContext
         var setKey = Assert.Single(JSInterop.Invocations["localStorage.setItem"]
             .Select(i => (string?)i.Arguments[0]).Distinct());
         Assert.Equal(ConfigKey, setKey);
+    }
+
+    // ── The ruled labels have one owner ────────────────────────────────────
+
+    // Each ruled label is spelled once in the product tree — at its definition
+    // on the panel — and in no other file but this suite's own ruling above.
+    // That is precisely the claim the shipped panel broke: the words were
+    // producer copy with five owners (the markup, and four sentences of the
+    // help), so the flip could not be made anywhere without being made in five
+    // places, and the help's four would have gone on describing a control that
+    // no longer answered to them.
+    //
+    // Over SOURCE rather than over a rendered tree, because the failure this
+    // catches is a second DEFINITION and a render cannot see one — a help
+    // block that retyped the words would render identically today and drift
+    // tomorrow. It reads the QUOTED literal, so the container's prose name in
+    // comments and doc text is out of scope by construction: that name is the
+    // codebase's vocabulary (moreFiltersToggle, MoreFiltersKey), not the
+    // user's copy, and it does not flip.
+    [Theory]
+    [InlineData(FoldedLabel)]
+    [InlineData(ExpandedLabel)]
+    public void EachRuledLabel_IsSpelledOnceInTheProductTree(string label)
+    {
+        var literal = $"\"{label}\"";
+
+        var spellings = SourceFiles()
+            .Select(f => (f.Relative, Count: Occurrences(File.ReadAllText(f.Full), literal)))
+            .Where(x => x.Count > 0)
+            .ToDictionary(x => x.Relative, x => x.Count, StringComparer.Ordinal);
+
+        Assert.Equal(
+            new[]
+            {
+                "XgFilter_Razor.Tests/FilterPanelTests.cs",
+                "XgFilter_Razor/Components/FilterPanel.razor",
+            },
+            spellings.Keys.Order(StringComparer.Ordinal));
+
+        Assert.Equal(1, spellings["XgFilter_Razor/Components/FilterPanel.razor"]);
+        Assert.Equal(1, spellings["XgFilter_Razor.Tests/FilterPanelTests.cs"]);
+    }
+
+    /// <summary>
+    /// Every hand-written C# and Razor file in the repository, as (absolute,
+    /// repo-relative) pairs. Rooted at this file's own compile-time location
+    /// rather than at the runner's working directory — the idiom the host
+    /// suites use to read source a build never copies to output. Generated
+    /// output is excluded by directory: <c>obj</c> holds a <c>.g.cs</c> for
+    /// every <c>.razor</c> here, and counting those would double every literal
+    /// the survey exists to count once.
+    /// </summary>
+    private static IEnumerable<(string Full, string Relative)> SourceFiles(
+        [CallerFilePath] string thisFile = "")
+    {
+        var root = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(thisFile)!, ".."));
+
+        // A root resolved to the wrong place would survey nothing, and the set
+        // comparison would then fail with a message about missing files rather
+        // than about a missing tree. Say the real cause here instead.
+        Assert.True(
+            Directory.Exists(Path.Combine(root, "XgFilter_Razor", "Components")),
+            $"repository root resolved to '{root}', which is not this repo");
+
+        return Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+            .Where(f => f.EndsWith(".cs", StringComparison.Ordinal)
+                     || f.EndsWith(".razor", StringComparison.Ordinal))
+            .Select(f => (Full: f, Relative: Path.GetRelativePath(root, f).Replace('\\', '/')))
+            .Where(f => !f.Relative.Split('/').Any(s => s is "bin" or "obj" or ".git"))
+            .OrderBy(f => f.Relative, StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// How many times <paramref name="needle"/> occurs in
+    /// <paramref name="text"/>, counting non-overlapping matches ordinally. A
+    /// count, not a containment check: the defect the survey above exists to
+    /// catch is a SECOND spelling inside a file that legitimately holds one.
+    /// </summary>
+    private static int Occurrences(string text, string needle)
+    {
+        var count = 0;
+        for (var i = text.IndexOf(needle, StringComparison.Ordinal); i >= 0;
+             i = text.IndexOf(needle, i + needle.Length, StringComparison.Ordinal))
+        {
+            count++;
+        }
+
+        return count;
     }
 }

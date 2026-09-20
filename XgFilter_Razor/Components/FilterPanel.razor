@@ -26,10 +26,13 @@
    Information hierarchy: the error-range section is first and always visible;
    each of the other eight facets is its own collapsible row, one tier, in the
    lib's FilterFacet declaration order, and all eight rows sit behind one
-   further disclosure — More filters — so the panel at rest is the error range
-   and the two buttons. A collapsed row names its facet and, while that facet
-   holds an active filter, carries a badge; the folded container carries the
-   count of those — see the facet-row and More-filters comments for how
+   further disclosure — the container whose toggle names itself from
+   MoreFiltersFoldedLabel / MoreFiltersExpandedLabel — so the panel at rest is
+   the error range and the two buttons. That container reads as the rows'
+   parent rather than as a ninth row: it carries header weight, and its region
+   indents the rows under it. A collapsed row names its facet and, while that
+   facet holds an active filter, carries a badge; the folded container carries
+   the count of those — see the facet-row and container comments for how
    presence and wording divide.
    State persists to localStorage under three keys: the whole filter selection
    as one serialized FilterConfig blob (lib-owned shape via FilterConfig.ToJson
@@ -182,7 +185,19 @@
            ReportAppliedState. The container below keeps its own open state the
            same way, under its own key; a row the user left open is still open
            when the container is next opened, whether or not the container was
-           folded over it in between. *@
+           folded over it in between.
+
+           Spacing is the row's, and it belongs to the BODY rather than to the
+           row (halheinrich/backgammon#239). The rows pack tightly against one
+           another — a stack of one-line headers reads as one list, and the
+           blank line the wrapper's mb-3 used to draw between them made eight
+           siblings look like eight sections. What still needs a gap beneath it
+           is an expanded body, so the next row's header does not sit against
+           the controls above it; so the step rides on the #facet_<Facet>
+           region and only while that region has children. Conditional, not
+           unconditional: the region is rendered in both states, and a margin
+           on the empty one would put the blank line straight back between
+           collapsed rows. One step throughout — mb-3, the panel's own. *@
         @{
             var activeFacets = ActiveFacets;
 
@@ -193,7 +208,7 @@
                     ? FacetBadgeText(facet)
                     : null;
 
-                return @<div class="mb-3">
+                return @<div>
                     <button type="button" id="facetToggle_@facet"
                             class="btn btn-link btn-sm p-0 text-decoration-none"
                             aria-expanded="@(expanded ? "true" : "false")"
@@ -206,7 +221,7 @@
                             <span id="facetBadge_@facet" class="badge text-bg-primary ms-1">@badge</span>
                         }
                     </button>
-                    <div id="facet_@facet">
+                    <div id="facet_@facet" class="@(expanded ? "mb-3" : null)">
                         @if (expanded)
                         {
                             @body
@@ -216,7 +231,7 @@
             }
         }
 
-        @* ── More filters ────────────────────────────────────────────────────
+        @* ── More / Fewer filters ─────────────────────────────────────────────
            One disclosure over all eight rows (halheinrich/backgammon#231), so
            the panel at rest is the error range and the two buttons — the two
            things a returning user reaches for — and everything else is one
@@ -252,22 +267,58 @@
            exactly the corruption its all-or-nothing restore exists to refuse.
            LoadConfig and Clear filters never move it, as with the rows —
            opening or closing it is navigation, not an edit, so no
-           ReportAppliedState. *@
+           ReportAppliedState.
+
+           Its hierarchy is drawn, not merely meant (halheinrich/backgammon#239).
+           Shipped flat, this control was measured expanded at the rows' own
+           left edge, size, weight and colour, one 24px rhythm with no gap: the
+           thing that folds the panel read as the first of nine identical links,
+           told apart only by its glyph. Two marks fix that and both are
+           structural rather than decorative. The REGION indents its rows as a
+           group — ms-3, the same step a row's own body already takes under its
+           header, so the panel says "inside" one way at both tiers rather than
+           inventing a second. The TOGGLE takes header weight: fw-bold, the
+           card header's <strong> in utility form, and it drops btn-sm, which
+           was the rows' tier borrowed — the small scale is what marks the
+           repeated tier, and the control over that tier is not of it. That
+           lands it at the card body's own font size, bold, a tier above the
+           14px regular of the rows it governs. No colour is added: btn-link's
+           blue already says "activates", and a second colour here would be a
+           second meaning to learn. It stays a button, not a heading element:
+           what outline this panel sits in is the host's to know (FilterHelp
+           takes a HeadingLevel for exactly that reason) and a hard-coded <h_>
+           here would malform an outline this component cannot see.
+
+           The gap after the toggle is the region's too, and conditional for
+           the rows' reason one tier down: mt-3 while it has children, nothing
+           while it is folded, so the resting panel keeps the tight line
+           between this control and the buttons below.
+
+           Its NAME flips with the fold — MoreFiltersFoldedLabel while folded,
+           MoreFiltersExpandedLabel while open — so the control says what the
+           next click does rather than describing a state the user is already
+           looking at. The two words and the rule that picks between them live
+           together beside MoreFiltersKey and nowhere else: the markup renders
+           MoreFiltersLabel, FilterHelp renders the pair, and neither retypes
+           either — the same one-owner rule the row headers keep by rendering
+           ToLabel(). The accessible name follows the visible label because it
+           IS the visible label: the button's own text, with only the glyph
+           held out of it as aria-hidden. *@
         @{ var setRowCount = RowFacets.Count(activeFacets.Contains); }
         <div class="mb-3">
             <button type="button" id="moreFiltersToggle"
-                    class="btn btn-link btn-sm p-0 text-decoration-none"
+                    class="btn btn-link p-0 text-decoration-none fw-bold"
                     aria-expanded="@(_moreFiltersExpanded ? "true" : "false")"
                     aria-controls="moreFilters"
                     @onclick="ToggleMoreFiltersAsync">
                 <span aria-hidden="true">@(_moreFiltersExpanded ? "−" : "+")</span>
-                More filters
+                @MoreFiltersLabel
                 @if (!_moreFiltersExpanded && setRowCount > 0)
                 {
                     <span id="moreFiltersBadge" class="badge text-bg-primary ms-1">@setRowCount set</span>
                 }
             </button>
-            <div id="moreFilters">
+            <div id="moreFilters" class="ms-3 @(_moreFiltersExpanded ? "mt-3" : string.Empty)">
                 @if (_moreFiltersExpanded)
                 {
                     @* ── Player ──────────────────────────────────────────────── *@
@@ -770,7 +821,7 @@
     internal const string DisclosureKey = "xg_expandedFilters";
 
     /// <summary>
-    /// Whether the <b>More filters</b> container is open — the one disclosure
+    /// Whether the container over the rows is open — the one disclosure
     /// over all eight rows (halheinrich/backgammon#231). Its own key, beside
     /// <see cref="DisclosureKey"/> rather than inside it: that key's value is a
     /// list of <see cref="FilterFacet"/> member names and this container is not
@@ -791,6 +842,40 @@
     /// remarks.
     /// </remarks>
     internal const string MoreFiltersKey = "xg_moreFiltersOpen";
+
+    /// <summary>
+    /// What the container's toggle is called while the rows are folded away
+    /// behind it — the words on the control, and the accessible name that
+    /// follows from them.
+    /// </summary>
+    /// <remarks>
+    /// <c>internal</c> for <see cref="ConfigKey"/>'s reason and no other: it
+    /// is how <see cref="FilterHelp"/> names this control in prose without
+    /// retyping it, exactly as that block renders a facet heading from the
+    /// lib's <c>ToLabel()</c> rather than spelling the facet out. Deliberately
+    /// not <c>public</c> — a consumer must never name this panel's chrome,
+    /// which is why the copy that does is producer-owned and lives here.
+    /// </remarks>
+    internal const string MoreFiltersFoldedLabel = "More filters";
+
+    /// <summary>
+    /// What the same toggle is called while the rows are showing — the
+    /// gesture it now offers, not the state the user is already looking at
+    /// (<c>halheinrich/backgammon#239</c>). <see cref="MoreFiltersFoldedLabel"/>'s
+    /// twin in every other respect, including why it is <c>internal</c>.
+    /// </summary>
+    internal const string MoreFiltersExpandedLabel = "Fewer filters";
+
+    /// <summary>
+    /// Which of the two the toggle wears right now — the rule that picks
+    /// between them, owned here with the words themselves so the panel's
+    /// markup and <see cref="FilterHelp"/>'s prose cannot disagree about what
+    /// the control is called in either state. <c>private</c> because only this
+    /// panel renders a label: the help names both and leaves the choosing
+    /// alone, and no test needs the rule when it can read the button.
+    /// </summary>
+    private string MoreFiltersLabel =>
+        _moreFiltersExpanded ? MoreFiltersExpandedLabel : MoreFiltersFoldedLabel;
 
     // Free-text / numeric buffers. These exist only because in-progress typing
     // needs a string distinct from the parsed value; they are transient

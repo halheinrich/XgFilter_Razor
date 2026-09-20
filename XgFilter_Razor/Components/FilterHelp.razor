@@ -50,20 +50,30 @@
        the filter rows and their badges, the Apply gate and its two
        disabled states are the panel's behavior, so a host restating them
        would be a second encoding that drifts. Placed before the facets: it is
-       the frame a reader needs in order to find and commit any of them. *@
+       the frame a reader needs in order to find and commit any of them.
+
+       This block is where the fold over the rows is NAMED, once, by both of
+       the words it wears — rendered from the panel's own constants, never
+       retyped, the rule this block already keeps for every facet heading
+       (halheinrich/backgammon#239). Every later mention, here and in the
+       storage section, says "the fold" and leaves the naming to this
+       sentence: two labels spelled in five places would be ten copies to
+       drift, and a reader who has met the control once does not need it
+       re-introduced. *@
     <section>
         @Heading(SectionLevel, ChromeSectionAnchorId, "Setting and applying filters")
         <p>
             Only <em>Error range</em> is shown open at first — it is the one
             most people reach for. Every other filter sits on its own row that
             you open and close, and those rows are themselves folded away
-            behind <em>More filters</em>, so at rest the panel is the error
-            range and the buttons. Whatever you left open — <em>More
-            filters</em> itself, and the rows inside it — is open again next
-            time. While a row is closed, a badge on it says the filter inside
-            is set, and while <em>More filters</em> is folded, a badge on it
-            counts how many of the filters behind it are set, so a filter you
-            set earlier can never be quietly out of sight.
+            behind a single control — <em>@FilterPanel.MoreFiltersFoldedLabel</em>
+            while they are hidden, <em>@FilterPanel.MoreFiltersExpandedLabel</em>
+            while they are showing — so at rest the panel is the error range
+            and the buttons. Whatever you left open — that fold itself, and the
+            rows inside it — is open again next time. While a row is closed, a
+            badge on it says the filter inside is set, and while the fold is
+            closed, a badge on it counts how many of the filters behind it are
+            set, so a filter you set earlier can never be quietly out of sight.
         </p>
         <p>
             Nothing you type or check takes effect until you press <em>Apply
@@ -78,8 +88,8 @@
         <p>
             <em>Clear filters</em> empties every filter and applies that
             immediately, giving you the unfiltered set back in one gesture. It
-            changes only the filters — what you have open, rows and
-            <em>More filters</em> alike, is left exactly as you had it.
+            changes only the filters — what you have open, the rows and the
+            fold over them alike, is left exactly as you had it.
         </p>
     </section>
 
@@ -267,11 +277,11 @@
                 Clear filters never changes it.
             </li>
             <li>
-                <code>@FilterPanel.MoreFiltersKey</code> — whether
-                <em>More filters</em>, the fold those rows sit behind, is open.
-                A display preference in the same way, and kept in its own entry
-                because it is its own choice: folding the panel away does not
-                disturb which rows you left open inside it.
+                <code>@FilterPanel.MoreFiltersKey</code> — whether the fold
+                that all of those rows sit behind is open. A display preference
+                in the same way, and kept in its own entry because it is its
+                own choice: folding the panel away does not disturb which rows
+                you left open inside it.
             </li>
         </ul>
         <p>
