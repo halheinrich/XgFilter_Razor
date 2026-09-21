@@ -67,7 +67,7 @@
            component renders nothing while it is false, whether the notice was
            never armed or is over. *@
         <Notice id="filterRestoredNotice" class="mb-3"
-                Kind="NoticeKind.Information" Urgency="NoticeUrgency.Polite"
+                Kind="NoticeKind.Information" Announcement="NoticeAnnouncement.Polite"
                 Dismissible="true"
                 @bind-Dismissed:get="!RestoreNotice.IsVisible"
                 @bind-Dismissed:set="_ => RestoreNotice.Dismiss()">
@@ -280,7 +280,8 @@
            ReportAppliedState.
 
            Its hierarchy is drawn, not merely meant (halheinrich/backgammon#239).
-           Shipped flat, this control was measured expanded at the rows' own
+           Drawn flat in the candidate the user rejected — nothing shipped that
+           way — this control was measured expanded at the rows' own
            left edge, size, weight and colour, one 24px rhythm with no gap: the
            thing that folds the panel read as the first of nine identical links,
            told apart only by its glyph. Two marks fix that and both are

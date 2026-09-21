@@ -39,7 +39,7 @@ https://github.com/halheinrich/XgFilter_Razor — branch `main`.
   owns both the set and its order, so the panel enumerates `All` and never
   builds a local roll list.
 - **BgUiPrimitives_Razor** — `Notice`, with its selectors `NoticeKind` and
-  `NoticeUrgency`: the one owner of alert markup across the umbrella
+  `NoticeAnnouncement`: the one owner of alert markup across the umbrella
   (`halheinrich/backgammon#248`, under the umbrella's `SPEC-notices.md`).
   This member's boxes render through it, so its `.razor` files name what
   each box *is* and the component owns what that means in classes, roles
@@ -190,9 +190,8 @@ In the restore notice the user's close gesture and the owning gesture are
 because both mean the notice is over for this app lifetime and nothing reads
 the difference; a second bit would be a second holder for `Arm()` to
 resurrect around. Closing a notice is never an edit: it reports nothing and
-moves no gate. `NamedEntriesPanel`'s load confirmation is ruled dismissible
-too and is **not yet on `Notice`** — see Pitfalls for why that waits on the
-component's producer.
+moves no gate. `NamedEntriesPanel`'s load confirmation is the same model in
+the generic panel — see that component's section for its holder.
 
 ### `FilterPanel` component
 
@@ -557,6 +556,20 @@ The saved-filters wiring: `OnLoadRequested` → resolve via `TryGet` →
 `FilterPanel.LoadConfig` (a miss throws — see Pitfalls);
 `OnSaveRequested` / `OnSaveAsRequested` → `FilterPanel.TryGetEditedConfig`
 → `With` → persist.
+
+**The load confirmation is the panel's one box, and the panel holds its
+dismissal as the confirmation itself** (`halheinrich/backgammon#248`).
+"{name} loaded." is an event notice, so dismissible under the umbrella's
+`SPEC-notices.md`, and renders through `Notice` inside the standing
+`role="status"` region (the surface's `LoadedNoticeId`), which is rendered
+unconditionally and stays the only announcer: the notice is
+`ByEnclosingRegion` and carries no role or live-region attribute of its own.
+Its occurrence is one accepted load, and the panel owns it outright —
+`_loadedName` is non-null exactly while a confirmation stands — so closing
+the box clears the field, as every other retiring gesture already does, and
+no dismissed bit exists anywhere. Loading the same name again assigns the
+field again and shows fresh: the name was never the occurrence. Every mount
+gets this with no wiring, like the confirmation itself.
 
 ### `FilterHelp` component
 
@@ -1454,7 +1467,7 @@ producer-side, so neither widens what consumers can see.
   distinguishing fact is app-boot identity, and it is carried by lifetime,
   not by a recorded flag: a reload constructs a fresh
   `FilterRestoreNotice`, a remount reuses the boot's already-dismissed
-  one. Three properties are load-bearing:
+  one. The properties below are each load-bearing:
   - **Dismissal is one-way per app lifetime and rides on user gestures
     only** — buffer edits, `LoadConfig` staging, and commits dismiss;
     row and level-group toggles (navigation) and `ForgetCommitted`
@@ -1508,24 +1521,35 @@ producer-side, so neither widens what consumers can see.
   - **Leaving `role`, `@onclick` or an `alert*` class on the tag.** The
     component throws on the first two by design and would emit the third
     twice. Pass only marker and spacing classes, `id` and `style`, and
-    name the urgency explicitly (`status` was `Polite`, `alert` was
+    name the `Announcement` explicitly (`status` was `Polite`, `alert` was
     `Assertive`) rather than trusting the default.
+  - **Trusting a green build after the component renames a parameter.** An
+    attribute on a `<Notice>` tag that matches no parameter is not an
+    error: Razor splats it onto the box and the real parameter takes its
+    default. That happened once (`halheinrich/backgammon#248`) — 0
+    warnings, and both assertive boxes silently polite. Adapt to a
+    producer rename by bare-identifier survey, never by following build
+    errors; the suite's box pins refuse any attribute on a box beyond the
+    ones this member passes, which is what catches the next one.
+  - **Reading a box's `role` on the box.** The live region is the
+    `div.bg-notice-content` child, so that the close button — its sibling
+    — is not part of what an atomic region announces. The box carries no
+    role under any `Announcement`.
   - **Pinning a box's copy by its children.** The content sits inside
     `div.bg-notice-content`, and a dismissible box also holds the close
     button; `TextContent` on the box still reads the copy, a direct-child
     selector does not.
-- **The load confirmation is the one box not yet on `Notice`, and that is
-  deliberate** (`halheinrich/backgammon#248`). "{name} loaded." renders
-  inside `NamedEntriesPanel`'s persistent `role="status"` region, which is
-  pinned as contract (a live region created in the render that fills it is
-  announced unreliably). `Notice` always emits a live-region role of its own
-  and refuses a caller's `role`, so adopting it there nests one live region
-  inside another — announced twice by some screen readers, and not what the
-  ARIA model means by either. The correct shape is a role-less box inside
-  the standing region, which the component does not offer; it was reported
-  to its producer rather than designed around. Do not "fix" it from here by
-  dropping the region, by moving the id onto the box, or by passing
-  `aria-live="off"` through the attribute splat.
+- **The load confirmation is announced by its standing region, never by
+  itself** (`halheinrich/backgammon#248`). "{name} loaded." renders inside
+  `NamedEntriesPanel`'s persistent `role="status"` region, which is pinned as
+  contract (a live region created in the render that fills it is announced
+  unreliably), so its `<Notice>` is `ByEnclosingRegion`: no role and no
+  live-region attribute on any element of the box. `Polite` there would nest
+  one live region inside another — announced twice by some screen readers,
+  and not what the ARIA model means by either. Do not drop the region, move
+  the surface's id onto the box, or make the region conditional; and its
+  dismissal is the panel's `_loadedName` being cleared, not a bit and not a
+  key — the name is not the occurrence, and the same name loads twice.
 - **A new mount of `NamedEntriesPanel` supplies a surface record and
   nothing else.** Copy and ids belong to the mount, not the component: the
   panel spells no title, no empty-list line, no placeholder, no prompt
@@ -1578,12 +1602,6 @@ producer-side, so neither widens what consumers can see.
   change.
 
 ## Subproject-internal next steps
-
-- **Move the load confirmation onto `Notice` once the component can render
-  without a live-region role** (`halheinrich/backgammon#248`; see Pitfalls).
-  It is ruled dismissible — an event notice, one occurrence per load, so
-  loading the same name twice is two occurrences and the name cannot be the
-  key. Blocked on `BgUiPrimitives_Razor`, not on this member.
 
 - **Add a `FilterPanel.razor.cs` code-behind partial.** The `@code`
   block runs over 100 lines and would be more navigable as a separate

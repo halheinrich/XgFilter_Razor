@@ -547,6 +547,76 @@ public class NamedEntriesPanelTests : BunitContext
         Assert.Equal(string.Empty, LoadedNoticeText(cut));
     }
 
+    // ── The confirmation renders through the shared Notice (halheinrich/backgammon#248) ──
+    //
+    // An event notice, so dismissible (the umbrella's SPEC-notices.md), and
+    // announced by the standing region it sits in, never by itself. Its
+    // occurrence is one accepted load and its holder is this panel, as the
+    // confirmation itself: _loadedName is the whole state, so closing the box
+    // clears it and no dismissed bit exists. Driven through real clicks, both
+    // of them — the close button and the box — because the model rules both.
+
+    private const string LoadedBox = "#savedFilterLoadedNotice > div.alert";
+
+    public static TheoryData<string> DismissGestures => new()
+    {
+        " > button.btn-close",  // the visible affordance: keyboard and screen reader
+        string.Empty,           // the whole box: the large target
+    };
+
+    [Fact]
+    public async Task LoadConfirmation_LandsOnTheComponent_WithItsIdentityIntact()
+    {
+        var cut = RenderPanel(Collection("Race"));
+
+        Assert.Empty(cut.FindAll(LoadedBox));
+        await ClickRowButtonAsync(cut, "Race", "Load");
+
+        var box = cut.Find(LoadedBox);
+        Assert.Equal("alert alert-success alert-dismissible mt-3 mb-0", box.GetAttribute("class"));
+        Assert.Single(box.QuerySelectorAll(":scope > button.btn-close"));
+        Assert.Equal("Race loaded.", box.QuerySelector(":scope > .bg-notice-content")!.TextContent.Trim());
+    }
+
+    // The region announces; the box must not. A role or a live-region
+    // attribute anywhere on the box or under it would nest a second live
+    // region inside the standing one — announced twice by some screen readers.
+    [Fact]
+    public async Task LoadConfirmation_AnnouncesNothingOfItsOwn_TheStandingRegionDoes()
+    {
+        var cut = RenderPanel(Collection("Race"));
+        await ClickRowButtonAsync(cut, "Race", "Load");
+
+        var region = cut.Find("#savedFilterLoadedNotice");
+        Assert.Equal("status", region.GetAttribute("role"));
+        Assert.Empty(region.QuerySelectorAll(
+            "[role], [aria-live], [aria-atomic], [aria-relevant]"));
+    }
+
+    // The name is not the occurrence: the second load is of the same name, and
+    // its confirmation must show although the first was closed.
+    [Theory]
+    [MemberData(nameof(DismissGestures))]
+    public async Task LoadConfirmation_Dismisses_AndASecondLoadOfTheSameNameShowsFresh(string gesture)
+    {
+        var cut = RenderPanel(Collection("Race"));
+        await ClickRowButtonAsync(cut, "Race", "Load");
+
+        cut.Find(LoadedBox + gesture).Click();
+
+        Assert.Empty(cut.FindAll(LoadedBox));
+        Assert.Equal(string.Empty, LoadedNoticeText(cut));
+        // The region is a permanent fixture; closing the box empties it and
+        // nothing more. Closing is not a request: nothing was raised.
+        Assert.NotNull(cut.Find("#savedFilterLoadedNotice"));
+        Assert.Equal(["Race"], _loadRequests);
+
+        await ClickRowButtonAsync(cut, "Race", "Load");
+
+        Assert.Equal("Race loaded.", LoadedNoticeText(cut));
+        Assert.NotNull(cut.Find(LoadedBox));
+    }
+
     // ── The surface record (halheinrich/backgammon#190 leg (D)) ─────────────
     // Everything above asserts the saved-filters preset's ids and copy, which
     // is the byte-for-byte proof that mount did not move. This asserts the

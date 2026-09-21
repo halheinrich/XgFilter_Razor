@@ -657,9 +657,31 @@ public class FilterSurfaceTests : BunitContext
         IElement box, string expectedClass, string expectedRole, string? expectedStyle, bool dismissible)
     {
         Assert.Equal(expectedClass, box.GetAttribute("class"));
-        Assert.Equal(expectedRole, box.GetAttribute("role"));
         Assert.Equal(expectedStyle, box.GetAttribute("style"));
         Assert.Equal(dismissible ? 1 : 0, box.QuerySelectorAll("button.btn-close").Length);
+
+        // Who announces. The box is never the live region: a status or alert
+        // region is atomic, so a role on the box would make the close
+        // button's name part of what the notice says. The region is the
+        // content wrapper — exactly one element under the box carries a role,
+        // it carries this box's, and the close button sits outside it.
+        Assert.False(box.HasAttribute("role"));
+        var region = Assert.Single(box.QuerySelectorAll("[role]"));
+        Assert.True(region.ClassList.Contains("bg-notice-content"));
+        Assert.Equal(expectedRole, region.GetAttribute("role"));
+        Assert.Empty(region.QuerySelectorAll("button.btn-close"));
+
+        // And nothing else was splatted onto the box. An attribute on the tag
+        // that Notice does not match as a parameter lands here silently — a
+        // renamed parameter did exactly that once, with the build green and
+        // the two assertive boxes quietly polite. So the box carries what
+        // this member passes (id, class, style) and the renderer's own
+        // bookkeeping (event and CSS-scope attributes), and nothing more.
+        Assert.All(box.Attributes, a => Assert.True(
+            a.Name is "id" or "class" or "style"
+                || a.Name.StartsWith("blazor:", StringComparison.Ordinal)
+                || a.Name.StartsWith("b-", StringComparison.Ordinal),
+            $"Unexpected attribute on the box: {a.Name}"));
     }
 
     private IRenderedComponent<FilterSurface> RenderWithRestoredSelection()

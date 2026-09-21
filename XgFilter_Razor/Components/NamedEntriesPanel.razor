@@ -157,12 +157,32 @@
            The region itself is rendered unconditionally and only its content
            swaps: a live region that first appears in the very render that
            fills it is announced unreliably across screen readers, and this
-           one fills and empties repeatedly through a session. *@
+           one fills and empties repeatedly through a session.
+
+           So the region announces and the box inside it must not: it renders
+           through the shared Notice as ByEnclosingRegion, which puts no role
+           and no live-region attribute on any element of the box. A
+           self-announcing notice here would be one live region nested in
+           another — announced twice by some screen readers.
+
+           An event notice, so dismissible (the umbrella's SPEC-notices.md).
+           The occurrence is one accepted load, and this panel owns it outright:
+           _loadedName is non-null exactly while a confirmation stands. So
+           closing the box ends the occurrence — the field is cleared, as every
+           other retiring gesture already clears it — and there is no dismissed
+           bit anywhere, here or in the Notice (the binding makes it
+           caller-held, so it keeps none). Loading the same name again assigns
+           the field again and shows fresh: the name was never the occurrence.
+           No @if around it — one fact, read once; the component renders
+           nothing while no confirmation stands. *@
         <div id="@Surface.LoadedNoticeId" role="status">
-            @if (_loadedName is not null)
-            {
-                <div class="alert alert-success mt-3 mb-0">@_loadedName loaded.</div>
-            }
+            <Notice class="mt-3 mb-0"
+                    Kind="NoticeKind.Success" Announcement="NoticeAnnouncement.ByEnclosingRegion"
+                    Dismissible="true"
+                    @bind-Dismissed:get="_loadedName is null"
+                    @bind-Dismissed:set="_ => _loadedName = null">
+                @_loadedName loaded.
+            </Notice>
         </div>
     </div>
 </div>
@@ -285,7 +305,9 @@
     // rule: it says where the panel's values just came from, so the moment
     // any other gesture actually begins (past its guards) it no longer
     // describes the panel and is cleared there; a new Document instance
-    // clears it too, through the OnParametersSet reset. Cancelling a confirm
+    // clears it too, through the OnParametersSet reset, and so does the user
+    // closing the confirmation — this field is that notice's whole state, so
+    // there is no dismissed bit beside it (see the markup). Cancelling a confirm
     // needs no clear of its own — the gesture that posed the confirm already
     // did it. Never inferred from the arriving document: that would be the
     // causation guessing OnParametersSet refuses.

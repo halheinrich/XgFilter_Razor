@@ -61,7 +61,7 @@
    identical: the text was never the occurrence. No @if around it, for the
    restore notice's reason — one fact, read once. *@
 <Notice id="filterSaveError" class="mb-4" style="max-width:800px"
-        Kind="NoticeKind.Error" Urgency="NoticeUrgency.Assertive"
+        Kind="NoticeKind.Error" Announcement="NoticeAnnouncement.Assertive"
         Dismissible="true"
         @bind-Dismissed:get="_saveRefusalNotice is null"
         @bind-Dismissed:set="_ => _saveRefusalNotice = null">
@@ -79,7 +79,7 @@
 @if (_store.Status == NamedDocumentStatus.LoadFailed)
 {
     <Notice id="savedFiltersLoadFailed" class="mb-4" style="max-width:800px"
-            Kind="NoticeKind.Warning" Urgency="NoticeUrgency.Polite">
+            Kind="NoticeKind.Warning" Announcement="NoticeAnnouncement.Polite">
         Your saved-filters file (<strong>@_store.LoadFailedFileName</strong>)
         couldn't be read, so it's been left untouched — saving is disabled to
         protect it.
@@ -101,7 +101,7 @@
 @if (_store.Status == NamedDocumentStatus.WriteFailed)
 {
     <Notice id="savedFiltersWriteFailed" class="mb-4" style="max-width:800px"
-            Kind="NoticeKind.Warning" Urgency="NoticeUrgency.Assertive"
+            Kind="NoticeKind.Warning" Announcement="NoticeAnnouncement.Assertive"
             Dismissible="true" OccurrenceKey="_store.LastWriteFailure">
         Couldn't save to <strong>@SavedFiltersDocument.FileName</strong> — your
         change is kept in this list for now, but it is not being saved and will
