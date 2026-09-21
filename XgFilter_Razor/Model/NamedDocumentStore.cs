@@ -126,6 +126,34 @@ public abstract class NamedDocumentStore<TValue, TSelf>
     public string? LoadFailedFileName { get; private set; }
 
     /// <summary>
+    /// The identity of the most recent failed write — a distinct value for
+    /// every write that fails, <see langword="null"/> until one does. It
+    /// exists so that whoever reports a failed write can tell one failure
+    /// from the next: <see cref="Status"/> reads
+    /// <see cref="NamedDocumentStatus.WriteFailed"/> after each of them alike,
+    /// so the status says <i>that</i> writing is failing and never
+    /// <i>which</i> failure is being reported. Only this store knows when a
+    /// write failed, so only this store names the occurrence; a consumer
+    /// inferring it from renders, statuses or gestures would be a second
+    /// owner.
+    /// <para>
+    /// Opaque on purpose: compare it (<see cref="object.Equals(object)"/>),
+    /// never inspect it. It is not a count and carries no ordering. Whether a
+    /// failure currently stands is <see cref="Status"/>'s to say and not this
+    /// member's — it is never cleared, because the most recent failure stays
+    /// the most recent failure after a reload returns the context to
+    /// <see cref="NamedDocumentStatus.Ready"/>.
+    /// </para>
+    /// <para>
+    /// The composite hands it to its write-failed notice as the notice's
+    /// occurrence key, which is what makes a dismissal last exactly one
+    /// failed write (the umbrella's SPEC-notices.md, a condition notice
+    /// dismissible per occurrence).
+    /// </para>
+    /// </summary>
+    public object? LastWriteFailure { get; private set; }
+
+    /// <summary>
     /// Read the document, re-deriving the whole context — called by the host
     /// after its source is (re)established. Applies the two-name migration
     /// rule where a legacy name is declared, and swallows every storage
@@ -271,7 +299,10 @@ public abstract class NamedDocumentStore<TValue, TSelf>
         }
         catch (DocumentStorageException)
         {
+            // Both move here and only here: the condition, and the identity
+            // of this particular failure (see LastWriteFailure).
             Status = NamedDocumentStatus.WriteFailed;
+            LastWriteFailure = new object();
         }
     }
 }

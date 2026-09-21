@@ -276,6 +276,62 @@ public class SavedFiltersStoreTests
         Assert.False(store.Document.Contains("Blitz"));
     }
 
+    // The occurrence behind the write-failed notice. Status reads WriteFailed
+    // after every failure alike, so it cannot tell one failed write from the
+    // next; the store — the only party that knows a write failed — names each
+    // one. A second failure is reachable only through a reload, because a
+    // WriteFailed context refuses further writes (the pin above): the reload
+    // returns it to Ready and the next write fails afresh.
+    [Fact]
+    public async Task LastWriteFailure_NullUntilAWriteFails_ThenDistinctPerFailure()
+    {
+        var storage = new FakeDocumentStorage();
+        var store = new SavedFiltersStore(storage);
+        await store.LoadAsync();
+        await store.SaveAsync("Race", new FilterConfig());
+
+        Assert.Null(store.LastWriteFailure);
+
+        storage.ThrowOnWrite = true;
+        await store.SaveAsync("Blitz", new FilterConfig());
+        var first = store.LastWriteFailure;
+
+        Assert.NotNull(first);
+
+        await store.LoadAsync();
+        await store.SaveAsync("Blitz", new FilterConfig());
+
+        Assert.Equal(NamedDocumentStatus.WriteFailed, store.Status);
+        Assert.NotNull(store.LastWriteFailure);
+        Assert.NotEqual(first, store.LastWriteFailure);
+    }
+
+    // It names a failure and says nothing about whether one stands — that is
+    // Status's. So neither a recovered reload nor a refused write moves it: the
+    // most recent failure is still the most recent failure.
+    [Fact]
+    public async Task LastWriteFailure_MovedOnlyByAFailedWrite()
+    {
+        var storage = new FakeDocumentStorage();
+        var store = new SavedFiltersStore(storage);
+        await store.LoadAsync();
+        storage.ThrowOnWrite = true;
+        await store.SaveAsync("Race", new FilterConfig());
+        var failure = store.LastWriteFailure;
+
+        // Refused under WriteFailed: no write was attempted, so none failed.
+        await store.SaveAsync("Blitz", new FilterConfig());
+        Assert.Same(failure, store.LastWriteFailure);
+
+        storage.ThrowOnWrite = false;
+        await store.LoadAsync();
+        Assert.Equal(NamedDocumentStatus.Ready, store.Status);
+        Assert.Same(failure, store.LastWriteFailure);
+
+        await store.SaveAsync("Blitz", new FilterConfig());
+        Assert.Same(failure, store.LastWriteFailure);
+    }
+
     [Fact]
     public async Task Delete_RemovesAndPersists()
     {

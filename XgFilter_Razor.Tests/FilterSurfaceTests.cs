@@ -634,6 +634,208 @@ public class FilterSurfaceTests : BunitContext
         Assert.Equal(reason, FindRowButton(cut, "Race", "Save")!.GetAttribute("title"));
     }
 
+    // ── The boxes render through the shared Notice (halheinrich/backgammon#248) ──
+    //
+    // The umbrella's SPEC-notices.md rules which of this composite's boxes
+    // dismiss and what a dismissal survives; BgUiPrimitives_Razor's Notice owns
+    // the markup and pins its own gestures. What is pinned HERE is this
+    // member's half: that each box landed on the component with the identity
+    // it had before (id, spacing class, inline style, role), that each
+    // dismissible one has exactly one holder which a new occurrence resets,
+    // and that the gate reason cannot be closed. Every gesture goes through the
+    // real composite and a real DOM click — both of them, the close button and
+    // the box, because the model rules both.
+
+    // The two dismiss gestures, as a selector suffix under a box's id.
+    public static TheoryData<string> DismissGestures => new()
+    {
+        " button.btn-close",    // the visible affordance: keyboard and screen reader
+        string.Empty,           // the whole box: the large target
+    };
+
+    private static void AssertBox(
+        IElement box, string expectedClass, string expectedRole, string? expectedStyle, bool dismissible)
+    {
+        Assert.Equal(expectedClass, box.GetAttribute("class"));
+        Assert.Equal(expectedRole, box.GetAttribute("role"));
+        Assert.Equal(expectedStyle, box.GetAttribute("style"));
+        Assert.Equal(dismissible ? 1 : 0, box.QuerySelectorAll("button.btn-close").Length);
+    }
+
+    private IRenderedComponent<FilterSurface> RenderWithRestoredSelection()
+    {
+        StoredConfig(new FilterConfig { ErrorMin = 0.1 });
+        var cut = RenderSurface(TokenA, new FakeDocumentStorage());
+        cut.WaitForAssertion(() => cut.Find("#filterRestoredNotice"));
+        return cut;
+    }
+
+    // Min above Max on the always-visible facet, then a confirmed row Save:
+    // the snapshot is refused. Repeatable with no gesture in between, which is
+    // what makes two consecutive refusals — identical text — reachable.
+    private static async Task RefuseASaveAsync(IRenderedComponent<FilterSurface> cut)
+    {
+        cut.Find("#errorMin").Input("5");
+        cut.Find("#errorMax").Input("2");
+        await ConfirmRowSaveAsync(cut);
+    }
+
+    private static async Task ConfirmRowSaveAsync(IRenderedComponent<FilterSurface> cut)
+    {
+        await ClickRowButtonAsync(cut, "Race", "Save");
+        await ClickRowButtonAsync(cut, "Race", "Overwrite");
+    }
+
+    // · #filterRestoredNotice — event notice; holder: the app-scoped FilterRestoreNotice
+
+    [Fact]
+    public void RestoreNotice_LandsOnTheComponent_WithItsIdentityIntact()
+    {
+        var cut = RenderWithRestoredSelection();
+
+        AssertBox(cut.Find("#filterRestoredNotice"),
+            "alert alert-info alert-dismissible mb-3", "status", expectedStyle: null, dismissible: true);
+    }
+
+    [Theory]
+    [MemberData(nameof(DismissGestures))]
+    public void RestoreNotice_Dismisses_AndTheHolderIsWhatMoved(string gesture)
+    {
+        var cut = RenderWithRestoredSelection();
+
+        cut.Find("#filterRestoredNotice" + gesture).Click();
+
+        Assert.Empty(cut.FindAll("#filterRestoredNotice"));
+        Assert.False(_notice.IsVisible);
+        // Closing a notice is not an edit: nothing was reported, Apply is
+        // still armed over the still-restored selection.
+        Assert.Empty(_reports);
+        Assert.False(Apply(cut).HasAttribute("disabled"));
+    }
+
+    // The reason the dismissal is the holder's and not the panel's: the
+    // occurrence — this boot's restore — outlives the mount. A navigate-back
+    // remounts the panel, which restores again and Arms again; the closed
+    // notice must not come back, and no later Arm can bring it.
+    [Fact]
+    public void RestoreNotice_ClosedByTheUser_StaysClosedAcrossARemount_AndArmCannotResurrectIt()
+    {
+        var first = RenderWithRestoredSelection();
+        first.Find("#filterRestoredNotice button.btn-close").Click();
+
+        var second = RenderSurface(TokenA, new FakeDocumentStorage());
+
+        // The remount's restore has landed (and with it, its Arm).
+        second.WaitForAssertion(() =>
+            Assert.Equal("0.1", ErrorMin(second).GetAttribute("value")));
+        Assert.Empty(second.FindAll("#filterRestoredNotice"));
+
+        _notice.Arm();
+        second.Render();
+
+        Assert.False(_notice.IsVisible);
+        Assert.Empty(second.FindAll("#filterRestoredNotice"));
+    }
+
+    // · #filterSaveError — error; holder: this composite, as the refusal itself
+
+    [Fact]
+    public async Task SaveError_LandsOnTheComponent_WithItsIdentityIntact()
+    {
+        var cut = RenderSurface(TokenA, StorageWith(("Race", new FilterConfig())));
+
+        Assert.Empty(cut.FindAll("#filterSaveError"));
+        await RefuseASaveAsync(cut);
+
+        AssertBox(cut.Find("#filterSaveError"),
+            "alert alert-danger alert-dismissible mb-4", "alert", "max-width:800px", dismissible: true);
+    }
+
+    // The text is not the occurrence: both refusals carry the same copy, and
+    // the second must show although the first was closed. No panel gesture
+    // sits between them, so nothing but the refusal itself can have re-shown it.
+    [Theory]
+    [MemberData(nameof(DismissGestures))]
+    public async Task SaveError_Dismisses_AndASecondIdenticalRefusalShowsFresh(string gesture)
+    {
+        var cut = RenderSurface(TokenA, StorageWith(("Race", new FilterConfig())));
+        await RefuseASaveAsync(cut);
+        var firstText = cut.Find("#filterSaveError").TextContent;
+
+        cut.Find("#filterSaveError" + gesture).Click();
+
+        Assert.Empty(cut.FindAll("#filterSaveError"));
+
+        await ConfirmRowSaveAsync(cut);
+
+        Assert.Equal(firstText, cut.Find("#filterSaveError").TextContent);
+    }
+
+    // · #savedFiltersLoadFailed — gate reason; never dismissible
+
+    [Fact]
+    public void LoadFailed_LandsOnTheComponent_AndCannotBeClosed()
+    {
+        var storage = new FakeDocumentStorage();
+        storage.Documents[SavedFiltersDocument.FileName] = "not a filters document";
+        var cut = RenderSurface(TokenA, storage);
+
+        var box = cut.Find("#savedFiltersLoadFailed");
+        AssertBox(box, "alert alert-warning mb-4", "status", "max-width:800px", dismissible: false);
+
+        // No handler at all, on the box or inside it — a click is not merely
+        // ignored, there is nothing listening for one.
+        Assert.Throws<MissingEventHandlerException>(() => box.Click());
+        Assert.Throws<MissingEventHandlerException>(
+            () => cut.Find("#savedFiltersLoadFailed .bg-notice-content").Click());
+        Assert.NotNull(cut.Find("#savedFiltersLoadFailed"));
+    }
+
+    // · #savedFiltersWriteFailed — condition notice; occurrence named by the store
+
+    private async Task<IRenderedComponent<FilterSurface>> RenderWithAFailedWriteAsync()
+    {
+        var storage = StorageWith(("Race", new FilterConfig()));
+        storage.ThrowOnWrite = true;
+        var cut = RenderSurface(TokenA, storage);
+        await ConfirmRowSaveAsync(cut);
+        return cut;
+    }
+
+    [Fact]
+    public async Task WriteFailed_LandsOnTheComponent_WithItsIdentityIntact()
+    {
+        var cut = await RenderWithAFailedWriteAsync();
+
+        AssertBox(cut.Find("#savedFiltersWriteFailed"),
+            "alert alert-warning alert-dismissible mb-4", "alert", "max-width:800px", dismissible: true);
+    }
+
+    // Dismissible per failed write. A WriteFailed context refuses further
+    // writes, so the next failure is reached the only way a user reaches it:
+    // the source changes, the context reloads to Ready, and the next save
+    // fails again. The store names that failure; the notice shows for it.
+    [Theory]
+    [MemberData(nameof(DismissGestures))]
+    public async Task WriteFailed_Dismisses_AndTheNextFailedWriteShowsFresh(string gesture)
+    {
+        var cut = await RenderWithAFailedWriteAsync();
+
+        cut.Find("#savedFiltersWriteFailed" + gesture).Click();
+
+        Assert.Empty(cut.FindAll("#savedFiltersWriteFailed"));
+        // Closing the notice closes nothing else: the condition stands, so
+        // saving stays off and the in-memory list stays on screen.
+        Assert.True(FindRowButton(cut, "Race", "Save")!.HasAttribute("disabled"));
+
+        cut.Render(parameters => parameters.Add(p => p.Source, TokenB));
+        cut.WaitForAssertion(() =>
+            Assert.False(FindRowButton(cut, "Race", "Save")!.HasAttribute("disabled")));
+        await ConfirmRowSaveAsync(cut);
+
+        Assert.NotNull(cut.Find("#savedFiltersWriteFailed"));
+    }
+
     // ── Required-parameter pins ─────────────────────────────────────────────
 
     [Theory]

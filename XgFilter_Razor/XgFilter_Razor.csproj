@@ -42,6 +42,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\BgDataTypes_Lib\BgDataTypes_Lib\BgDataTypes_Lib.csproj" />
+    <ProjectReference Include="..\..\BgUiPrimitives_Razor\BgUiPrimitives_Razor\BgUiPrimitives_Razor.csproj" />
     <ProjectReference Include="..\..\XgFilter_Lib\XgFilter_Lib\XgFilter_Lib.csproj" />
   </ItemGroup>
 

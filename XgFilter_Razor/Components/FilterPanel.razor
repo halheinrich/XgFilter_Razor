@@ -55,15 +55,25 @@
            app-scoped RestoreNotice is armed (this boot's restore staged a
            stored selection and no gesture has superseded it); it survives
            navigation with the state it describes and dies at the first
-           buffer-affecting gesture or commit. A polite outcome, not an
-           error: role="status", the LoadFailed idiom. *@
-        @if (RestoreNotice.IsVisible)
-        {
-            <div id="filterRestoredNotice" class="alert alert-info mb-3" role="status">
-                This filter was restored from a previous session — it isn't in
-                effect until you press <strong>Apply Filter</strong>.
-            </div>
-        }
+           buffer-affecting gesture or commit — or when the user closes it,
+           which is the same death (see FilterRestoreNotice.Dismiss). A polite
+           outcome, not an error.
+
+           An event notice, so dismissible (the umbrella's SPEC-notices.md), and
+           its occurrence outlives this component, so the dismissal is
+           caller-held: bound to the app-scoped holder, which is why a
+           navigate-back cannot bring a closed notice back. No @if around it and
+           no bit here — the holder's IsVisible is the one fact, read once; the
+           component renders nothing while it is false, whether the notice was
+           never armed or is over. *@
+        <Notice id="filterRestoredNotice" class="mb-3"
+                Kind="NoticeKind.Information" Urgency="NoticeUrgency.Polite"
+                Dismissible="true"
+                @bind-Dismissed:get="!RestoreNotice.IsVisible"
+                @bind-Dismissed:set="_ => RestoreNotice.Dismiss()">
+            This filter was restored from a previous session — it isn't in
+            effect until you press <strong>Apply Filter</strong>.
+        </Notice>
 
         @* ── Error range ──────────────────────────────────────────────────────
            First and always visible: dogfooding showed it is the panel's
@@ -772,7 +782,8 @@
     /// The restored-filter notice's state (see <see cref="FilterRestoreNotice"/>),
     /// armed by this panel's first-render restore when it stages a stored
     /// selection and dismissed at the first buffer-affecting gesture or
-    /// commit. The composite forwards the host's app-scoped instance — the
+    /// commit, or by the user closing the notice — one dismissal, held there
+    /// and nowhere in this panel. The composite forwards the host's app-scoped instance — the
     /// lifetime that lets the notice survive navigation and die on reload by
     /// construction. The default is a fresh, panel-scoped instance so the
     /// panel is coherent in isolation (tests render it bare); only the
