@@ -38,6 +38,19 @@ https://github.com/halheinrich/XgFilter_Razor — branch `main`.
   canonical order — which drive the dice-roll facet's checkbox grid; the type
   owns both the set and its order, so the panel enumerates `All` and never
   builds a local roll list.
+- **BgUiPrimitives_Razor** — `Notice`, with its selectors `NoticeKind` and
+  `NoticeUrgency`: the one owner of alert markup across the umbrella
+  (`halheinrich/backgammon#248`, under the umbrella's `SPEC-notices.md`).
+  This member's boxes render through it, so its `.razor` files name what
+  each box *is* and the component owns what that means in classes, roles
+  and gestures. Project reference, not a package; the namespace is imported
+  once, in `_Imports.razor`. **It passes an obligation through to hosts:**
+  the component's scoped CSS reaches a host inside the host's own
+  `{HostAssembly}.styles.css` bundle, also when the host references that
+  library only through this one, so a host's root document must link that
+  bundle. Without it a dismissible notice's text is not a click target (its
+  close button and padding still dismiss) — the safe failure, but a
+  failure. That library's `INSTRUCTIONS.md` is the contract.
 
 ## Layout
 
@@ -156,6 +169,30 @@ empty (nothing to load, nothing to save — BgQuiz's clutter rule, now
 producer-owned); WriteFailed keeps the panel beside its notice; Disabled
 and LoadFailed render none. No `RenderFragment` slots — verified against
 both hosts: neither interleaves anything between the composite's children.
+
+**The composite's and the panel's boxes render through `Notice`, and each
+dismissal has one holder — the owner of its occurrence**
+(`halheinrich/backgammon#248`). The umbrella's `SPEC-notices.md` rules what
+each box is, and so whether it dismisses; a dismissal belongs to one
+occurrence, lives as long as it, and is never stored. Who holds it follows
+from who knows when a new occurrence begins and whether the old one outlives
+the page:
+
+| Box | What it is | Occurrence | Holder of the dismissal |
+| --- | --- | --- | --- |
+| `#filterRestoredNotice` | event notice, polite | this boot's restore of a stored selection | the app-scoped `FilterRestoreNotice` — the occurrence outlives every mount of the panel, so the panel binds the component's dismissed state to it and keeps no copy |
+| `#filterSaveError` | error, assertive | one refused save | the composite, *as the refusal itself*: `_saveRefusalNotice` is non-null exactly while a refusal stands, so closing the box clears the field and no dismissed bit exists anywhere |
+| `#savedFiltersWriteFailed` | condition notice, assertive | one failed write | the `Notice` instance, keyed by `NamedDocumentStore.LastWriteFailure` — the store names the occurrence because only it knows a write failed; store and notice both die with the composite, so the component may hold the bit |
+| `#savedFiltersLoadFailed` | gate reason, polite | — | none: it cannot be closed. It stands where the saved-filters panel would and is the only thing saying why saving is off; it leaves when its cause does |
+
+In the restore notice the user's close gesture and the owning gesture are
+**one state change, not two** — `FilterRestoreNotice.Dismiss()` either way —
+because both mean the notice is over for this app lifetime and nothing reads
+the difference; a second bit would be a second holder for `Arm()` to
+resurrect around. Closing a notice is never an edit: it reports nothing and
+moves no gate. `NamedEntriesPanel`'s load confirmation is ruled dismissible
+too and is **not yet on `Notice`** — see Pitfalls for why that waits on the
+component's producer.
 
 ### `FilterPanel` component
 
@@ -298,9 +335,10 @@ because it *is* the visible label — the button's own text, with only the
 glyph held out of it.
 
 **The container reads as the rows' parent, and that is drawn, not merely
-meant** (`halheinrich/backgammon#239` — shipped flat in `1.11.0`'s candidate,
-where the toggle sat at the rows' left edge, size, weight and colour and the
-user read it as no collapse widget at all). Three structural marks: the
+meant** (`halheinrich/backgammon#239` — drawn flat in the `1.11.0` candidate the
+user rejected, where the toggle sat at the rows' left edge, size, weight and
+colour and the user read it as no collapse widget at all; nothing shipped
+that way). The marks are structural: the
 `#moreFilters` region indents its rows as a group with `ms-3`, the step a
 row's own body already takes under its header, so the panel says "inside" one
 way at both tiers; the toggle takes header weight (`fw-bold`, the card
@@ -464,7 +502,8 @@ stored or unreadable = nothing restored = no claim; an *empty* stored
 config does arm it — the empty filter is still a choice), and *dismisses*
 it at the first gesture that makes the selection the user's own — any
 buffer-affecting gesture (edit, `LoadConfig` staging, Clear filters) or a
-commit. Dismissal is one-way for the app lifetime, which is what makes a
+commit — or when the user closes it, which is the same transition on the
+same holder (see the composite's notices table). Dismissal is one-way for the app lifetime, which is what makes a
 remount within a setup quiet after an edit while an untouched remount
 re-shows the same notice (navigation changes nothing, in both directions).
 Row and level-group toggles are navigation and keep it; `ForgetCommitted`
@@ -621,7 +660,8 @@ gates must survive (BgQuiz: Scoped), and `FilterSurface` drives them.
 - **`FilterRestoreNotice`** — app-scoped state for the restored-selection
   notice (§4): armed by the panel's first-render restore of a stored
   selection, dismissed one-way at the first buffer-affecting gesture or
-  commit. The *instance lifetime* is the trigger fact: a reload constructs
+  commit, or by the user closing the notice — one dismissal, held here
+  because the occurrence outlives the panel. The *instance lifetime* is the trigger fact: a reload constructs
   a fresh one, a remount within a setup reuses the boot's — which is what
   the mount-time condition alone cannot distinguish (see Pitfalls). Hosts
   register and bind it, nothing more: the movers (`Arm`/`Dismiss`) and the
@@ -830,14 +870,14 @@ caller (its source-change rule and its first-mount reconcile
 respectively), so neither is host-facing surface (see Architecture and
 Pitfalls).
 
-Five `internal const string`s, and **`internal` is the whole point of
-them**: `FilterHelp` is their only reader, so the copy it renders and the
+Its `internal const string`s, listed below, and **`internal` is the whole
+point of them**: `FilterHelp` is their only reader, so the copy it renders and the
 thing the panel actually does have one source. Not `public` — no consumer
 may see, let alone depend on, this panel's storage keys or name its chrome.
 
 - `ConfigKey` (`xg_filter_config`) / `DisclosureKey`
   (`xg_expandedFilters`) / `MoreFiltersKey` (`xg_moreFiltersOpen`) — the
-  three `localStorage` entries, rendered into the help's storage section
+  panel's `localStorage` entries, rendered into the help's storage section
   as the names a reader verifies in devtools.
 - `MoreFiltersFoldedLabel` (*More filters*) / `MoreFiltersExpandedLabel`
   (*Fewer filters*) — the container toggle's two names, rendered into the
@@ -899,6 +939,11 @@ Parameters (all callbacks `[EditorRequired]`, as are `Document` and
   `NamedDocumentStatus Status`, `string? LoadFailedFileName` (non-null
   exactly while `LoadFailed`, naming the actual file — canonical or
   legacy — the failed load was about, so degrade copy never guesses),
+  `object? LastWriteFailure` (the identity of the most recent failed
+  write: a distinct value per failure, `null` until one fails, never
+  cleared. Opaque — compared, never inspected; it names *which* failure
+  and leaves whether one stands to `Status`. It is what a write-failed
+  notice takes as its occurrence key),
   `Task LoadAsync()`, `Task SaveAsync(string, TValue)`,
   `Task DeleteAsync(string)`, `void Reset()`. Never throws for storage
   trouble; mutating members no-op unless `Status == Ready`. A
@@ -1431,6 +1476,56 @@ producer-side, so neither widens what consumers can see.
     remounts quiet after an edit. Dropping the forwarding is silent at
     compile time and pinned by
     `Remount_WithinSetup_AfterAnEdit_DoesNotResurrectTheNotice`.
+- **Never type alert markup here, and never add a second holder for a
+  dismissal.** A new box is a `<Notice>`; whether the user may close it is
+  the umbrella's `SPEC-notices.md` section 1 (the gate-reason test), never
+  the box's colour, and `Dismissible` defaults to `false` on purpose. Then
+  find the occurrence's owner before writing any state. The wrong moves,
+  each of which a future edit will be tempted by:
+  - **A `_dismissed` field beside a `<Notice>`** — in the panel for the
+    restore notice, in the composite for the others. It is a second copy
+    of a bit that already has a holder, and a component's copy dies on
+    unmount while the occurrence may not: that is the closed restore
+    notice coming back on a navigate-back.
+  - **A second mover on `FilterRestoreNotice`** for "closed by hand". The
+    close gesture is `Dismiss()`; `Arm()` guards one bit and would not
+    know about another.
+  - **Keying the write-failed notice on `Status`, on the file name, or on
+    nothing.** `Status` reads `WriteFailed` after every failure alike.
+    Unkeyed, it would behave today only by an accident of rendering — a
+    `WriteFailed` context refuses further writes, so the next failure
+    needs a reload, and the reload's render happens to unmount the
+    notice — and a ruled behaviour must not rest on that. The store names
+    the failure; pass the name.
+  - **Treating the refusal's text as its occurrence.** Consecutive
+    refusals carry identical copy. The field being assigned again is the
+    new occurrence, which is why the composite clears the field on close
+    rather than remembering that this text was closed.
+  - **Wrapping a bound `<Notice>` in an `@if` on the same fact.** The
+    restore notice and the save refusal bind `Dismissed` to their holder's
+    one fact and render nothing while it says so; an `@if` around them
+    reads that fact a second time and buys nothing.
+  - **Leaving `role`, `@onclick` or an `alert*` class on the tag.** The
+    component throws on the first two by design and would emit the third
+    twice. Pass only marker and spacing classes, `id` and `style`, and
+    name the urgency explicitly (`status` was `Polite`, `alert` was
+    `Assertive`) rather than trusting the default.
+  - **Pinning a box's copy by its children.** The content sits inside
+    `div.bg-notice-content`, and a dismissible box also holds the close
+    button; `TextContent` on the box still reads the copy, a direct-child
+    selector does not.
+- **The load confirmation is the one box not yet on `Notice`, and that is
+  deliberate** (`halheinrich/backgammon#248`). "{name} loaded." renders
+  inside `NamedEntriesPanel`'s persistent `role="status"` region, which is
+  pinned as contract (a live region created in the render that fills it is
+  announced unreliably). `Notice` always emits a live-region role of its own
+  and refuses a caller's `role`, so adopting it there nests one live region
+  inside another — announced twice by some screen readers, and not what the
+  ARIA model means by either. The correct shape is a role-less box inside
+  the standing region, which the component does not offer; it was reported
+  to its producer rather than designed around. Do not "fix" it from here by
+  dropping the region, by moving the id onto the box, or by passing
+  `aria-live="off"` through the attribute splat.
 - **A new mount of `NamedEntriesPanel` supplies a surface record and
   nothing else.** Copy and ids belong to the mount, not the component: the
   panel spells no title, no empty-list line, no placeholder, no prompt
@@ -1483,6 +1578,12 @@ producer-side, so neither widens what consumers can see.
   change.
 
 ## Subproject-internal next steps
+
+- **Move the load confirmation onto `Notice` once the component can render
+  without a live-region role** (`halheinrich/backgammon#248`; see Pitfalls).
+  It is ruled dismissible — an event notice, one occurrence per load, so
+  loading the same name twice is two occurrences and the name cannot be the
+  key. Blocked on `BgUiPrimitives_Razor`, not on this member.
 
 - **Add a `FilterPanel.razor.cs` code-behind partial.** The `@code`
   block runs over 100 lines and would be more navigable as a separate
