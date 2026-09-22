@@ -160,6 +160,14 @@ public class FilterPanelTests : BunitContext
     private static IElement MatchScores(IRenderedComponent<FilterPanel> cut) =>
         cut.Find("input[placeholder^='e.g. 4a5a']");
 
+    // The example tokens the match-score placeholder advertises, one entry per
+    // example — the unit both the "every example parses" pin and the
+    // "the alias is offered" pin reason about.
+    private static string[] PlaceholderExamples(IRenderedComponent<FilterPanel> cut) =>
+        MatchScores(cut).GetAttribute("placeholder")!
+            .Replace("e.g. ", string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
     // The match-score field's rendered verdicts, one entry per voice, with
     // incidental markup whitespace collapsed. A list, not a string: the panel
     // words a malformed token and a retired one differently, and how many
@@ -1396,42 +1404,59 @@ public class FilterPanelTests : BunitContext
         Assert.Contains("5a4a", hint.TextContent);
     }
 
-    // The old placeholder taught "DMP", which neither the old nor the new
-    // tokenizer accepts — typing it throws on Apply. Pin that the placeholder
-    // advertises only the natural vocabulary (DMP's equivalent, 1a1a, belongs in
-    // the hint line, not as an un-parseable example).
-    [Fact]
-    public void MatchScorePlaceholder_DoesNotAdvertiseInvalidDmpToken()
-    {
-        var cut = RenderExpanded(FilterFacet.MatchScores);
-
-        var placeholder = MatchScores(cut).GetAttribute("placeholder")!;
-
-        Assert.DoesNotContain("DMP", placeholder);
-    }
-
     // Cross-lib invariant (XgFilter_Lib is a dependency): every example token the
     // placeholder advertises must survive FilterConfig.Build() — the same score
     // parsing the panel's Apply path runs, reached through the lib's intent
     // surface rather than its internal filter types. Build() fails loud on any
     // token the parser rejects, so this pins "the UI never advertises an example
     // the lib rejects" as a standing invariant rather than a one-time fix — a
-    // future placeholder edit that reintroduces a DMP-style un-parseable example
+    // future placeholder edit that introduces an example the grammar refuses
     // trips here.
     [Fact]
     public void MatchScorePlaceholder_ExampleTokensAllParse()
     {
         var cut = RenderExpanded(FilterFacet.MatchScores);
 
-        var placeholder = MatchScores(cut).GetAttribute("placeholder")!;
-        var examples = placeholder
-            .Replace("e.g. ", string.Empty)
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var examples = PlaceholderExamples(cut);
 
         Assert.NotEmpty(examples);
         // Build() is the lib's Apply-time validation path.
         var cfg = new FilterConfig { MatchScores = [.. examples] };
         Assert.Null(Record.Exception(() => cfg.Build()));
+    }
+
+    // The grammar spells double match point two ways (halheinrich/backgammon#259),
+    // and every place the field states its vocabulary offers both: the
+    // placeholder as an example of its own, the hint as a spelling of 1a1a, and
+    // the malformed verdict beside the money tokens. Each is asked for the
+    // grammar's constant, never a literal — the pin follows the spelling
+    // wherever MatchScoreToken takes it.
+    [Fact]
+    public void MatchScoreFieldCopy_OffersTheDoubleMatchPointAlias_FromTheGrammarsConstant()
+    {
+        var cut = RenderExpanded(FilterFacet.MatchScores);
+
+        var hint = MatchScores(cut).ParentElement!.QuerySelector(".form-text")!.TextContent;
+        MatchScores(cut).Input("not-a-score");
+        var verdict = Assert.Single(MatchScoreVerdicts(cut));
+
+        Assert.Contains(MatchScoreToken.DoubleMatchPoint, PlaceholderExamples(cut));
+        Assert.Contains(MatchScoreToken.DoubleMatchPoint, hint);
+        Assert.Contains(MatchScoreToken.DoubleMatchPoint, verdict);
+    }
+
+    // The case the user reported: typing the alias the hint explained drew
+    // "Not a valid score". It now leaves the field clean and Apply offered.
+    [Fact]
+    public void DoubleMatchPointAlias_LeavesTheFieldClean_AndApplyOffered()
+    {
+        var cut = RenderExpanded(FilterFacet.MatchScores);
+
+        MatchScores(cut).Input(MatchScoreToken.DoubleMatchPoint);
+
+        Assert.DoesNotContain("is-invalid", MatchScores(cut).GetAttribute("class"));
+        Assert.Empty(MatchScoreVerdicts(cut));
+        Assert.False(Apply(cut).HasAttribute("disabled"));
     }
 
     // ── Match-score token validity ─────────────────────────────────────────

@@ -275,7 +275,12 @@ down (pinned both ways).
 **Token spellings render from the lib's constants, never as literals.**
 The placeholder's examples, the hint line, and both verdicts all render
 `MatchScoreToken.MoneyWithJacoby` / `MoneyWithoutJacoby` /
-`RetiredMoney` — see Pitfalls.
+`RetiredMoney` — see Pitfalls. The grammar also accepts
+`MatchScoreToken.DoubleMatchPoint` as a second spelling of `1a1a`
+(`halheinrich/backgammon#259`), and the field offers it everywhere it
+states the vocabulary: an example of its own in the placeholder, a
+spelling of `1a1a` in the hint, beside the money tokens in the malformed
+verdict, and in `FilterHelp`'s match-scores prose.
 
 **Information hierarchy** (dogfooding-driven, re-ruled in
 `halheinrich/backgammon#193`, folded once more in
@@ -596,7 +601,8 @@ and that levels under an unchecked mode are kept but inert. The
 match-scores section teaches the two rule-bearing money tokens, that
 admitting either rule means listing both, and that a session whose file
 never recorded the Jacoby rule matches neither (rare to the point of
-absent from files the current converter writes); it renders those
+absent from files the current converter writes), and that double match
+point may be written `1a1a` or as the `DoubleMatchPoint` alias; it renders those
 spellings from `MatchScoreToken`'s constants and deliberately does not
 offer the retired bare token — explaining a retirement belongs to the
 panel, which meets it where a user still has one typed. The shelved
@@ -1263,8 +1269,8 @@ producer-side, so neither widens what consumers can see.
   the user types that the lib parses has an exported constant, and that
   constant is the only place the spelling exists on this side:
   `MatchScoreToken.MoneyWithJacoby` / `MoneyWithoutJacoby` /
-  `RetiredMoney` (and `RetiredMoneyReplacements` for what to offer in
-  place of the retired one) across the placeholder, the hint line, both
+  `DoubleMatchPoint` / `RetiredMoney` (and `RetiredMoneyReplacements`
+  for what to offer in place of the retired one) across the placeholder, the hint line, both
   verdicts, and `FilterHelp`'s match-scores prose; `FilterPanel.ConfigKey`
   / `DisclosureKey` / `MoreFiltersKey` for the storage names;
   `FilterPanel.MoreFiltersFoldedLabel` / `MoreFiltersExpandedLabel` for

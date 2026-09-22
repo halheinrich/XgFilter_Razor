@@ -146,6 +146,17 @@ public class FilterHelpTests : BunitContext
         Assert.Empty(retired);
     }
 
+    // Same posture for the double-match-point alias the grammar accepts
+    // beside 1a1a (halheinrich/backgammon#259): the section offers it, and
+    // renders it from the lib's constant rather than a copy.
+    [Fact]
+    public void MatchScoresSection_NamesTheDoubleMatchPointAlias_FromTheLibsConstant()
+    {
+        var cut = RenderHelp();
+
+        Assert.Contains(MatchScoreToken.DoubleMatchPoint, MatchScoresProse(cut));
+    }
+
     // The match-scores section's prose, scoped to the section so a mention of
     // a token anywhere else in the block cannot satisfy — or break — either
     // half of the pair above.
