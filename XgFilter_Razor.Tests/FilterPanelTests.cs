@@ -1425,6 +1425,21 @@ public class FilterPanelTests : BunitContext
         Assert.Null(Record.Exception(() => cfg.Build()));
     }
 
+    // The placeholder's shape, not only its members: PlaceholderExamples trims
+    // each entry, so a lost or doubled separator space reads back the same list
+    // and passes every membership pin. Rebuilding the attribute from that list
+    // with exactly ", " between entries catches it — the same helper on both
+    // sides, so the two cannot disagree about what an example is.
+    [Fact]
+    public void MatchScorePlaceholder_ExamplesAreSeparatedByExactlyCommaSpace()
+    {
+        var cut = RenderExpanded(FilterFacet.MatchScores);
+
+        Assert.Equal(
+            "e.g. " + string.Join(", ", PlaceholderExamples(cut)),
+            MatchScores(cut).GetAttribute("placeholder"));
+    }
+
     // The grammar spells double match point two ways (halheinrich/backgammon#259),
     // and every place the field states its vocabulary offers both: the
     // placeholder as an example of its own, the hint as a spelling of 1a1a, and
