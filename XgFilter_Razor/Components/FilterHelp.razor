@@ -1,6 +1,7 @@
 @using System.Globalization
 @using XgFilter_Lib.Enums
 @using XgFilter_Lib.Filtering
+@using XgFilter_Lib.Patterns
 @using XgFilter_Razor.Components.Internal
 
 @* ── FilterHelp.razor ────────────────────────────────────────────────────────
@@ -230,18 +231,66 @@
         </p>
     </section>
 
+    @* The grammar is XgFilter_Lib's (BoardPattern and its constraint types);
+       this section describes how it behaves, never a second statement of
+       what parses — BoardPattern.TryParse is the only judge. Two markup
+       conventions carry that split into the pins: a concrete token the
+       reader could type is a <code> with no <var> in it, and every one of
+       those must parse as a whole pattern; a schematic form marks its
+       placeholders with <var>, and is exempt. A location name alone is not
+       a pattern, so it is never a <code>. So an example the grammar refuses cannot be offered
+       here — which is also why the refused forms are described in words
+       rather than shown. The borne-off names render from CheckerLocation's
+       own canonical spelling, never as literals. *@
     <section>
         @Heading(SectionLevel, PositionPatternAnchorId, FilterFacet.PositionPattern.ToLabel())
         <p>
-            Admits decisions whose position matches a set of per-location
-            checker-count ranges, written as a bracket list —
-            [location,min,max] per location, with a blank bound meaning
-            unbounded. Positive counts belong to the player on roll, negative
-            to the opponent. Locations are points 1–24 (numbered from the
-            player on roll's perspective), the bars (25 for the player on
-            roll, 0 for the opponent), and the borne-off trays (off and
-            opp-off). Every listed location must match. Blank means no
-            pattern filter.
+            Admits decisions whose position matches a pattern of checker
+            counts, written as bracketed entries separated by spaces. Every
+            entry must match. Blank means no pattern filter.
+        </p>
+        <p>
+            <code>[<var>location</var>,<var>min</var>,<var>max</var>]</code>
+            bounds the count at one location, inclusive, with a blank bound
+            meaning no limit on that side. Positive counts belong to the player
+            on roll, negative to the opponent: <code>[6,2,]</code> asks for two
+            or more of the player on roll's checkers on the 6-point, and
+            <code>[5,,-2]</code> for two or more of the opponent's on the
+            5-point. Locations are points 1–24 (numbered from the player on
+            roll's perspective), the bars (25 for the player on roll, 0 for the
+            opponent), and the borne-off trays (@CheckerLocation.PlayerOff
+            for the player on roll, @CheckerLocation.OpponentOff for the
+            opponent). A bar or a tray only ever holds one side's
+            checkers, so a bound of the other side's sign is refused there: 25
+            and @CheckerLocation.PlayerOff take no negative bound, 0 and
+            @CheckerLocation.OpponentOff no positive one. A point can hold
+            either side, and a bound on it sees both — <code>[6,0,3]</code>
+            also rules out an opponent's checker on the 6-point.
+        </p>
+        <p>
+            <code>[<var>a</var>-<var>b</var>,<var>min</var>,<var>max</var>]</code>
+            bounds a range of locations instead: every location from
+            <var>a</var> to <var>b</var>, where <var>a</var> is below
+            <var>b</var>. It counts one side's total across the whole range,
+            and the sign of the bounds says whose — <code>[7-12,3,]</code> asks
+            for three or more of the player on roll's checkers across points 7
+            to 12, and <code>[13-18,,-2]</code> for two or more of the
+            opponent's across 13 to 18. The other side's checkers in the range
+            are ignored, not subtracted: opposing checkers on points 7 to 12
+            neither help nor hurt <code>[7-12,3,]</code>. That is where a range
+            differs from a single point, and why a range whose bounds have
+            opposite signs is refused — it counts only one side. A range may
+            take in either bar, whichever side it counts.
+        </p>
+        <p>
+            Zero is the one count both sides share, so a range bounded only by
+            zeros and blanks speaks for each side it can:
+            <code>[19-24,0,0]</code> means points 19 to 24 are empty of both
+            sides, <code>[13-24,,0]</code> that the player on roll has no
+            checkers on points 13 to 24, and <code>[1-12,0,]</code> that the
+            opponent has none on points 1 to 12. Ranges may overlap each other
+            and single locations; each entry is one more condition, so
+            <code>[7,1,] [7-12,3,]</code> asks for both.
         </p>
     </section>
 

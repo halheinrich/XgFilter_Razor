@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Components;
 using BgDataTypes_Lib;
 using XgFilter_Lib.Enums;
 using XgFilter_Lib.Filtering;
+using XgFilter_Lib.Patterns;
 using XgFilter_Razor.Components.Internal;
 
 namespace XgFilter_Razor.Tests;
@@ -556,6 +557,40 @@ public class FilterPanelTests : BunitContext
         _ = enumType;  // present so failures cite the enum that caused them
         var cut = RenderExpanded(FilterFacet.DecisionType);
         Assert.Contains(expectedLabel, cut.Markup);
+    }
+
+    // The ruled contact-type vocabulary in its ruled order, member token paired
+    // with the [Description] label the user reads — an independent literal, not
+    // a projection of Enum.GetValues, for the reason RuledLevelVocabulary gives:
+    // the panel derives these checkboxes from the enum, so an expectation built
+    // the same way moves with the producer and can never fail. A rename,
+    // reorder, relabel, insertion or removal in XgFilter_Lib's ContactType
+    // changes what the user sees, and breaks this so it is ruled on here
+    // (halheinrich/backgammon#162).
+    private static readonly (string Member, string Label)[] RuledContactVocabulary =
+    [
+        ("Contact", "Contact"),
+        ("Race",    "Race"),
+    ];
+
+    // The contact-type row renders exactly that vocabulary, in exactly that
+    // order, labelled exactly that way — the level facet's pin, for the one
+    // other enum-derived checkbox group. Sequence equality over the ids pins
+    // membership too: an extra or missing checkbox fails here.
+    [Fact]
+    public void ContactTypeSection_RendersTheRuledVocabularyInTheRuledOrder()
+    {
+        var cut = RenderExpanded(FilterFacet.ContactTypes);
+
+        Assert.Equal(
+            RuledContactVocabulary.Select(v => v.Member),
+            cut.FindAll("input[id^='ct_']").Select(el => el.Id!["ct_".Length..]));
+
+        foreach (var (member, label) in RuledContactVocabulary)
+        {
+            Assert.Equal("checkbox", cut.Find($"#ct_{member}").GetAttribute("type"));
+            Assert.Equal(label, cut.Find($"label[for='ct_{member}']").TextContent.Trim());
+        }
     }
 
     // Position type and Play type are shelved for later reintroduction in a
@@ -1252,8 +1287,10 @@ public class FilterPanelTests : BunitContext
     // Silent-splat guard for the Position-pattern field: an unbound text input
     // would compile but never feed BuildConfig, so type a valid bracket list,
     // Apply, and assert the emitted config carries the parsed BoardPattern.
-    // BoardPattern has no value-equality, so compare via its round-tripping
-    // ToBracketList rendering.
+    // BoardPattern has value equality (IEquatable, over its constraint set), so
+    // the expectation is built from the constraints themselves rather than
+    // from text — independent of the parse path the panel ran, and blind to
+    // token order, which the pattern's identity does not include.
     [Fact]
     public async Task PositionPattern_FlowsIntoEmittedConfig()
     {
@@ -1267,8 +1304,87 @@ public class FilterPanelTests : BunitContext
         await cut.Find("button.btn-primary").ClickAsync(new());
 
         Assert.NotNull(capturedConfig);
-        Assert.NotNull(capturedConfig!.PositionPattern);
-        Assert.Equal("[6,2,] [5,,-2]", capturedConfig.PositionPattern!.ToBracketList());
+        Assert.Equal(
+            new BoardPattern([new CheckerRange(6, 2, null), new CheckerRange(5, null, -2)]),
+            capturedConfig!.PositionPattern);
+    }
+
+    // The range token reaches the wire the same way (halheinrich/backgammon#268):
+    // one side's total across a span, the side named by the bounds' sign. Both
+    // signs ride in one pattern, so a panel that dropped or re-signed either
+    // would emit a different constraint set and fail the value comparison.
+    [Fact]
+    public async Task PositionPatternRange_FlowsIntoEmittedConfig()
+    {
+        FilterConfig? capturedConfig = null;
+        var cut = RenderExpanded(
+            parameters => parameters
+                .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }),
+            FilterFacet.PositionPattern);
+
+        cut.Find("#positionPattern").Input("[7-12,3,] [13-18,,-2]");
+        await Apply(cut).ClickAsync(new());
+
+        Assert.NotNull(capturedConfig);
+        Assert.Equal(
+            new BoardPattern([new CheckerSpanRange(7, 12, 3, null), new CheckerSpanRange(13, 18, null, -2)]),
+            capturedConfig!.PositionPattern);
+    }
+
+    // The range forms the grammar refuses land in the field's invalid state
+    // like any other unparseable text: the field reds, its invalid-entry line
+    // is the sibling Bootstrap reveals, and Apply is withheld. Each row is one
+    // refusal the grammar owns — opposite-signed range bounds, a range that
+    // does not run low to high, and the bar rule on a single-location token
+    // from each side. The panel runs no check of its own, so these prove only
+    // that it asks TryParse and marks what it hears; the rules themselves are
+    // pinned in XgFilter_Lib.
+    [Theory]
+    [InlineData("[7-12,-1,3]")]   // opposite-signed bounds
+    [InlineData("[12-7,1,]")]     // start not below end
+    [InlineData("[0,1,]")]        // opponent's bar, positive bound
+    [InlineData("[25,,-1]")]      // on-roll player's bar, negative bound
+    public void RefusedPatternForm_MarksFieldWithItsMessage_AndWithholdsApply(string text)
+    {
+        var cut = RenderExpanded(FilterFacet.PositionPattern);
+
+        cut.Find("#positionPattern").Input(text);
+
+        Assert.Contains("is-invalid", cut.Find("#positionPattern").GetAttribute("class"));
+        Assert.NotNull(cut.Find("#positionPattern ~ .invalid-feedback"));
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+    }
+
+    // The bar rule belongs to single-location tokens only: a range may take in
+    // either bar whichever side it counts. Pinned from the panel so a local
+    // pre-check that over-applied the bar rule to ranges would red a pattern
+    // the grammar accepts.
+    [Theory]
+    [InlineData("[24-25,-2,-2]")]  // on-roll player's bar, opponent's count
+    [InlineData("[0-6,3,]")]       // opponent's bar, on-roll player's count
+    public void RangeAcrossABar_EitherSign_LeavesFieldClean(string text)
+    {
+        var cut = RenderExpanded(FilterFacet.PositionPattern);
+        cut.Find("#positionPattern").Input(text);
+
+        Assert.DoesNotContain("is-invalid", cut.Find("#positionPattern").GetAttribute("class"));
+        Assert.False(Apply(cut).HasAttribute("disabled"));
+    }
+
+    // Every example the placeholder advertises is a pattern the grammar
+    // accepts, and one of them is a range — the placeholder is where most
+    // users first meet the syntax, so it must show the token this facet
+    // gained. The match-score placeholder's invariant, for this field.
+    [Fact]
+    public void PositionPatternPlaceholder_IsAnAcceptedPattern_ThatIncludesARange()
+    {
+        var cut = RenderExpanded(FilterFacet.PositionPattern);
+
+        var placeholder = cut.Find("#positionPattern").GetAttribute("placeholder")!;
+        Assert.StartsWith("e.g. ", placeholder);
+
+        Assert.True(BoardPattern.TryParse(placeholder["e.g. ".Length..], out var pattern));
+        Assert.Contains(pattern!.Constraints, c => c is CheckerSpanRange);
     }
 
     // The panel is where users type the grammar by hand, so pin the borne-off

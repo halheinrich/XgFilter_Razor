@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using Bunit;
 using XgFilter_Lib.Enums;
 using XgFilter_Lib.Filtering;
+using XgFilter_Lib.Patterns;
 using XgFilter_Razor.Components;
 using XgFilter_Razor.Components.Internal;
 
@@ -162,6 +163,72 @@ public class FilterHelpTests : BunitContext
     // half of the pair above.
     private static string MatchScoresProse(IRenderedComponent<FilterHelp> cut) =>
         cut.Find($"#{FilterHelp.MatchScoresAnchorId} ~ p").TextContent;
+
+    // ── Position pattern ───────────────────────────────────────────────────
+    //
+    // The section teaches a grammar XgFilter_Lib owns (BoardPattern), so its
+    // pins ask that owner rather than re-typing copy. The section's markup
+    // convention gives them their hook: a concrete example is a <code> with no
+    // <var> in it, a schematic form marks its placeholders with <var>.
+
+    // Every concrete example the section offers is a pattern the grammar
+    // accepts — help that shows an entry the field then refuses is worse than
+    // none. Asked of BoardPattern.TryParse, the one judge, so a grammar change
+    // that retires an example spelling trips here.
+    [Fact]
+    public void PositionPatternSection_EveryConcreteExampleParses()
+    {
+        var examples = PositionPatternExamples(RenderHelp());
+
+        Assert.NotEmpty(examples);
+        Assert.All(examples, example => Assert.True(
+            BoardPattern.TryParse(example, out _), $"'{example}' does not parse"));
+    }
+
+    // The forms a reader must be able to write from this section alone
+    // (halheinrich/backgammon#268), asked of the parsed examples rather than
+    // their text: a range for each side, named by the sign of its bounds, and
+    // each of the three zero-bound forms — empty of both sides, none of the
+    // player on roll's, none of the opponent's. A reword keeps these green; an
+    // example that stops demonstrating its form reds them.
+    [Fact]
+    public void PositionPatternSection_ShowsARangeForEachSide_AndEveryZeroBoundForm()
+    {
+        var ranges = PositionPatternExamples(RenderHelp())
+            .SelectMany(example => BoardPattern.Parse(example).Constraints)
+            .OfType<CheckerSpanRange>()
+            .ToArray();
+
+        Assert.Contains(ranges, r => r.Min > 0 || r.Max > 0);
+        Assert.Contains(ranges, r => r.Min < 0 || r.Max < 0);
+        Assert.Contains(ranges, r => r is { Min: 0, Max: 0 });
+        Assert.Contains(ranges, r => r is { Min: null, Max: 0 });
+        Assert.Contains(ranges, r => r is { Min: 0, Max: null });
+    }
+
+    // The borne-off location names are the grammar's vocabulary, rendered from
+    // CheckerLocation's canonical spelling — the match-scores section's
+    // posture. Matched as whole words: the on-roll player's name is a suffix
+    // of the opponent's, so a substring check would pass on the second alone.
+    [Fact]
+    public void PositionPatternSection_NamesTheBorneOffLocations_FromTheLibsSpelling()
+    {
+        var prose = PositionPatternProse(RenderHelp());
+
+        foreach (var name in new[] { CheckerLocation.PlayerOff.ToString(), CheckerLocation.OpponentOff.ToString() })
+            Assert.Matches($@"(?<![\w-]){Regex.Escape(name)}(?![\w-])", prose);
+    }
+
+    // The section's whole prose, every paragraph after its heading.
+    private static string PositionPatternProse(IRenderedComponent<FilterHelp> cut) =>
+        string.Join(" ", cut.FindAll($"#{FilterHelp.PositionPatternAnchorId} ~ p").Select(p => p.TextContent));
+
+    // The section's concrete examples: every <code> carrying no <var>.
+    private static string[] PositionPatternExamples(IRenderedComponent<FilterHelp> cut) =>
+        cut.FindAll($"#{FilterHelp.PositionPatternAnchorId} ~ p code")
+           .Where(code => code.QuerySelector("var") is null)
+           .Select(code => code.TextContent)
+           .ToArray();
 
     // The two non-facet sections carry stable anchor ids on headings, like
     // every facet section here — those anchors are the embedding surface a

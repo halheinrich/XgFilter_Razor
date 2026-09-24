@@ -282,6 +282,23 @@ states the vocabulary: an example of its own in the placeholder, a
 spelling of `1a1a` in the hint, beside the money tokens in the malformed
 verdict, and in `FilterHelp`'s match-scores prose.
 
+**The position-pattern field presents a grammar it does not own.**
+`XgFilter_Lib`'s `BoardPattern` (and its constraint types) owns the
+bracket list; see that repo's Patterns section. The field's copy states
+the grammar for a user typing it: the single-location token, the
+`[a-b,min,max]` range token (`halheinrich/backgammon#268`) with the sign
+of its bounds naming the side, the other side's checkers ignored, the
+three zero-bound forms, and the bar rule. The borne-off names render from
+`CheckerLocation.PlayerOff` / `OpponentOff` (their `ToString` is the
+canonical spelling; the name constants themselves are `internal`). The
+example tokens are literal and pinned to parse. The placeholder must be a
+pattern the grammar accepts and must include a range. The invalid-entry
+line names no single cause, deliberately: `TryParse` reports none, and a
+list of causes (opposite-signed bounds, a backwards range, a wrong-signed
+bar bound, a duplicate place) would be a second copy of the lib's rules,
+incomplete the day the lib adds one. It sends the reader to the rules
+stated directly above it.
+
 **Information hierarchy** (dogfooding-driven, re-ruled in
 `halheinrich/backgammon#193`, folded once more in
 `halheinrich/backgammon#231`): the error-range section is first and always
@@ -605,7 +622,18 @@ absent from files the current converter writes), and that double match
 point may be written `1a1a` or as the `DoubleMatchPoint` alias; it renders those
 spellings from `MatchScoreToken`'s constants and deliberately does not
 offer the retired bare token — explaining a retirement belongs to the
-panel, which meets it where a user still has one typed. The shelved
+panel, which meets it where a user still has one typed. The
+position-pattern section teaches the bracket list as behavior, with worked
+examples: single-location tokens and what a signed bound on a point sees,
+the bars' and trays' one-sided bounds, the range token
+(`halheinrich/backgammon#268`) counting one side named by its sign with the
+other side ignored, and the three zero-bound forms. It describes the
+refused forms in words and never shows one. Its markup carries the split
+the pins key on: a concrete token is a `<code>` with no `<var>`, and every
+one must parse through `BoardPattern.TryParse`. A schematic form marks its
+placeholders with `<var>` and is exempt. The pins ask the parsed examples
+for a range of each sign and each zero-bound form, not for any wording.
+The borne-off names render from `CheckerLocation`. The shelved
 facets (Position types / Play types) are deliberately undocumented until
 their UI returns.
 
@@ -1271,7 +1299,11 @@ producer-side, so neither widens what consumers can see.
   `MatchScoreToken.MoneyWithJacoby` / `MoneyWithoutJacoby` /
   `DoubleMatchPoint` / `RetiredMoney` (and `RetiredMoneyReplacements`
   for what to offer in place of the retired one) across the placeholder, the hint line, both
-  verdicts, and `FilterHelp`'s match-scores prose; `FilterPanel.ConfigKey`
+  verdicts, and `FilterHelp`'s match-scores prose; `CheckerLocation.PlayerOff`
+  / `OpponentOff` (rendered through their canonical `ToString`, the
+  public face of the lib's `internal` name constants) for the borne-off
+  names in the position-pattern field's copy and `FilterHelp`'s
+  position-pattern prose; `FilterPanel.ConfigKey`
   / `DisclosureKey` / `MoreFiltersKey` for the storage names;
   `FilterPanel.MoreFiltersFoldedLabel` / `MoreFiltersExpandedLabel` for
   the container toggle's two names, in the markup and in the help alike;
