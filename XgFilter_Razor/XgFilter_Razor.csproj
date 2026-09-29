@@ -2,8 +2,9 @@
 
   <!-- Framework, nullable, implicit usings, warnings-as-errors, and doc-file
        generation are repo-wide policy — see ..\Directory.Build.props. Only
-       per-project decisions live here: the Razor SDK (project attribute above)
-       and the browser SupportedPlatform. -->
+       per-project decisions live here: the Razor SDK (project attribute above),
+       the browser SupportedPlatform, and the trim posture and test-only
+       InternalsVisibleTo grants, each commented where it stands. -->
 
   <ItemGroup>
     <SupportedPlatform Include="browser" />
