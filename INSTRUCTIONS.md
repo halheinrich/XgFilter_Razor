@@ -806,7 +806,7 @@ bUnit + xUnit, targets .NET 10. `BunitContext` with
 `localStorage.getItem` calls return `default` (treated as "no persisted
 state").
 
-**Pin posture: structure and wiring, never copy.** These suites assert
+**Pin posture: structure and wiring, and copy only where it was ruled.** These suites assert
 that a component renders the identity, value, or spelling its source of
 truth names — the anchor ids, the storage keys, the score-token
 constants — reached through test-only `InternalsVisibleTo` where the
