@@ -92,7 +92,8 @@ packable.
 the saved-filters store, plus the seeding seam pinned against a real render
 and the trim-posture pins. `FakeDocumentStorage`
 is the recording fake over the storage seam the store and composite tests
-share.
+share; `OpponentBoundRuling` is the one oracle the help and panel suites
+both pin the opponent-bound statement against (see Test project).
 
 ## Architecture
 
@@ -288,7 +289,11 @@ bracket list; see that repo's Patterns section. The field's copy states
 the grammar for a user typing it: the single-location token, the
 `[a-b,min,max]` range token (`halheinrich/backgammon#268`) with the sign
 of its bounds naming the side, the other side's checkers ignored, the
-three zero-bound forms, and the bar rule. The borne-off names render from
+three zero-bound forms, the bar rule, and — Hal's ruling on
+`halheinrich/backgammon#275` (2026-09-25), stated here and in `FilterHelp`
+alike — that the opponent's "at least n" is written with the upper bound
+(`[1-6,,-1]`) and a lower bound (`[1-6,-1,]`) means "at most n". The
+borne-off names render from
 `CheckerLocation.PlayerOff` / `OpponentOff` (their `ToString` is the
 canonical spelling; the name constants themselves are `internal`). The
 example tokens are literal and pinned to parse. The placeholder must be a
@@ -615,10 +620,14 @@ more checked = more matched; nothing checked = facet off), the
 inner-level distinction per mode, and the per-mode **Analysis level**
 disclosure: what its `any` / `N selected` badge says without opening it,
 and that levels under an unchecked mode are kept but inert. The
+error-range section states whose error is filtered (SPEC-scoring §2a): a
+checker play's error is measured under the ranking the application uses to
+pick the best play, and a move that ranking does not score has no error, so
+no error range admits it. The ranking is the host's — this component
+neither owns nor chooses one — so the copy names no setting and stays true
+in a host without one. The
 match-scores section teaches the two rule-bearing money tokens, that
-admitting either rule means listing both, and that a session whose file
-never recorded the Jacoby rule matches neither (rare to the point of
-absent from files the current converter writes), and that double match
+admitting either rule means listing both, and that double match
 point may be written `1a1a` or as the `DoubleMatchPoint` alias; it renders those
 spellings from `MatchScoreToken`'s constants and deliberately does not
 offer the retired bare token — explaining a retirement belongs to the
@@ -627,12 +636,16 @@ position-pattern section teaches the bracket list as behavior, with worked
 examples: single-location tokens and what a signed bound on a point sees,
 the bars' and trays' one-sided bounds, the range token
 (`halheinrich/backgammon#268`) counting one side named by its sign with the
-other side ignored, and the three zero-bound forms. It describes the
+other side ignored, the three zero-bound forms, and the opponent's "at
+least n" as the upper bound and "at most n" as the lower
+(`halheinrich/backgammon#275`, the ruling's own two examples). It describes the
 refused forms in words and never shows one. Its markup carries the split
 the pins key on: a concrete token is a `<code>` with no `<var>`, and every
 one must parse through `BoardPattern.TryParse`. A schematic form marks its
 placeholders with `<var>` and is exempt. The pins ask the parsed examples
-for a range of each sign and each zero-bound form, not for any wording.
+for a range of each sign and each zero-bound form, not for any wording —
+except the opponent-bound paragraph, which is ruled copy and is pinned as
+such (see Test project).
 The borne-off names render from `CheckerLocation`. The shelved
 facets (Position types / Play types) are deliberately undocumented until
 their UI returns.
@@ -801,7 +814,15 @@ source is `internal`. Wording itself is not pinned here: an
 independent-literal oracle for "the user can read X" would be a second
 copy of the very text under test, so that oracle lives in the consumer's
 e2e suite. The corollary is the no-literal-spellings rule in Pitfalls,
-which binds these pins as much as the markup.
+which binds these pins as much as the markup. **Ruled copy is the one
+exception**, and it is the carve-out in that rule, not a departure from it:
+where a ruling or a spec requires a surface to make a statement, or to stop
+making one, the pin is an oracle for the ruling and holds the copy to
+independent literals, naming the ruling it enforces. A statement ruled
+for more than one surface is pinned in each against one shared oracle, so
+the surfaces cannot be held to different rulings — `OpponentBoundRuling`
+(`halheinrich/backgammon#275`) is the shape, and it also asks the grammar
+that each of the ruling's examples still reads as the ruling says.
 
 ### Test-support assembly (`XgFilter_Razor.Testing`)
 

@@ -1387,6 +1387,18 @@ public class FilterPanelTests : BunitContext
         Assert.Contains(pattern!.Constraints, c => c is CheckerSpanRange);
     }
 
+    // Hal's ruling on halheinrich/backgammon#275: the field's hint states how
+    // the opponent's "at least n" and "at most n" are written, with the
+    // ruling's own examples — the same oracle FilterHelp's section is pinned
+    // against, so the two surfaces answer to one ruling.
+    [Fact]
+    public void PositionPatternHint_StatesTheOpponentsAtLeastAndAtMost_AsRuled()
+    {
+        var cut = RenderExpanded(FilterFacet.PositionPattern);
+
+        OpponentBoundRuling.AssertStatedIn(cut.Find("#positionPattern ~ .form-text").TextContent);
+    }
+
     // The panel is where users type the grammar by hand, so pin the borne-off
     // vocabulary at the wire: an off/opp-off pattern must reach the emitted
     // config, and mixed-case names must come back canonicalized. BoardPattern

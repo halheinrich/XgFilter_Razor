@@ -656,7 +656,10 @@
                        cause: TryParse reports none, and a list of causes would be a second
                        copy of the lib's rules. The borne-off names render from
                        CheckerLocation's own canonical spelling, never as literals (see
-                       Pitfalls); the example tokens are literal and pinned to parse.
+                       Pitfalls); the example tokens are literal and pinned to parse. How the
+                       opponent's at least n and at most n are written is Hal's ruling on
+                       halheinrich/backgammon#275 (2026-09-25), stated here and in FilterHelp
+                       alike with the ruling's own two examples.
 
                        Named by reference rather than from a label: the row's header
                        button already carries the facet's name, so aria-labelledby points
@@ -690,6 +693,9 @@
                             checkers there are ignored, and opposite-signed bounds are refused.
                             [a-b,0,0] = empty of both sides; [a-b,,0] = none of the player on roll's;
                             [a-b,0,] = none of the opponent's.
+                            For the opponent, at least n is written with the upper bound — [1-6,,-1] =
+                            at least one of the opponent's on points 1–6 — and a lower bound means at
+                            most n: [1-6,-1,] = at most one.
                             E.g. [6,2,] [5,,-2] [25,1,] [@CheckerLocation.OpponentOff,,-2] [@CheckerLocation.PlayerOff,10,] [7-12,3,] [13-18,,-2] [19-24,0,0].
                         </div>
                         <div class="invalid-feedback">

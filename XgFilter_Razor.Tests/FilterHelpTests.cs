@@ -11,6 +11,10 @@ namespace XgFilter_Razor.Tests;
 // Deliberately minimal pins — FilterHelp is prose that will evolve, so these
 // assert structure (it renders, every documented topic has an anchored
 // heading, the outline the host asked for is the outline it gets), not copy.
+// The exception is copy that was ruled — a statement a ruling or a spec
+// requires the help to make, or to stop making — pinned by independent
+// literals as an oracle for that ruling (the carve-out in Pitfalls), each
+// test naming the ruling it holds the copy to.
 // No Loose JSInterop needed: the component is render-only with no interop by
 // contract.
 public class FilterHelpTests : BunitContext
@@ -64,6 +68,27 @@ public class FilterHelpTests : BunitContext
 
         foreach (var (facet, anchorId) in DocumentedFacets)
             Assert.Equal(facet.ToLabel(), cut.Find($"#{anchorId}").TextContent.Trim());
+    }
+
+    // SPEC-scoring §2a rules that the error filter reads the player's error
+    // under the caller's ranking, and that a move the ranking does not score
+    // has no error — so it never satisfies an error range. The section states
+    // both, in the spec's own terms (the carve-out's oracle posture: the pin
+    // holds the copy to the ruling, not to itself). Its other half: the copy
+    // names no ranking *setting*, because it must stay true in a host that has
+    // none, and must not suggest this component chooses the ranking.
+    [Fact]
+    public void ErrorRangeSection_StatesThatAMoveTheRankingDoesNotScoreHasNoError()
+    {
+        var prose = Regex.Replace(
+            string.Join(" ", RenderHelp()
+                .FindAll($"#{FilterHelp.ErrorRangeAnchorId} ~ p")
+                .Select(p => p.TextContent)),
+            @"\s+", " ");
+
+        Assert.Contains("ranking", prose);
+        Assert.Contains("does not score has no error", prose);
+        Assert.DoesNotContain("setting", prose);
     }
 
     // The shelved facets stay undocumented until their UI returns — help that
@@ -158,6 +183,22 @@ public class FilterHelpTests : BunitContext
         Assert.Contains(MatchScoreToken.DoubleMatchPoint, MatchScoresProse(cut));
     }
 
+    // Every money session states its Jacoby rule (SPEC-stats-identity §2,
+    // amended 2026-09-27; MoneyTerms.IsJacoby is a required bool), so the
+    // section's old sentence about a session whose file never recorded the
+    // rule — that it matches neither money token — described a state that no
+    // longer exists, and was removed rather than replaced. An absence of
+    // retired prose has no owner to ask, so this is the carve-out's kind of
+    // pin: independent literals for the removed claim's own words.
+    [Fact]
+    public void MatchScoresSection_MakesNoClaimAboutAnUnrecordedJacobyRule()
+    {
+        var prose = MatchScoresProse(RenderHelp());
+
+        Assert.DoesNotContain("never recorded", prose);
+        Assert.DoesNotContain("neither", prose);
+    }
+
     // The match-scores section's prose, scoped to the section so a mention of
     // a token anywhere else in the block cannot satisfy — or break — either
     // half of the pair above.
@@ -204,6 +245,21 @@ public class FilterHelpTests : BunitContext
         Assert.Contains(ranges, r => r is { Min: 0, Max: 0 });
         Assert.Contains(ranges, r => r is { Min: null, Max: 0 });
         Assert.Contains(ranges, r => r is { Min: 0, Max: null });
+    }
+
+    // Hal's ruling on halheinrich/backgammon#275: the section states how the
+    // opponent's "at least n" and "at most n" are written, in one paragraph,
+    // with the ruling's own examples. OpponentBoundRuling is the oracle, shared
+    // with the pattern field's pin so the two surfaces answer to one ruling.
+    [Fact]
+    public void PositionPatternSection_StatesTheOpponentsAtLeastAndAtMost_AsRuled()
+    {
+        var paragraph = RenderHelp()
+            .FindAll($"#{FilterHelp.PositionPatternAnchorId} ~ p")
+            .Single(p => p.QuerySelectorAll("code")
+                          .Any(code => code.TextContent == OpponentBoundRuling.AtLeastExample));
+
+        OpponentBoundRuling.AssertStatedIn(paragraph.TextContent);
     }
 
     // The borne-off location names are the grammar's vocabulary, rendered from
