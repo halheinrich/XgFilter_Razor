@@ -321,6 +321,44 @@ public class FilterSurfaceStorageUnavailableTests : BunitContext
         Assert.Equal(0, _storageUnavailableReports);
     }
 
+    // ── The failed-restore notice outlives a refused write ──────────────────
+    //
+    // The notice claims the stored document could not be read, and it ends at
+    // a commit only because the commit replaces that document. A commit whose
+    // write the browser refused replaces nothing, so the notice must stand —
+    // beside whatever the host says about storage — while the applied
+    // selection is still committed and delivered (Hal's ruling, 2026-10-07).
+    // The control is FilterSurfaceTests'
+    // RestoreFailedNotice_SurvivesAnEdit_AndEndsAtACommit, where the write
+    // lands and the notice ends.
+
+    [Fact]
+    public async Task WritesRefused_ApplyCommits_ButTheFailedRestoreNoticeStays_AcrossARemount()
+    {
+        JSInterop.Setup<string?>("localStorage.getItem", FilterPanel.ConfigKey)
+                 .SetResult("}{ not a config");
+        WithWritesRefused();
+        var first = RenderSurface();
+        first.WaitForAssertion(() => first.Find("#filterRestoreFailedNotice"));
+
+        ErrorMin(first).Input("0.05");
+        await Apply(first).ClickAsync(new());
+
+        // Committed and delivered, exactly as a landed write would be.
+        var applied = Assert.Single(_committed);
+        Assert.Equal(applied, _reports[^1]);
+        Assert.Equal(applied, _holder.ConfigFor(TokenA));
+        // But the unreadable document was never replaced, so the notice stands.
+        Assert.NotNull(first.Find("#filterRestoreFailedNotice"));
+        Assert.True(_notice.IsFailureVisible);
+
+        var second = RenderSurface();
+
+        second.WaitForAssertion(() => Assert.Equal("0.05", ErrorMin(second).GetAttribute("value")));
+        Assert.True(Apply(second).HasAttribute("disabled"));
+        Assert.NotNull(second.Find("#filterRestoreFailedNotice"));
+    }
+
     // The parameter is optional by design: both hosts bind it in their own
     // legs, and until then — or in a host that never does — the panel
     // degrades exactly the same way and the host simply is not told.

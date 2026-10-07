@@ -61,9 +61,10 @@ namespace XgFilter_Razor;
 /// app-scoped holder carries both facts, each with its own one-way
 /// dismissal (<see cref="IsFailureVisible"/>, <see cref="ArmFailure"/>,
 /// <see cref="DismissFailure"/>), and a host registers one instance for the
-/// pair. The failure notice ends when the user closes it or when a commit
-/// writes a fresh document over the unreadable one; an edit leaves it, since
-/// an edit changes nothing about what was stored. The two outcomes are
+/// pair. The failure notice ends when the user closes it or when a commit's
+/// write lands, replacing the unreadable document; an edit leaves it, and so
+/// does a commit whose write the browser refused, since neither changes what
+/// is stored (Hal's ruling, 2026-10-07). The two outcomes are
 /// exclusive within one restore, but the holder does not encode that — each
 /// bit answers for itself.
 /// </para>
@@ -144,8 +145,10 @@ public sealed class FilterRestoreNotice
     }
 
     /// <summary>
-    /// The failure notice is over: the user closed it, or a commit wrote a
-    /// fresh document over the one that could not be read. One transition for
+    /// The failure notice is over: the user closed it, or a commit's write
+    /// landed and replaced the document that could not be read — never a
+    /// commit whose write was refused, which leaves that document in place.
+    /// One transition for
     /// both, as with <see cref="Dismiss"/>: hides the notice and spends it for
     /// the rest of the app lifetime.
     /// </summary>

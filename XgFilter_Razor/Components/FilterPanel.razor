@@ -95,10 +95,11 @@
            unreadable document survives navigation and a remount reads it
            again. So the dismissal is the same app-scoped holder's, its second
            fact, and the binding is the box above's shape — no @if, no bit
-           here. It ends when the user closes it or a commit writes a fresh
-           document over the unreadable one; an edit leaves it standing, since
-           an edit changes nothing about what is stored. Polite: an outcome to
-           understand, not a gesture that failed. *@
+           here. It ends when the user closes it or a commit's write lands,
+           replacing the unreadable document; an edit leaves it standing, and
+           so does a commit whose write the browser refused, since neither
+           changes what is stored. Polite: an outcome to understand, not a
+           gesture that failed. *@
         <Notice id="filterRestoreFailedNotice" class="mb-3"
                 Kind="NoticeKind.Warning" Announcement="NoticeAnnouncement.Polite"
                 Dismissible="true"
@@ -1304,17 +1305,22 @@
         return stored;
     }
 
-    private async Task TrySetItemAsync(string key, string value)
+    // Reports whether the write landed: a caller whose claim depends on the
+    // stored value having changed (the failed-restore notice's) must not
+    // act on a write that was skipped or refused.
+    private async Task<bool> TrySetItemAsync(string key, string value)
     {
-        if (_storageUnavailable) return;
+        if (_storageUnavailable) return false;
 
         try
         {
             await JS.InvokeVoidAsync("localStorage.setItem", key, value);
+            return true;
         }
         catch (JSException)
         {
             await RecordStorageUnavailableAsync();
+            return false;
         }
     }
 
@@ -1547,9 +1553,11 @@
     // is the only place _committedConfig moves on a gesture (ResumeApplied
     // moves it at mount). A commit is the other gesture that makes the
     // selection the user's own, so the restored-selection notice dies here
-    // too (Apply is additionally the very consent the notice asks for); and
-    // it writes a fresh document over whatever was stored, so the
-    // failed-restore notice ends here as well.
+    // too (Apply is additionally the very consent the notice asks for). The
+    // failed-restore notice ends here only when the write lands: its claim
+    // is about the stored document, and a refused or skipped write leaves
+    // the unreadable one in place, so the notice stays beside whatever the
+    // host says about storage (Hal's ruling, 2026-10-07).
     //
     // The committed config is assigned before the write and both callbacks
     // are raised after it whether or not the write landed: the host must
@@ -1559,9 +1567,11 @@
     private async Task PersistAndRaiseAsync(FilterConfig cfg)
     {
         RestoreNotice.Dismiss();
-        RestoreNotice.DismissFailure();
         _committedConfig = cfg;
-        await TrySetItemAsync(ConfigKey, cfg.ToJson());
+        if (await TrySetItemAsync(ConfigKey, cfg.ToJson()))
+        {
+            RestoreNotice.DismissFailure();
+        }
         await OnFilterConfigChanged.InvokeAsync(cfg);
 
         // Re-derived through MatchedCommittedConfig rather than handing cfg

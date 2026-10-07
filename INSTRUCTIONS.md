@@ -187,7 +187,7 @@ the page:
 | Box | What it is | Occurrence | Holder of the dismissal |
 | --- | --- | --- | --- |
 | `#filterRestoredNotice` | event notice, polite | this boot's restore of a stored selection | the app-scoped `FilterRestoreNotice` — the occurrence outlives every mount of the panel, so the panel binds the component's dismissed state to it and keeps no copy |
-| `#filterRestoreFailedNotice` | event notice, polite | this boot's restore of a stored selection it could not read (`halheinrich/backgammon#367`: a failed restore is never silent) | the same `FilterRestoreNotice`, its second fact — the unreadable document outlives every mount too, and a remount reads it again; one holder for the two outcomes of one restore, each with its own one-way dismissal. It also ends at a commit, which writes a fresh document over the unreadable one; an edit leaves it |
+| `#filterRestoreFailedNotice` | event notice, polite | this boot's restore of a stored selection it could not read (`halheinrich/backgammon#367`: a failed restore is never silent) | the same `FilterRestoreNotice`, its second fact — the unreadable document outlives every mount too, and a remount reads it again; one holder for the two outcomes of one restore, each with its own one-way dismissal. It also ends at a commit whose write lands, replacing the unreadable document; an edit leaves it, and so does a commit whose write the browser refused |
 | `#filterSaveError` | error, assertive | one refused save | the composite, *as the refusal itself*: `_saveRefusalNotice` is non-null exactly while a refusal stands, so closing the box clears the field and no dismissed bit exists anywhere |
 | `#savedFiltersWriteFailed` | condition notice, assertive | one failed write | the `Notice` instance, keyed by `NamedDocumentStore.LastWriteFailure` — the store names the occurrence because only it knows a write failed; store and notice both die with the composite, so the component may hold the bit |
 | `#savedFiltersLoadFailed` | gate reason, polite | — | none: it cannot be closed. It stands where the saved-filters panel would and is the only thing saying why saving is off; it leaves when its cause does |
@@ -588,9 +588,11 @@ a missing key too, which is why the null check precedes it. The notice's
 state is the same app-scoped `FilterRestoreNotice`, its second fact: the
 unreadable document outlives the mount exactly as a restored selection
 does, so a dismissal held in the panel would let a navigate-back say it
-again. It ends when the user closes it or a commit writes a fresh document
-over the unreadable one; an edit leaves it, since an edit changes nothing
-about what is stored. The unreadable document itself is left as it is.
+again. It ends when the user closes it or a commit's write lands, replacing
+the unreadable document; an edit leaves it, and so does a commit whose
+write the browser refused (the guarded write reports whether it landed,
+and the commit dismisses only on true), since neither changes what is
+stored. The unreadable document itself is left as it is.
 
 ### `NamedEntriesPanel` component
 
