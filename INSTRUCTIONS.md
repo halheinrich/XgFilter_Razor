@@ -251,10 +251,28 @@ in one line, worded to stay true for the literal `NaN` that
 `double.TryParse` accepts and the lib rejects. Rendered only while it
 applies (the `#applyDisabledReason` idiom) rather than left in the DOM for
 Bootstrap's sibling selector, which cannot reach the inputs one level down
-inside the flex row. A stored selection whose bound a rule outlaws still
+inside the flex row — and since `halheinrich/backgammon#270` every
+feedback line on the panel renders that way, the pattern's included,
+because a described-by reference to a hidden element is read out
+regardless. A stored selection whose bound a rule outlaws still
 loads, shows its values, marks the offender, and is refused a commit —
 never silently repaired, never dropped (the lib's documented posture,
 pinned).
+
+**How an input wears the verdict is rendered from one place**
+(`halheinrich/backgammon#270`). The `is-invalid` class is a colour, and a
+screen reader hears nothing of it; so an invalid input also carries
+`aria-invalid="true"` and an `aria-describedby` that names, beside the hint
+it always names, the feedback line that says why — rendered exactly while
+the field is invalid, so the reference never names an element that is not
+there — and a valid input carries neither mark and keeps its hint. The
+private `FieldAttributes` on `FilterPanel` is the one place that decides
+all of it, and every text and number box on the panel splats its result
+(class, `aria-describedby`, and `aria-invalid` when it applies) rather
+than typing a class expression of its own: a seventh field joins the splat
+or fails to be announced, and the suite's per-box theory is where that
+shows. Attribution stays the lib's — the field asked for is the one
+`GetInvalidFields` names.
 
 **The match-score field's verdict — two voices over one lib seam**
 (`halheinrich/backgammon#121`). The score-token grammar joined the lib's
@@ -341,13 +359,17 @@ beside is now the button's name, so nothing is said twice.
 Every id in a row is built from the facet's enum member name — one mould,
 `facetToggle_`, `facet_`, `facetBadge_`, and `facetHint_` where a hint is
 referenced — which is what lets a control **name itself by reference** to its
-own header rather than repeating the heading. `#positionPattern` does exactly
-that (`aria-labelledby` at the header, `aria-describedby` at the hint), and
-its hint's wrapper is a plain container: a `<label for>` whose text is the
-hint would have made the hint the field's *name*. It is the only input on the
-panel with an accessible name; the others have none, which predates this arc
-and is booked as `halheinrich/backgammon#196`. The regions deliberately carry
-no `role="group"` — unruled, and the level groups do not carry it either.
+own header rather than repeating the heading. `#positionPattern` was the
+first to do that (`aria-labelledby` at the header, `aria-describedby` at
+the hint), and its hint's wrapper is a plain container: a `<label for>`
+whose text is the hint would have made the hint the field's *name*.
+`halheinrich/backgammon#196` made the pair of references the rule for every
+text and number box on the panel (the error-range pair names itself off
+its own heading's words, outside the rows), and
+`halheinrich/backgammon#270` made the description carry the field's
+invalid verdict as well — see the validity paragraph above. The regions
+deliberately carry no `role="group"` — unruled, and the level groups do
+not carry it either.
 
 **The container over the rows** (`halheinrich/backgammon#231`) is the rows'
 own idiom one tier up: a real `<button>` (`#moreFiltersToggle`) carrying

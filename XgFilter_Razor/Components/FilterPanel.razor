@@ -121,7 +121,14 @@
            and every feedback line on the panel — this facet's, the score
            tokens', the move numbers', the pattern's — reads that one
            evaluation, and the Apply gate reads the same rule through CanApply.
-           The panel writes no rule of its own here — only the words for it. *@
+           The panel writes no rule of its own here — only the words for it.
+
+           How an input wears the verdict is rendered from one place too
+           (FieldAttributes, halheinrich/backgammon#270): the is-invalid class,
+           aria-invalid, and an aria-describedby that names the field's hint
+           always and its rendered feedback line only while that line exists.
+           Every text and number box on the panel splats that one result, so a
+           seventh field cannot carry the class and miss the announcement. *@
         @{ var invalidFields = InvalidFields; }
         <div class="mb-3">
             @* The heading and its hint carry ids of their own because the two
@@ -150,29 +157,30 @@
                first. *@
             <div class="d-flex gap-2 align-items-center">
                 <input id="errorMin"
-                       class="form-control @(invalidFields.Contains(FilterField.ErrorMin) ? "is-invalid" : string.Empty)"
+                       @attributes="@(FieldAttributes(invalidFields, FilterField.ErrorMin, "errorRangeHint", "errorRangeFeedback"))"
                        style="max-width:140px"
                        aria-labelledby="errorRangeLabel"
-                       aria-describedby="errorRangeHint"
                        type="number" step="0.001" placeholder="Min"
                        value="@_errorMinText"
                        @oninput="e => { _errorMinText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
                 <span>–</span>
                 <input id="errorMax"
-                       class="form-control @(invalidFields.Contains(FilterField.ErrorMax) ? "is-invalid" : string.Empty)"
+                       @attributes="@(FieldAttributes(invalidFields, FilterField.ErrorMax, "errorRangeHint", "errorRangeFeedback"))"
                        style="max-width:140px"
                        aria-labelledby="errorRangeLabel"
-                       aria-describedby="errorRangeHint"
                        type="number" step="0.001" placeholder="Max"
                        value="@_errorMaxText"
                        @oninput="e => { _errorMaxText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
             </div>
             @* Rendered only while it applies, the #applyDisabledReason idiom,
                rather than left in the DOM for Bootstrap's sibling selector to
-               reveal as the position-pattern field's feedback is: the inputs
-               sit one level down inside the flex row, so `.is-invalid ~
-               .invalid-feedback` cannot reach across — hence the explicit
-               d-block and the @if. One line for both violations, because the
+               reveal: the inputs sit one level down inside the flex row, so
+               `.is-invalid ~ .invalid-feedback` cannot reach across — hence the
+               explicit d-block and the @if. Since halheinrich/backgammon#270
+               every feedback line on the panel renders this way, because the
+               input's aria-describedby names it while it is invalid and a
+               reference to a hidden element is read out regardless.
+               One line for both violations, because the
                user fixes them at the same two boxes: "a number, zero or
                greater" is also the true verdict on the literal NaN that
                double.TryParse accepts and the lib rejects.
@@ -423,9 +431,8 @@
                         <label class="form-label">
                             <small class="text-muted" id="facetHint_MatchScores">(comma-separated; blank = all scores)</small>
                         </label>
-                        <input class="form-control @(invalidFields.Contains(FilterField.MatchScores) ? "is-invalid" : string.Empty)"
+                        <input @attributes="@(FieldAttributes(invalidFields, FilterField.MatchScores, "facetHint_MatchScores", "matchScoreFeedback"))"
                                aria-labelledby="facetToggle_MatchScores"
-                               aria-describedby="facetHint_MatchScores"
                                placeholder="e.g. 4a5a, 1a1a, @MatchScoreToken.DoubleMatchPoint, 1a2aC, @MatchScoreToken.MoneyWithJacoby, @MatchScoreToken.MoneyWithoutJacoby"
                                value="@_matchScoreText"
                                @oninput="e => { _matchScoreText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
@@ -489,19 +496,17 @@
                         </label>
                         <div class="d-flex gap-2 align-items-center">
                             <input id="moveNumberMin"
-                                   class="form-control @(invalidFields.Contains(FilterField.MoveNumberMin) ? "is-invalid" : string.Empty)"
+                                   @attributes="@(FieldAttributes(invalidFields, FilterField.MoveNumberMin, "facetHint_MoveNumberRange", "moveNumberFeedback"))"
                                    style="max-width:140px"
                                    aria-labelledby="facetToggle_MoveNumberRange"
-                                   aria-describedby="facetHint_MoveNumberRange"
                                    type="number" step="1" min="1" placeholder="Min"
                                    value="@_moveNumberMinText"
                                    @oninput="e => { _moveNumberMinText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
                             <span>–</span>
                             <input id="moveNumberMax"
-                                   class="form-control @(invalidFields.Contains(FilterField.MoveNumberMax) ? "is-invalid" : string.Empty)"
+                                   @attributes="@(FieldAttributes(invalidFields, FilterField.MoveNumberMax, "facetHint_MoveNumberRange", "moveNumberFeedback"))"
                                    style="max-width:140px"
                                    aria-labelledby="facetToggle_MoveNumberRange"
-                                   aria-describedby="facetHint_MoveNumberRange"
                                    type="number" step="1" min="1" placeholder="Max"
                                    value="@_moveNumberMaxText"
                                    @oninput="e => { _moveNumberMaxText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
@@ -715,9 +720,8 @@
                             <small class="text-muted" id="facetHint_PositionPattern">(checker counts by location or range of locations; blank = no pattern filter)</small>
                         </label>
                         <input id="positionPattern"
-                               class="form-control @(invalidFields.Contains(FilterField.PositionPattern) ? "is-invalid" : string.Empty)"
+                               @attributes="@(FieldAttributes(invalidFields, FilterField.PositionPattern, "facetHint_PositionPattern", "positionPatternFeedback"))"
                                aria-labelledby="facetToggle_PositionPattern"
-                               aria-describedby="facetHint_PositionPattern"
                                placeholder="e.g. [6,2,] [5,,-2] [7-12,3,] [@CheckerLocation.OpponentOff,,-2]"
                                value="@_positionPatternText"
                                @oninput="e => { _positionPatternText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
@@ -738,9 +742,18 @@
                             most n: [1-6,-1,] = at most one.
                             E.g. [6,2,] [5,,-2] [25,1,] [@CheckerLocation.OpponentOff,,-2] [@CheckerLocation.PlayerOff,10,] [7-12,3,] [13-18,,-2] [19-24,0,0].
                         </div>
-                        <div class="invalid-feedback">
-                            Not a valid pattern — check each entry against the rules above; fix it to apply, or clear it for no pattern filter.
-                        </div>
+                        @* The panel's one feedback idiom — rendered only while it
+                           applies, d-block, keyed to this facet's own field — so the
+                           line exists exactly when the input's aria-describedby names
+                           it. It used to sit in the DOM for Bootstrap's sibling
+                           selector to reveal; a described-by reference to a hidden
+                           element is read out regardless, which is why it moved. *@
+                        @if (invalidFields.Contains(FilterField.PositionPattern))
+                        {
+                            <div id="positionPatternFeedback" class="invalid-feedback d-block">
+                                Not a valid pattern — check each entry against the rules above; fix it to apply, or clear it for no pattern filter.
+                            </div>
+                        }
                     </div>)
                 }
             </div>
@@ -1688,6 +1701,35 @@
     // like the active-facet set, at the same accepted cost (a buffer flush
     // plus a predicate sweep).
     private IReadOnlySet<FilterField> InvalidFields => BuildConfig().GetInvalidFields();
+
+    // How an input wears the lib's verdict — the one place a field's validity
+    // is rendered (halheinrich/backgammon#270), splatted onto every text and
+    // number box on the panel. Invalid: the is-invalid class, aria-invalid, and
+    // aria-describedby naming the field's hint and its feedback line, which
+    // every site renders exactly while its field is invalid (so the reference
+    // never names an element that is not there). Valid: the class alone and
+    // the hint alone — nothing says "invalid" in any form, and nothing points
+    // at a feedback line that does not exist. Only the attributes that vary
+    // with validity, plus the class they ride in, so a site keeps its own id,
+    // name reference and type beside the splat. Attribution stays the lib's:
+    // the field asked for is the one the lib names, never a facet-wide red.
+    private static IReadOnlyDictionary<string, object> FieldAttributes(
+        IReadOnlySet<FilterField> invalidFields, FilterField field, string hintId, string feedbackId)
+    {
+        var invalid = invalidFields.Contains(field);
+        var attributes = new Dictionary<string, object>(StringComparer.Ordinal)
+        {
+            ["class"] = invalid ? "form-control is-invalid" : "form-control",
+            ["aria-describedby"] = invalid ? $"{hintId} {feedbackId}" : hintId,
+        };
+
+        if (invalid)
+        {
+            attributes["aria-invalid"] = "true";
+        }
+
+        return attributes;
+    }
 
     // The per-token detail behind FilterField.MatchScores, which names the
     // list without saying what is wrong in it. Asked of the grammar itself

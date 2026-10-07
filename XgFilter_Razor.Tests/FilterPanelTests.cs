@@ -2773,6 +2773,66 @@ public class FilterPanelTests : BunitContext
                        string.Empty)
               .Trim();
 
+    // ── An invalid field is announced as invalid (halheinrich/backgammon#270) ─
+    //
+    // The is-invalid class is a colour; a screen reader hears nothing of it,
+    // and the feedback line that says why was not part of the field's
+    // description. So an invalid input carries aria-invalid="true", and its
+    // aria-describedby names — beside the hint it always names — the rendered
+    // feedback line; a valid input carries neither mark and keeps its hint.
+    // Resolved through the DOM as a screen reader would (follow each id to
+    // its element, which must exist), never as an attribute string, and the
+    // feedback is recognised by what it is rather than by a literal id. One
+    // row per text and number box on the panel: the panel renders all six
+    // from one place (FieldAttributes), which is what makes the rule hold
+    // without this list being the rule — a seventh box would join the splat
+    // or fail to be announced, and this list is where that shows.
+    [Theory]
+    [InlineData(null, "#errorMin", "-1")]
+    [InlineData(null, "#errorMax", "-1")]
+    [InlineData(FilterFacet.MatchScores, "input[placeholder^='e.g. 4a5a']", "not-a-score")]
+    [InlineData(FilterFacet.MoveNumberRange, "#moveNumberMin", "0")]
+    [InlineData(FilterFacet.MoveNumberRange, "#moveNumberMax", "0")]
+    [InlineData(FilterFacet.PositionPattern, "#positionPattern", "[6,2")]
+    public void Input_AnnouncesItsInvalidity_AndDropsTheAnnouncementOnceValid(
+        FilterFacet? facet, string selector, string invalidValue)
+    {
+        var cut = facet is { } row ? RenderExpanded(row) : Render<FilterPanel>();
+
+        // Valid at rest: no mark, and the description is the hint alone.
+        var input = cut.Find(selector);
+        Assert.False(input.HasAttribute("aria-invalid"));
+        var hint = Assert.Single(DescribedBy(cut, input));
+        Assert.True(hint.ClassList.Contains("text-muted"));
+
+        input.Input(invalidValue);
+
+        input = cut.Find(selector);
+        Assert.Equal("true", input.GetAttribute("aria-invalid"));
+        Assert.Contains("is-invalid", input.GetAttribute("class"));
+        var described = DescribedBy(cut, input);
+        Assert.Contains(described, e => e.Id == hint.Id);
+        var feedback = Assert.Single(described, e => e.ClassList.Contains("invalid-feedback"));
+        Assert.NotEmpty(feedback.TextContent.Trim());
+
+        input.Input(string.Empty);
+
+        input = cut.Find(selector);
+        Assert.False(input.HasAttribute("aria-invalid"));
+        Assert.DoesNotContain("is-invalid", input.GetAttribute("class"));
+        Assert.Equal(hint.Id, Assert.Single(DescribedBy(cut, input)).Id);
+    }
+
+    // The elements an input's aria-describedby names, each id followed to
+    // its element the way a screen reader follows it. Find throws for an id
+    // that reaches nothing, which is the point: a description that names an
+    // element not in the DOM is read as nothing.
+    private static IElement[] DescribedBy(IRenderedComponent<FilterPanel> cut, IElement input) =>
+        input.GetAttribute("aria-describedby")!
+             .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+             .Select(id => cut.Find($"#{id}"))
+             .ToArray();
+
     // Every text and number box inside a row takes its name by reference from
     // the row's own header, so the name a user hears is the facet's label —
     // the lib's, via ToLabel() — and not the hint sitting above the box. The
