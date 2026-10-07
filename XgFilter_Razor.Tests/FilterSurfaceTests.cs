@@ -858,6 +858,222 @@ public class FilterSurfaceTests : BunitContext
         Assert.NotNull(cut.Find("#savedFiltersWriteFailed"));
     }
 
+    // ── The restore's three outcomes (halheinrich/backgammon#367) ───────────
+    //
+    // The remembered selection reaches the panel in one of three states, and
+    // each has its own answer. Readable: restored and staged, under the
+    // restored-selection notice above. Present but unreadable: defaults, and
+    // the failed-restore notice — a failed restore is never silent (Hal's
+    // ruling). Absent: defaults and no word — a first visit is not a failure,
+    // and TryFromJson alone cannot tell the two apart. The first pin is the
+    // producer's ruling carried through (XgFilter_Lib,
+    // halheinrich/backgammon#269): a stored pattern the grammar refuses is no
+    // longer an unreadable document. It restores whole, every other value
+    // intact, the pattern shown as stored, the field marked, and Apply
+    // withheld with the field's own reason — never silently repaired, never
+    // dropped, never silently applied.
+
+    private const string RestoreFailedNotice = "#filterRestoreFailedNotice";
+
+    // The pattern box sits in its row behind the More filters container, so
+    // reaching it is two real disclosure gestures — the same route a user
+    // takes to see what was restored.
+    private static IElement OpenPositionPattern(IRenderedComponent<FilterSurface> cut)
+    {
+        OpenMoreFilters(cut);
+        cut.Find("#facetToggle_PositionPattern").Click();
+        return cut.Find("#positionPattern");
+    }
+
+    // A document is unreadable when TryFromJson refuses it; this is what the
+    // panel finds under its key then. Not a refused pattern — that document
+    // reads fine now, which is the point of the first pin.
+    private void StoredUnreadableConfig() =>
+        JSInterop.Setup<string?>("localStorage.getItem", FilterPanel.ConfigKey)
+                 .SetResult("}{ not a config");
+
+    // The panel's restore has landed once its read of the config key has been
+    // issued and answered — the fact to wait on before asserting that a
+    // notice is absent, since "absent" is also what an unfinished restore
+    // looks like.
+    private void WaitForConfigRestore(IRenderedComponent<FilterSurface> cut, int reads = 1) =>
+        cut.WaitForAssertion(() => Assert.True(
+            JSInterop.Invocations.Count(i => i.Identifier == "localStorage.getItem"
+                                          && (string?)i.Arguments[0] == FilterPanel.ConfigKey) >= reads));
+
+    [Fact]
+    public void Restore_RefusedPattern_RestoresWhole_MarksTheField_WithholdsApply()
+    {
+        StoredConfig(new FilterConfig { ErrorMin = 0.1, PositionPattern = "[6,2" });
+
+        var cut = RenderSurface(TokenA, new FakeDocumentStorage());
+
+        // Every other value intact, and the document counted as restored: the
+        // restored-selection notice, not the failure notice.
+        cut.WaitForAssertion(() => Assert.Equal("0.1", ErrorMin(cut).GetAttribute("value")));
+        Assert.NotNull(cut.Find("#filterRestoredNotice"));
+        Assert.Empty(cut.FindAll(RestoreFailedNotice));
+
+        // The text the user stored, shown back, marked, with its reason.
+        var pattern = OpenPositionPattern(cut);
+        Assert.Equal("[6,2", pattern.GetAttribute("value"));
+        Assert.Contains("is-invalid", pattern.GetAttribute("class"));
+        Assert.NotNull(cut.Find("#positionPattern ~ .invalid-feedback"));
+
+        // And no way to make it an executable filter without fixing it.
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+        Assert.Null(_holder.ConfigFor(TokenA));
+    }
+
+    [Fact]
+    public void Restore_UnreadableDocument_RestoresDefaults_AndSaysSo()
+    {
+        StoredUnreadableConfig();
+
+        var cut = RenderSurface(TokenA, new FakeDocumentStorage());
+
+        cut.WaitForAssertion(() => cut.Find(RestoreFailedNotice));
+        Assert.Equal(string.Empty, ErrorMin(cut).GetAttribute("value"));
+        // Nothing was restored, so the restored-selection notice has no claim
+        // to make; and nothing is committed, so Apply is armed over defaults.
+        Assert.Empty(cut.FindAll("#filterRestoredNotice"));
+        Assert.False(Apply(cut).HasAttribute("disabled"));
+        // The unreadable document is left as it is — no write touched the key.
+        Assert.DoesNotContain(JSInterop.Invocations, i =>
+            i.Identifier != "localStorage.getItem" && (string?)i.Arguments[0] == FilterPanel.ConfigKey);
+    }
+
+    [Fact]
+    public void Restore_NothingStored_RestoresDefaults_AndSaysNothing()
+    {
+        // Nothing in storage (the loose JS default): an ordinary first visit.
+        var cut = RenderSurface(TokenA, new FakeDocumentStorage());
+
+        WaitForConfigRestore(cut);
+
+        Assert.Equal(string.Empty, ErrorMin(cut).GetAttribute("value"));
+        Assert.Empty(cut.FindAll(RestoreFailedNotice));
+        Assert.Empty(cut.FindAll("#filterRestoredNotice"));
+    }
+
+    // The saved-filters document holds the same posture one tier up
+    // (XgFilter_Lib's NamedFilterCollection, halheinrich/backgammon#269): an
+    // entry whose pattern the grammar refuses loads beside the others, and
+    // loading it stages exactly what a refused restore stages — the text,
+    // the mark, Apply withheld. The store's LoadFailed path is for a document
+    // that cannot be read at all, and one such entry is not that.
+    [Fact]
+    public async Task SavedEntry_WithARefusedPattern_LoadsBesideTheOthers_AndStagesAsInvalid()
+    {
+        var storage = StorageWith(
+            ("Stale", new FilterConfig { PositionPattern = "[6,2" }),
+            ("Race", new FilterConfig { ErrorMin = 0.1 }));
+
+        var cut = RenderSurface(TokenA, storage);
+
+        Assert.NotNull(FindRowButton(cut, "Stale", "Load"));
+        Assert.NotNull(FindRowButton(cut, "Race", "Load"));
+        Assert.Empty(cut.FindAll("#savedFiltersLoadFailed"));
+
+        await ClickRowButtonAsync(cut, "Stale", "Load");
+
+        var pattern = OpenPositionPattern(cut);
+        Assert.Equal("[6,2", pattern.GetAttribute("value"));
+        Assert.Contains("is-invalid", pattern.GetAttribute("class"));
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+        Assert.Null(_reports[^1]);
+    }
+
+    // · #filterRestoreFailedNotice — event notice; holder: the app-scoped
+    //   FilterRestoreNotice's second fact, the same owner for the same
+    //   occurrence (this boot's restore) and the same reason.
+
+    private IRenderedComponent<FilterSurface> RenderWithFailedRestore()
+    {
+        StoredUnreadableConfig();
+        var cut = RenderSurface(TokenA, new FakeDocumentStorage());
+        cut.WaitForAssertion(() => cut.Find(RestoreFailedNotice));
+        return cut;
+    }
+
+    [Fact]
+    public void RestoreFailedNotice_LandsOnTheComponent_WithItsIdentityIntact()
+    {
+        var cut = RenderWithFailedRestore();
+
+        AssertBox(cut.Find(RestoreFailedNotice),
+            "alert alert-warning alert-dismissible mb-3", "status", expectedStyle: null, dismissible: true);
+    }
+
+    [Theory]
+    [MemberData(nameof(DismissGestures))]
+    public void RestoreFailedNotice_Dismisses_AndTheHolderIsWhatMoved(string gesture)
+    {
+        var cut = RenderWithFailedRestore();
+
+        cut.Find(RestoreFailedNotice + gesture).Click();
+
+        Assert.Empty(cut.FindAll(RestoreFailedNotice));
+        Assert.False(_notice.IsFailureVisible);
+        // Closing a notice is not an edit: nothing was reported, Apply is
+        // still armed over the defaults.
+        Assert.Empty(_reports);
+        Assert.False(Apply(cut).HasAttribute("disabled"));
+    }
+
+    // Why the dismissal is the app-scoped holder's and not the panel's: the
+    // unreadable document outlives the mount. A navigate-back remounts the
+    // panel, which reads it again and arms again; the closed notice must not
+    // come back, and no later arm can bring it.
+    [Fact]
+    public void RestoreFailedNotice_ClosedByTheUser_StaysClosedAcrossARemount_AndArmCannotResurrectIt()
+    {
+        var first = RenderWithFailedRestore();
+        first.Find(RestoreFailedNotice + " button.btn-close").Click();
+
+        var second = RenderSurface(TokenA, new FakeDocumentStorage());
+
+        // The remount's restore has landed (and with it, its arm).
+        WaitForConfigRestore(second, reads: 2);
+        Assert.Empty(second.FindAll(RestoreFailedNotice));
+
+        _notice.ArmFailure();
+        second.Render();
+
+        Assert.False(_notice.IsFailureVisible);
+        Assert.Empty(second.FindAll(RestoreFailedNotice));
+    }
+
+    // The other side: untouched, a remount over the same unreadable document
+    // re-shows the same notice (navigation changes nothing).
+    [Fact]
+    public void RestoreFailedNotice_NotDismissed_IsStillShownAfterARemount()
+    {
+        RenderWithFailedRestore();
+
+        var second = RenderSurface(TokenA, new FakeDocumentStorage());
+
+        second.WaitForAssertion(() => second.Find(RestoreFailedNotice));
+    }
+
+    // An edit changes nothing about what is stored, so the notice stands; a
+    // commit writes a fresh document over the unreadable one, so it ends.
+    [Fact]
+    public async Task RestoreFailedNotice_SurvivesAnEdit_AndEndsAtACommit()
+    {
+        var cut = RenderWithFailedRestore();
+
+        ErrorMin(cut).Input("0.2");
+        Assert.NotNull(cut.Find(RestoreFailedNotice));
+
+        await Apply(cut).ClickAsync(new());
+
+        Assert.Empty(cut.FindAll(RestoreFailedNotice));
+        Assert.False(_notice.IsFailureVisible);
+        Assert.Contains(JSInterop.Invocations, i =>
+            i.Identifier == "localStorage.setItem" && (string?)i.Arguments[0] == FilterPanel.ConfigKey);
+    }
+
     // ── Required-parameter pins ─────────────────────────────────────────────
 
     [Theory]

@@ -1286,11 +1286,13 @@ public class FilterPanelTests : BunitContext
 
     // Silent-splat guard for the Position-pattern field: an unbound text input
     // would compile but never feed BuildConfig, so type a valid bracket list,
-    // Apply, and assert the emitted config carries the parsed BoardPattern.
-    // BoardPattern has value equality (IEquatable, over its constraint set), so
-    // the expectation is built from the constraints themselves rather than
-    // from text — independent of the parse path the panel ran, and blind to
-    // token order, which the pattern's identity does not include.
+    // Apply, and assert the emitted config carries the text as typed
+    // (halheinrich/backgammon#269: the text is the stored value, and the
+    // panel builds no BoardPattern for the config's sake). The second
+    // assertion is the lib's own reading of that text, built from the
+    // constraints rather than from text — so the panel is pinned both to
+    // hand the user's spelling through untouched and to hand through text
+    // that means what was typed.
     [Fact]
     public async Task PositionPattern_FlowsIntoEmittedConfig()
     {
@@ -1304,15 +1306,16 @@ public class FilterPanelTests : BunitContext
         await cut.Find("button.btn-primary").ClickAsync(new());
 
         Assert.NotNull(capturedConfig);
+        Assert.Equal("[6,2,] [5,,-2]", capturedConfig!.PositionPattern);
         Assert.Equal(
             new BoardPattern([new CheckerRange(6, 2, null), new CheckerRange(5, null, -2)]),
-            capturedConfig!.PositionPattern);
+            BoardPattern.Parse(capturedConfig.PositionPattern!));
     }
 
     // The range token reaches the wire the same way (halheinrich/backgammon#268):
     // one side's total across a span, the side named by the bounds' sign. Both
     // signs ride in one pattern, so a panel that dropped or re-signed either
-    // would emit a different constraint set and fail the value comparison.
+    // would emit different text and fail the comparison.
     [Fact]
     public async Task PositionPatternRange_FlowsIntoEmittedConfig()
     {
@@ -1326,9 +1329,7 @@ public class FilterPanelTests : BunitContext
         await Apply(cut).ClickAsync(new());
 
         Assert.NotNull(capturedConfig);
-        Assert.Equal(
-            new BoardPattern([new CheckerSpanRange(7, 12, 3, null), new CheckerSpanRange(13, 18, null, -2)]),
-            capturedConfig!.PositionPattern);
+        Assert.Equal("[7-12,3,] [13-18,,-2]", capturedConfig!.PositionPattern);
     }
 
     // The range forms the grammar refuses land in the field's invalid state
@@ -1401,12 +1402,15 @@ public class FilterPanelTests : BunitContext
 
     // The panel is where users type the grammar by hand, so pin the borne-off
     // vocabulary at the wire: an off/opp-off pattern must reach the emitted
-    // config, and mixed-case names must come back canonicalized. BoardPattern
-    // parses the names case-insensitively and renders them lower-case; typing
-    // "OFF"/"Opp-Off" here proves the panel hands the text to TryParse verbatim
-    // rather than pre-chewing (or pre-rejecting) it.
+    // config spelled exactly as typed — the text is the stored value
+    // (halheinrich/backgammon#269), so the panel neither canonicalizes nor
+    // pre-chews it — while meaning what the canonical spelling means. The
+    // lib parses the names case-insensitively, and its config equality reads
+    // the pattern by meaning where both texts parse; a panel that lower-cased
+    // the text would fail the first assertion, and one that mangled a name
+    // would fail the second.
     [Fact]
-    public async Task PositionPatternWithOffTokens_FlowsIntoEmittedConfigCanonicalized()
+    public async Task PositionPatternWithOffTokens_FlowsIntoEmittedConfigAsTyped()
     {
         FilterConfig? capturedConfig = null;
         var cut = RenderExpanded(
@@ -1418,8 +1422,9 @@ public class FilterPanelTests : BunitContext
         await cut.Find("button.btn-primary").ClickAsync(new());
 
         Assert.NotNull(capturedConfig);
-        Assert.NotNull(capturedConfig!.PositionPattern);
-        Assert.Equal("[off,10,] [opp-off,,-2]", capturedConfig.PositionPattern!.ToBracketList());
+        Assert.Equal("[OFF,10,] [Opp-Off,,-2]", capturedConfig!.PositionPattern);
+        Assert.Equal(
+            new FilterConfig { PositionPattern = "[off,10,] [opp-off,,-2]" }, capturedConfig);
     }
 
     // A wrong-signed borne-off bound is a grammar error, not a typo the panel
@@ -1440,9 +1445,9 @@ public class FilterPanelTests : BunitContext
     }
 
     // Round-trips the Position-pattern field through the single-key persistence
-    // path: set a pattern, Apply (writes the FilterConfig blob, PositionPattern
-    // serialized as its bracket list by BoardPatternJsonConverter), then re-mount
-    // with the captured blob and assert the field shows the restored bracket list.
+    // path: set a pattern, Apply (writes the FilterConfig blob, the pattern
+    // riding as the text it is), then re-mount with the captured blob and
+    // assert the field shows the stored text.
     [Fact]
     public async Task PositionPattern_RoundTripsAcrossRemount()
     {
@@ -1462,9 +1467,11 @@ public class FilterPanelTests : BunitContext
         Assert.Equal("[6,2,] [5,,-2]", restored.Find("#positionPattern").GetAttribute("value"));
     }
 
-    // Blank Position-pattern field means "no pattern filter," which must surface
-    // as a null PositionPattern (not an empty pattern), per FilterConfig's
-    // null-or-empty contract.
+    // A blank Position-pattern field means "no pattern filter," and the panel
+    // emits that as the lib's null rather than as blank text: null is the
+    // value a fresh config carries, so a field never touched and a field
+    // cleared both build the config a fresh panel builds, and no document is
+    // minted carrying an empty pattern the user never wrote.
     [Fact]
     public async Task EmptyPositionPattern_EmitsNullPattern()
     {
@@ -1897,9 +1904,9 @@ public class FilterPanelTests : BunitContext
         Assert.Contains(ContactType.Race, cfg.ContactTypes);
     }
 
-    // The one state Apply refuses — non-blank, unparseable position-pattern
-    // text — is exactly the state TryGetEditedConfig refuses. Same gate,
-    // same build path.
+    // Pattern text the grammar refuses is a state Apply refuses, and exactly
+    // the state TryGetEditedConfig refuses — the lib's field verdict, read
+    // through the same gate and the same build path.
     [Fact]
     public void TryGetEditedConfig_InvalidPositionPattern_ReturnsFalseNull()
     {
@@ -2525,15 +2532,15 @@ public class FilterPanelTests : BunitContext
     }
 
     // PRESENCE follows the lib's activation predicate, not the buffer behind
-    // the control: pattern text that does not parse builds as "no pattern", so
-    // the row is not set and the count does not move for it. The rows' own
-    // badge pin, one tier up.
+    // the control: whitespace-only pattern text is a non-empty buffer and no
+    // pattern at all, so the row is not set and the count does not move for
+    // it. The rows' own badge pin, one tier up.
     [Fact]
     public void MoreFiltersBadge_FollowsTheLibsActivationPredicate_NotTheBuffer()
     {
         var cut = RenderExpanded(FilterFacet.PositionPattern, FilterFacet.ContactTypes);
 
-        cut.Find("#positionPattern").Input("[6,2");   // unparseable — facet off
+        cut.Find("#positionPattern").Input("   ");    // blank — facet off
         cut.Find("#ct_Race").Change(true);            // genuinely set
         FoldMoreFilters(cut);
 
@@ -3215,8 +3222,8 @@ public class FilterPanelTests : BunitContext
     // genuinely differ, so a badge that consulted its buffer directly would
     // light in each of them and fail here:
     //
-    //   · position-pattern text that does not parse builds as "no pattern",
-    //     so the facet is off however much text is in the box;
+    //   · whitespace-only position-pattern text is a non-empty buffer and
+    //     no pattern at all — the facet is off;
     //   · a depth level list whose mode toggle is off is inert by the lib's
     //     guarantee — checked levels, facet still off;
     //   · a player list of nothing but separators splits to no tokens.
@@ -3225,9 +3232,9 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void Badge_PresenceFollowsTheLibsActivationPredicate_NotTheBuffer()
     {
-        var unparseable = RenderWithActiveCollapsedFacet(
-            FilterFacet.PositionPattern, c => c.Find("#positionPattern").Input("[6,2"));
-        Assert.Empty(unparseable.FindAll("#facetBadge_PositionPattern"));
+        var blank = RenderWithActiveCollapsedFacet(
+            FilterFacet.PositionPattern, c => c.Find("#positionPattern").Input("   "));
+        Assert.Empty(blank.FindAll("#facetBadge_PositionPattern"));
 
         var inertLevels = RenderWithActiveCollapsedFacet(FilterFacet.AnalysisDepth, c =>
         {
@@ -3241,6 +3248,26 @@ public class FilterPanelTests : BunitContext
             FilterFacet.Players,
             c => c.Find("input[placeholder='e.g. Hal, Magriel']").Input(" , , "));
         Assert.Empty(separatorsOnly.FindAll("#facetBadge_Players"));
+    }
+
+    // The other side of that pin, and the state halheinrich/backgammon#269
+    // moved: a facet is active on PRESENCE, so pattern text the grammar
+    // refuses is a set facet — the lib says so, the badge follows, and Apply
+    // is withheld by the same lib's field verdict. The malformed score token
+    // is the precedent: both rows badge "set" over text that cannot be
+    // applied, because what is there is a filter the user meant, not nothing.
+    // A badge that re-parsed the text to decide would be a second encoding of
+    // the activation predicate, and would fail here.
+    [Theory]
+    [InlineData(FilterFacet.PositionPattern, "#positionPattern", "[6,2")]
+    [InlineData(FilterFacet.MatchScores, "input[placeholder^='e.g. 4a5a']", "not-a-score")]
+    public void Badge_LightsOverTextTheGrammarRefuses_AsTheLibRulesPresence(
+        FilterFacet facet, string inputSelector, string refusedText)
+    {
+        var cut = RenderWithActiveCollapsedFacet(facet, c => c.Find(inputSelector).Input(refusedText));
+
+        Assert.Equal("set", cut.Find($"#facetBadge_{facet}").TextContent.Trim());
+        Assert.True(Apply(cut).HasAttribute("disabled"));
     }
 
     // A loaded saved filter can stage values into collapsed rows. Their badges

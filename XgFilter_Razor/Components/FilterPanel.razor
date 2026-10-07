@@ -38,7 +38,9 @@
    as one serialized FilterConfig blob (lib-owned shape via FilterConfig.ToJson
    / TryFromJson), the set of expanded rows under its own key (DisclosureKey),
    and whether the container is open under its own (MoreFiltersKey) — the last
-   two user preference, never part of the config blob.
+   two user preference, never part of the config blob. A stored selection the
+   panel cannot read restores to defaults and says so
+   (#filterRestoreFailedNotice): a failed restore is never silent.
    Location: XgFilter_Razor/Components/FilterPanel.razor
 ──────────────────────────────────────────────────────────────────────────── *@
 
@@ -75,6 +77,33 @@
             effect until you press <strong>Apply Filter</strong>.
         </Notice>
 
+        @* ── Failed-restore notice ────────────────────────────────────────────
+           The restore's other outcome (halheinrich/backgammon#367): a stored
+           selection this panel cannot read restores to defaults, and defaults
+           with no word are indistinguishable from a first visit — the user's
+           filter gone for no stated reason. So the panel says so. Only for a
+           document that is present and unreadable: nothing stored is nothing
+           failed.
+
+           An event notice — this boot's restore failed once — so dismissible
+           (the umbrella's SPEC-notices.md), and its occurrence outlives this
+           component exactly as the restored-selection notice's does: the
+           unreadable document survives navigation and a remount reads it
+           again. So the dismissal is the same app-scoped holder's, its second
+           fact, and the binding is the box above's shape — no @if, no bit
+           here. It ends when the user closes it or a commit writes a fresh
+           document over the unreadable one; an edit leaves it standing, since
+           an edit changes nothing about what is stored. Polite: an outcome to
+           understand, not a gesture that failed. *@
+        <Notice id="filterRestoreFailedNotice" class="mb-3"
+                Kind="NoticeKind.Warning" Announcement="NoticeAnnouncement.Polite"
+                Dismissible="true"
+                @bind-Dismissed:get="!RestoreNotice.IsFailureVisible"
+                @bind-Dismissed:set="_ => RestoreNotice.DismissFailure()">
+            Your remembered filter couldn't be read, so the filters start from
+            their defaults.
+        </Notice>
+
         @* ── Error range ──────────────────────────────────────────────────────
            First and always visible: dogfooding showed it is the panel's
            most-used control, so it never rides behind a row of its own.
@@ -86,9 +115,9 @@
            decide that, and a misordered pair blames both by design. Hoisted
            into a local like the active-facet set below: every marked input
            and every feedback line on the panel — this facet's, the score
-           tokens', the move numbers' — reads that one evaluation, and the Apply
-           gate reads the same rule through CanApply. The panel writes no rule of
-           its own here — only the words for it. *@
+           tokens', the move numbers', the pattern's — reads that one
+           evaluation, and the Apply gate reads the same rule through CanApply.
+           The panel writes no rule of its own here — only the words for it. *@
         @{ var invalidFields = InvalidFields; }
         <div class="mb-3">
             @* The heading and its hint carry ids of their own because the two
@@ -640,10 +669,17 @@
                     @* ── Position pattern ────────────────────────────────────
                        Per-location checker-range constraint, entered as the lib's raw bracket
                        list until the board-grid widget replaces this field in a later arc.
-                       Parsed through BoardPattern.TryParse so half-typed input never throws
-                       out of the panel; while the text is non-blank and unparseable the
-                       field is marked invalid and Apply is disabled, so an invalid pattern
-                       can never silently drop the filter the user meant to set.
+                       The text is the config's text, both ways (halheinrich/backgammon#269):
+                       the buffer rides into FilterConfig.PositionPattern as typed and a
+                       restored or loaded config's text lands back in the buffer as stored,
+                       so a stored pattern a newer grammar rule refuses still shows the user
+                       what they wrote. Validity is the lib's ruling like every other
+                       field's: GetInvalidFields names FilterField.PositionPattern iff the
+                       text is present and BoardPattern.TryParse refuses it, the input reds
+                       itself on that membership, and the same IsCommittable member closes
+                       Apply — so an invalid pattern can never silently drop, or silently
+                       become, the filter the user meant to set. No BoardPattern is built
+                       here for the config's sake; Build() parses, on the lib's side.
 
                        The help text below documents the lib's grammar — single-location
                        tokens over board indices and the named borne-off locations, and the
@@ -675,7 +711,7 @@
                             <small class="text-muted" id="facetHint_PositionPattern">(checker counts by location or range of locations; blank = no pattern filter)</small>
                         </label>
                         <input id="positionPattern"
-                               class="form-control @(IsPositionPatternValid ? string.Empty : "is-invalid")"
+                               class="form-control @(invalidFields.Contains(FilterField.PositionPattern) ? "is-invalid" : string.Empty)"
                                aria-labelledby="facetToggle_PositionPattern"
                                aria-describedby="facetHint_PositionPattern"
                                placeholder="e.g. [6,2,] [5,,-2] [7-12,3,] [@CheckerLocation.OpponentOff,,-2]"
@@ -720,11 +756,11 @@
            either stretch, and it keeps the disabled-reason line reading as the
            line under the buttons, which is how the help describes it.
 
-           Apply is gated on CanApply: the position pattern must be committable
-           AND the selection must differ from the last-committed config.
+           Apply is gated on CanApply: the lib must name no invalid field AND
+           the selection must differ from the last-committed config.
            ApplyDisabledReason explains the second case in the
            NamedEntriesPanel disabled-reason idiom (title + muted hint line);
-           the first already explains itself in the pattern field's own
+           the first already explains itself in the offending field's own
            invalid-feedback line. Hoisted into a local like the active-facet
            set above: both surfaces of the reason read the one evaluation.
 
@@ -1161,9 +1197,22 @@
         // must not claim otherwise over a defaults screen. An empty stored
         // config does arm it — the empty filter is still a filter and still
         // a choice the previous session made.
+        //
+        // The three outcomes are told apart here and nowhere else. Null is
+        // nothing stored — an ordinary first visit — and gets defaults with
+        // no word. A document that is present but unreadable gets defaults
+        // and the failed-restore notice: a failed restore is never silent
+        // (Hal's ruling, halheinrich/backgammon#367). TryFromJson alone
+        // cannot draw that line — it answers false for a missing key too —
+        // which is why the null check precedes it. The unreadable document
+        // is left as it is; the next commit writes over it.
         if (FilterConfig.TryFromJson(stored, out var cfg))
         {
             RestoreNotice.Arm();
+        }
+        else if (stored is not null)
+        {
+            RestoreNotice.ArmFailure();
         }
 
         HydrateFrom(cfg);
@@ -1209,14 +1258,14 @@
     /// Snapshots the current edit buffers — including unapplied edits — into a
     /// <see cref="FilterConfig"/>, for host-driven save-as while the panel is
     /// dirty. The gate is exactly Apply's validity gate, single-sourced through
-    /// the same build path: this fails when the position-pattern text is
-    /// non-blank and unparseable, and when
-    /// <see cref="FilterConfig.GetInvalidFields"/> names any field — together,
-    /// the states in which Apply refuses to commit. It is deliberately no
-    /// stricter than Apply either: both read the one
-    /// <see cref="IsCommittable"/> member, so a rule joining the lib's field
-    /// table (the score-token grammar did, in
-    /// <c>halheinrich/backgammon#121</c>) tightens both gates in the same
+    /// the same build path: this fails when
+    /// <see cref="FilterConfig.GetInvalidFields"/> names any field — the
+    /// state in which Apply refuses to commit, pattern text the grammar
+    /// refuses included. It is deliberately no stricter than Apply either:
+    /// both read the one <see cref="IsCommittable"/> member, so a rule joining
+    /// the lib's field table (the score-token grammar did, in
+    /// <c>halheinrich/backgammon#121</c>; the pattern grammar did, in
+    /// <c>halheinrich/backgammon#269</c>) tightens both gates in the same
     /// edit. Save-as therefore captures exactly what Apply could produce, and
     /// no saved document is minted from a selection Apply would have refused.
     /// </summary>
@@ -1313,10 +1362,10 @@
     // FilterConfig's own value equality, which is precisely why an edit undone
     // back to the committed values counts as clean again — a one-way dirty flag
     // would strand the user behind a disabled Apply in exactly that state.
-    // Unparseable position-pattern text builds as "no pattern" (see
-    // ParsePositionPattern), so it never reads as a *different* config; it never
-    // opens the gate either, because CanApply also requires
-    // IsPositionPatternValid.
+    // A committed config always parsed (the gate saw to it), and the lib's
+    // equality never matches text that parses to text that does not, so
+    // unparseable pattern text reads as a different config; it never opens
+    // the gate either, because CanApply also requires IsCommittable.
     private FilterConfig? MatchedCommittedConfig =>
         _committedConfig is not null && _committedConfig.Equals(BuildConfig())
             ? _committedConfig
@@ -1377,10 +1426,12 @@
     // is the only place _committedConfig moves. A commit is the other gesture
     // that makes the selection the user's own, so the restored-selection
     // notice dies here too (Apply is additionally the very consent the
-    // notice asks for).
+    // notice asks for); and it writes a fresh document over whatever was
+    // stored, so the failed-restore notice ends here as well.
     private async Task PersistAndRaiseAsync(FilterConfig cfg)
     {
         RestoreNotice.Dismiss();
+        RestoreNotice.DismissFailure();
         _committedConfig = cfg;
         await JS.InvokeVoidAsync("localStorage.setItem", ConfigKey, cfg.ToJson());
         await OnFilterConfigChanged.InvokeAsync(cfg);
@@ -1483,7 +1534,12 @@
         IncludeBookRollouts = _bookRollouts.Include,
         BookRolloutLevels = _bookRollouts.Levels.ToList(),
         DiceRolls = _diceRolls.ToList(),
-        PositionPattern = ParsePositionPattern(_positionPatternText),
+        // The text as typed, or null for a blank buffer: null is the lib's
+        // "no pattern filter", so a field never touched and a field cleared
+        // build the same config a fresh one does, and no document is minted
+        // with an empty pattern the user never wrote. Never trimmed — the
+        // stored value is the user's own spelling.
+        PositionPattern = string.IsNullOrWhiteSpace(_positionPatternText) ? null : _positionPatternText,
     };
 
     // Inverse of BuildConfig: project a config onto the buffers / enum state.
@@ -1504,23 +1560,19 @@
         _bookRollouts.Include = cfg.IncludeBookRollouts;
         _bookRollouts.Levels = new HashSet<AnalysisLevel>(cfg.BookRolloutLevels);
         _diceRolls = new HashSet<DiceRoll>(cfg.DiceRolls);
-        _positionPatternText = cfg.PositionPattern?.ToBracketList() ?? string.Empty;
+        // The stored text exactly as stored, parse or not: a pattern a newer
+        // grammar rule refuses shows the user what they wrote, marked invalid
+        // by the lib's verdict below, never repaired and never dropped.
+        _positionPatternText = cfg.PositionPattern ?? string.Empty;
     }
 
-    // True when the position-pattern buffer is committable: a blank buffer is
-    // "no pattern filter," and any non-blank buffer must parse as a bracket
-    // list. Drives both the field's is-invalid styling and the Apply gate, so
-    // half-typed input is flagged rather than silently dropped at Apply.
-    private bool IsPositionPatternValid =>
-        string.IsNullOrWhiteSpace(_positionPatternText)
-        || BoardPattern.TryParse(_positionPatternText, out _);
-
-    // The lib's verdict on the values it owns rules for, asked of the same
-    // build path Apply commits through — so what the panel reds and what
-    // Build() would throw on are one answer, not two encodings of it. Safe on
-    // every render: GetInvalidFields never throws, judging a value not being
-    // using it. Recomputed per render like the active-facet set, at the
-    // same accepted cost (a buffer flush plus a predicate sweep).
+    // The lib's verdict on every value it rules for — the bounds, the score
+    // tokens, the pattern text — asked of the same build path Apply commits
+    // through, so what the panel reds and what Build() would throw on are one
+    // answer, not two encodings of it. Safe on every render: GetInvalidFields
+    // never throws, judging a value not being using it. Recomputed per render
+    // like the active-facet set, at the same accepted cost (a buffer flush
+    // plus a predicate sweep).
     private IReadOnlySet<FilterField> InvalidFields => BuildConfig().GetInvalidFields();
 
     // The per-token detail behind FilterField.MatchScores, which names the
@@ -1536,26 +1588,13 @@
                      .Where(f => f != MatchScoreTokenFault.None)
                      .ToHashSet();
 
-    // The panel's whole validity truth, in one place: the position-pattern text
-    // must parse (BoardPattern owns what parses) and the lib must name no
-    // invalid field (it owns the rest). Both surfaces that must refuse an
-    // uncommittable selection read this one member — the Apply gate and
-    // TryGetEditedConfig — so a save can never capture a selection Apply itself
-    // would refuse.
-    private bool IsCommittable => IsPositionPatternValid && InvalidFields.Count == 0;
-
-    // Buffer → PositionPattern. A blank buffer is no filter (null); otherwise
-    // the parsed pattern. TryParse can only fail here for invalid text, which
-    // the Apply gate (IsPositionPatternValid) already prevents from reaching
-    // BuildConfig — the null fallback is a defensive belt, not a silent drop.
-    // (For the row badges' BuildConfig call the gate does not apply, so
-    // mid-edit unparseable text lands here as null — an inactive facet,
-    // which is the honest verdict for text Apply would refuse, and the
-    // reason a badge never lights over a pattern that does not parse.)
-    private static BoardPattern? ParsePositionPattern(string raw) =>
-        string.IsNullOrWhiteSpace(raw)
-            ? null
-            : BoardPattern.TryParse(raw, out var pattern) ? pattern : null;
+    // The panel's whole validity truth, in one place, and it is the lib's: the
+    // lib must name no invalid field. Since halheinrich/backgammon#269 that
+    // covers the pattern text too, so the panel keeps no rule of its own
+    // beside it. Both surfaces that must refuse an uncommittable selection
+    // read this one member — the Apply gate and TryGetEditedConfig — so a save
+    // can never capture a selection Apply itself would refuse.
+    private bool IsCommittable => InvalidFields.Count == 0;
 
     private static List<string> SplitTokens(string raw) =>
         raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)

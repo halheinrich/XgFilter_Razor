@@ -50,6 +50,25 @@ namespace XgFilter_Razor;
 /// </para>
 ///
 /// <para>
+/// <b>The other outcome of the same restore, held here too.</b> A stored
+/// document the panel cannot read restores to defaults, and a failed restore
+/// is never silent (Hal's ruling, halheinrich/backgammon#367): the panel says
+/// so in a second notice, <c>#filterRestoreFailedNotice</c>. Its occurrence
+/// is this boot's restore, exactly as the restored-selection notice's is —
+/// the unreadable document survives navigation, so a remount reads it
+/// again, and a dismissal that lived in the panel would let the remount say
+/// it again. The two notices are the two outcomes of one event, so one
+/// app-scoped holder carries both facts, each with its own one-way
+/// dismissal (<see cref="IsFailureVisible"/>, <see cref="ArmFailure"/>,
+/// <see cref="DismissFailure"/>), and a host registers one instance for the
+/// pair. The failure notice ends when the user closes it or when a commit
+/// writes a fresh document over the unreadable one; an edit leaves it, since
+/// an edit changes nothing about what was stored. The two outcomes are
+/// exclusive within one restore, but the holder does not encode that — each
+/// bit answers for itself.
+/// </para>
+///
+/// <para>
 /// The movers are <c>internal</c>: only the producer's panel arms, reads,
 /// and dismisses this — a host registers the instance and binds it, nothing
 /// more, so the notice behaves identically in every host by construction.
@@ -61,6 +80,9 @@ public sealed class FilterRestoreNotice
     // an app lifetime: once the notice is dismissed, later restores (remounts
     // within the same boot) must not resurrect it.
     private bool _spent;
+
+    // The failure notice's dismissal, the same shape for the same reason.
+    private bool _failureSpent;
 
     /// <summary>
     /// Whether the notice is showing: the boot's restore staged a stored
@@ -95,5 +117,40 @@ public sealed class FilterRestoreNotice
     {
         IsVisible = false;
         _spent = true;
+    }
+
+    /// <summary>
+    /// Whether the failed-restore notice is showing: the boot's restore found
+    /// a stored document it could not read, restored defaults instead, and
+    /// neither the user nor a commit has yet ended the notice.
+    /// </summary>
+    internal bool IsFailureVisible { get; private set; }
+
+    /// <summary>
+    /// Record that a first-render restore found a stored document it could
+    /// not read. <see cref="Arm"/>'s twin: shows the failure notice unless it
+    /// was already dismissed this app lifetime, so a remount over the same
+    /// unreadable document re-shows the same notice and a remount after a
+    /// dismissal stays quiet. Not for an absent document — nothing stored is
+    /// nothing failed.
+    /// </summary>
+    internal void ArmFailure()
+    {
+        if (!_failureSpent)
+        {
+            IsFailureVisible = true;
+        }
+    }
+
+    /// <summary>
+    /// The failure notice is over: the user closed it, or a commit wrote a
+    /// fresh document over the one that could not be read. One transition for
+    /// both, as with <see cref="Dismiss"/>: hides the notice and spends it for
+    /// the rest of the app lifetime.
+    /// </summary>
+    internal void DismissFailure()
+    {
+        IsFailureVisible = false;
+        _failureSpent = true;
     }
 }

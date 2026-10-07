@@ -182,6 +182,7 @@ the page:
 | Box | What it is | Occurrence | Holder of the dismissal |
 | --- | --- | --- | --- |
 | `#filterRestoredNotice` | event notice, polite | this boot's restore of a stored selection | the app-scoped `FilterRestoreNotice` — the occurrence outlives every mount of the panel, so the panel binds the component's dismissed state to it and keeps no copy |
+| `#filterRestoreFailedNotice` | event notice, polite | this boot's restore of a stored selection it could not read (`halheinrich/backgammon#367`: a failed restore is never silent) | the same `FilterRestoreNotice`, its second fact — the unreadable document outlives every mount too, and a remount reads it again; one holder for the two outcomes of one restore, each with its own one-way dismissal. It also ends at a commit, which writes a fresh document over the unreadable one; an edit leaves it |
 | `#filterSaveError` | error, assertive | one refused save | the composite, *as the refusal itself*: `_saveRefusalNotice` is non-null exactly while a refusal stands, so closing the box clears the field and no dismissed bit exists anywhere |
 | `#savedFiltersWriteFailed` | condition notice, assertive | one failed write | the `Notice` instance, keyed by `NamedDocumentStore.LastWriteFailure` — the store names the occurrence because only it knows a write failed; store and notice both die with the composite, so the component may hold the bit |
 | `#savedFiltersLoadFailed` | gate reason, polite | — | none: it cannot be closed. It stands where the saved-filters panel would and is the only thing saying why saving is off; it leaves when its cause does |
@@ -227,13 +228,15 @@ groups have been hidden since the FilterPanel hide pass, while the
 `PlayTypes`, the filters, the enums) stays intact. State is held in private
 fields on the component instance.
 
-**Validity is the lib's ruling; the panel marks it and words it.** Two
-rules compose into one `IsCommittable` member — the position-pattern text
-must parse (`BoardPattern.TryParse`, this panel's own field) and
+**Validity is the lib's ruling; the panel marks it and words it.** One
+rule is the whole of the `IsCommittable` member:
 `FilterConfig.GetInvalidFields()` must name no field (non-negative error
-bounds, `min ≤ max`, `NaN` rejected — the lib's rule, asked through the
-same `BuildConfig()` path Apply commits through, so what the panel reds and
-what `Build()` would throw on are one answer). The error-range inputs style
+bounds, `min ≤ max`, `NaN` rejected, a score token the grammar faults, and
+— since `halheinrich/backgammon#269` — pattern text `BoardPattern.TryParse`
+refuses; the lib's rule throughout, asked through the same `BuildConfig()`
+path Apply commits through, so what the panel reds and what `Build()` would
+throw on are one answer). The panel keeps no validity rule of its own
+beside it, the position-pattern field's included. The error-range inputs style
 themselves independently off `FilterField.ErrorMin` / `ErrorMax`
 membership, so the lib's attribution rules carry straight to the screen: a
 negative Max never reds a Min the user got right, while a misordered pair
@@ -285,7 +288,14 @@ verdict, and in `FilterHelp`'s match-scores prose.
 
 **The position-pattern field presents a grammar it does not own.**
 `XgFilter_Lib`'s `BoardPattern` (and its constraint types) owns the
-bracket list; see that repo's Patterns section. The field's copy states
+bracket list; see that repo's Patterns section. The text is the config's
+text, both ways (`halheinrich/backgammon#269`): the buffer rides into
+`FilterConfig.PositionPattern` as typed (a blank buffer as `null`, the
+lib's "no pattern") and a restored or loaded config's text lands back in
+the buffer as stored, so the panel builds no `BoardPattern` for the
+config's sake and a stored pattern a newer grammar rule refuses shows the
+user what they wrote — marked by the lib's verdict, with Apply withheld,
+never repaired and never dropped. The field's copy states
 the grammar for a user typing it: the single-location token, the
 `[a-b,min,max]` range token (`halheinrich/backgammon#268`) with the sign
 of its bounds naming the side, the other side's checkers ignored, the
@@ -453,8 +463,8 @@ therefore never disagree:
 
 - **The Apply gate.** Apply is offered only when the selection differs
   from the last-committed config *and* the selection is **committable** —
-  the position-pattern text parses *and* `FilterConfig.GetInvalidFields()`
-  names no field. `ApplyAsync` guards on the same condition it renders
+  `FilterConfig.GetInvalidFields()` names no field, the pattern text
+  included. `ApplyAsync` guards on the same condition it renders
   `disabled` from, so programmatic dispatch cannot re-commit either.
   While Apply is disabled *because nothing changed*, the panel says so —
   a `title` plus a muted hint line, the `NamedEntriesPanel`
@@ -534,6 +544,22 @@ remount within a setup quiet after an edit while an untouched remount
 re-shows the same notice (navigation changes nothing, in both directions).
 Row and level-group toggles are navigation and keep it; `ForgetCommitted`
 is choreography and keeps it (see Pitfalls).
+
+**The restore's other outcome is said too** (`halheinrich/backgammon#367`:
+a failed restore is never silent). The first-render restore tells three
+states apart, and only there: nothing stored (`getItem` returned null) is
+an ordinary first visit and restores defaults with no word; a document that
+is present but `TryFromJson` refuses restores defaults and says so
+(`#filterRestoreFailedNotice`); a document that reads restores whole, a
+refused pattern included — that is the first case above, not this one.
+`TryFromJson` alone cannot draw the first line, since it answers false for
+a missing key too, which is why the null check precedes it. The notice's
+state is the same app-scoped `FilterRestoreNotice`, its second fact: the
+unreadable document outlives the mount exactly as a restored selection
+does, so a dismissal held in the panel would let a navigate-back say it
+again. It ends when the user closes it or a commit writes a fresh document
+over the unreadable one; an edit leaves it, since an edit changes nothing
+about what is stored. The unreadable document itself is left as it is.
 
 ### `NamedEntriesPanel` component
 
@@ -725,8 +751,12 @@ gates must survive (BgQuiz: Scoped), and `FilterSurface` drives them.
   a fresh one, a remount within a setup reuses the boot's — which is what
   the mount-time condition alone cannot distinguish (see Pitfalls). Hosts
   register and bind it, nothing more: the movers (`Arm`/`Dismiss`) and the
-  read (`IsVisible`) are producer-internal. In-memory only, never
-  persisted.
+  read (`IsVisible`) are producer-internal. Since
+  `halheinrich/backgammon#367` it carries the restore's other outcome as a
+  second fact with the same shape (`ArmFailure`/`DismissFailure`/
+  `IsFailureVisible`): the failed-restore notice, whose occurrence — this
+  boot's restore — is the same, so one registered instance serves both and
+  a host binds nothing new. In-memory only, never persisted.
 - **`FilterSourceToken`** — opaque, equatable identity of "which source",
   minted by the host via `FromGeneration(int)` / `FromPath(string)` and
   only ever *compared* by the producer. Value equality over the wrapped
@@ -926,11 +956,11 @@ saved-filters arc):
   clobbered. Never opens or closes a row.
 - `bool TryGetEditedConfig(out FilterConfig?)` — snapshots the live
   buffers (including unapplied edits) for host-driven save-as. Gate is
-  exactly Apply's validity gate (`IsCommittable`): fails on non-blank,
-  unparseable position-pattern text and on any field
-  `FilterConfig.GetInvalidFields()` names. No stricter either — match-score
-  tokens ride raw through both paths — so a saved document is never minted
-  from a selection Apply would itself have refused.
+  exactly Apply's validity gate (`IsCommittable`): fails on any field
+  `FilterConfig.GetInvalidFields()` names, pattern text the grammar refuses
+  included. No stricter either — match-score tokens and pattern text ride
+  raw through both paths — so a saved document is never minted from a
+  selection Apply would itself have refused.
 
 Two further methods, `ForgetCommitted()` and `SeedCommitted(FilterConfig)`,
 are deliberately `internal` — `FilterSurface` is their only intended
@@ -1253,12 +1283,17 @@ producer-side, so neither widens what consumers can see.
   ruling), and a badge that read its own buffer would be a second encoding
   of one of them. The states where the two answers differ are real and
   reachable by typing, which is what makes this a live hazard rather than a
-  style rule: position-pattern text that does not parse builds as "no
-  pattern", a depth level list whose mode toggle is off is inert by the
-  lib's guarantee, and a player list of nothing but separators splits to no
-  tokens — in each the buffer is non-empty and the facet is off. The badge
+  style rule: whitespace-only position-pattern text is no pattern, a depth
+  level list whose mode toggle is off is inert by the lib's guarantee, and
+  a player list of nothing but separators splits to no tokens — in each the
+  buffer is non-empty and the facet is off. The opposite state is the lib's
+  ruling too (`halheinrich/backgammon#269`): a facet is active on
+  *presence*, so pattern text the grammar refuses badges `set` exactly as a
+  malformed score token does — what is there is a filter the user meant,
+  refused at Apply by the lib's field verdict, not nothing. A badge that
+  re-parsed the text to decide would be the second encoding again. The badge
   reads the live buffers via `BuildConfig()`, so it is honest for everything
-  the panel can apply. `ErrorRange` needs no exclusion any more: it has no
+  the panel holds. `ErrorRange` needs no exclusion any more: it has no
   row, so nothing it does can badge one. The shelved facets
   (`PositionTypes` / `PlayTypes`) have no row either and are outside scope by
   pre-existing panel behavior — `HydrateFrom` / `BuildConfig` ignore them —
