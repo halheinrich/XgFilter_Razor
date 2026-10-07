@@ -132,7 +132,8 @@ public sealed class FilterRestoreNotice
     /// was already dismissed this app lifetime, so a remount over the same
     /// unreadable document re-shows the same notice and a remount after a
     /// dismissal stays quiet. Not for an absent document — nothing stored is
-    /// nothing failed.
+    /// nothing failed — and not for a storage call that threw, which is the
+    /// storage-unavailable condition and reports through its own channel.
     /// </summary>
     internal void ArmFailure()
     {

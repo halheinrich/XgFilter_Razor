@@ -38,8 +38,11 @@
    as one serialized FilterConfig blob (lib-owned shape via FilterConfig.ToJson
    / TryFromJson), the set of expanded rows under its own key (DisclosureKey),
    and whether the container is open under its own (MoreFiltersKey) — the last
-   two user preference, never part of the config blob. A stored selection the
-   panel cannot read restores to defaults and says so
+   two user preference, never part of the config blob. Every storage call is
+   guarded (halheinrich/backgammon#102): a browser that refuses storage leaves
+   the panel working from its defaults and the host told once through
+   OnStorageUnavailable — see the storage seam below the restores. A stored
+   selection the panel cannot read restores to defaults and says so
    (#filterRestoreFailedNotice): a failed restore is never silent.
    Location: XgFilter_Razor/Components/FilterPanel.razor
 ──────────────────────────────────────────────────────────────────────────── *@
@@ -83,7 +86,8 @@
            with no word are indistinguishable from a first visit — the user's
            filter gone for no stated reason. So the panel says so. Only for a
            document that is present and unreadable: nothing stored is nothing
-           failed.
+           failed, and a storage call that threw is the storage-unavailable
+           condition, reported to the host instead (OnStorageUnavailable).
 
            An event notice — this boot's restore failed once — so dismissible
            (the umbrella's SPEC-notices.md), and its occurrence outlives this
@@ -851,6 +855,26 @@
     [Parameter] public FilterRestoreNotice RestoreNotice { get; set; } = new();
 
     /// <summary>
+    /// Raised once per mount, the first time a <c>localStorage</c> call this
+    /// panel makes is refused by the browser (halheinrich/backgammon#102) — a
+    /// disabled-storage or hostile-privacy setting, which reaches Blazor as a
+    /// <see cref="JSException"/>. The panel has already degraded by the time
+    /// this fires: a refused read reads as nothing stored and the read site's
+    /// own default applies, a refused write keeps the in-memory state, and
+    /// Apply still delivers the applied selection through
+    /// <see cref="OnFilterConfigChanged"/> and <see cref="OnAppliedStateChanged"/>
+    /// — what the failure costs is only that the next visit will not remember.
+    /// The host owns what the page says about it: whether storage is one
+    /// page-level fact shared with the host's own keys, and the notice, are
+    /// the host's (the condition notice under the umbrella's
+    /// <c>SPEC-notices.md</c>). Optional, deliberately: a host that binds
+    /// nothing behaves as before, and the panel keeps working either way.
+    /// Raised outside the guard, so a host handler's own failure is never
+    /// relabelled as unavailable storage.
+    /// </summary>
+    [Parameter] public EventCallback OnStorageUnavailable { get; set; }
+
+    /// <summary>
     /// Single <c>localStorage</c> key holding the whole filter state as one serialized
     /// <see cref="FilterConfig"/> blob. The lib owns the JSON shape (<c>ToJson</c> /
     /// <c>TryFromJson</c>); this component never touches a JSON serializer directly.
@@ -1026,17 +1050,26 @@
     // A remount over an *unchanged* source is the one case where dying is the
     // wrong answer — the selection really is still applied, so Apply would
     // re-arm with nothing to do. FilterSurface reconciles that at its first
-    // render through SeedCommitted, from the applied holder it mediates and
-    // never from localStorage (see SeedCommitted and the composite's
+    // render through ResumeApplied, from the applied holder it mediates and
+    // never from localStorage (see ResumeApplied and the composite's
     // first-mount reconcile).
     private FilterConfig? _committedConfig;
 
-    // True once LoadConfig has staged an externally supplied config. The
-    // first-render localStorage restore checks it both before and after its
-    // await, so a restore completing late can never clobber an external load.
-    // Blazor's single-threaded sync context makes the segments between awaits
-    // atomic — a plain bool is a sufficient guard, no locking.
+    // True once LoadConfig has staged an externally supplied config, or
+    // ResumeApplied has staged the applied selection a previous mount
+    // committed. The first-render localStorage restore checks it both before
+    // and after its await, so a restore completing late can never clobber
+    // either. Blazor's single-threaded sync context makes the segments between
+    // awaits atomic — a plain bool is a sufficient guard, no locking.
     private bool _externalConfigLoaded;
+
+    // Latched the first time a localStorage call is refused this mount, never
+    // retried: storage does not come back mid-session, and a failed call per
+    // key would be one identical console error each. Per mount rather than
+    // app-scoped because this panel holds no app-scoped state of its own; a
+    // remount rediscovers the condition at one refused call and tells the host
+    // again, which the host's own page-level fact absorbs idempotently.
+    private bool _storageUnavailable;
 
     // The facets that carry a row, in render order: FilterFacet declaration
     // order minus ErrorRange, which is always visible above the rows, and
@@ -1108,7 +1141,7 @@
     {
         if (_moreFiltersTouched) return;
 
-        var stored = await JS.InvokeAsync<string?>("localStorage.getItem", MoreFiltersKey);
+        var stored = await TryGetItemAsync(MoreFiltersKey);
 
         if (_moreFiltersTouched) return;
 
@@ -1126,7 +1159,7 @@
     {
         if (_disclosureTouched) return;
 
-        var stored = await JS.InvokeAsync<string?>("localStorage.getItem", DisclosureKey);
+        var stored = await TryGetItemAsync(DisclosureKey);
 
         // Re-check after the await: a row toggled while the interop was in
         // flight is a fresh user choice and must win.
@@ -1184,10 +1217,11 @@
     {
         if (_externalConfigLoaded) return;
 
-        var stored = await JS.InvokeAsync<string?>("localStorage.getItem", ConfigKey);
+        var stored = await TryGetItemAsync(ConfigKey);
 
-        // Re-check after the await: a host's LoadConfig may have run while the
-        // interop was in flight, and the external config must win.
+        // Re-check after the await: a host's LoadConfig or the composite's
+        // ResumeApplied may have run while the interop was in flight, and
+        // what they staged must win.
         if (_externalConfigLoaded) return;
 
         // Tolerant restore: a missing key, the literal null token, or corrupt
@@ -1199,9 +1233,10 @@
         // a choice the previous session made.
         //
         // The three outcomes are told apart here and nowhere else. Null is
-        // nothing stored — an ordinary first visit — and gets defaults with
-        // no word. A document that is present but unreadable gets defaults
-        // and the failed-restore notice: a failed restore is never silent
+        // nothing stored — an ordinary first visit, or a refused read, which
+        // the seam already reported as the storage condition — and gets
+        // defaults with no word. A document that is present but unreadable
+        // gets defaults and the failed-restore notice: a failed restore is never silent
         // (Hal's ruling, halheinrich/backgammon#367). TryFromJson alone
         // cannot draw that line — it answers false for a missing key too —
         // which is why the null check precedes it. The unreadable document
@@ -1218,6 +1253,62 @@
         HydrateFrom(cfg);
 
         StateHasChanged();
+    }
+
+    // ── The storage seam ────────────────────────────────────────────────────
+    //
+    // Every localStorage call the panel makes goes through these two, and
+    // neither throws for a refused call (halheinrich/backgammon#102). A
+    // browser with storage disabled raises a SecurityError on getItem and
+    // setItem alike, which reaches Blazor as a JSException; unguarded, the
+    // first read faulted the first render and a throwing write stopped the
+    // commit before the host heard of the applied selection. The guard is
+    // per call and translates the failure into "nothing is stored", a state
+    // every read site already answers with its own documented default, so
+    // nothing restates those defaults here. A refused write keeps whatever
+    // in-memory state the caller had already moved.
+    //
+    // JSException only, as ExtractFromXgToCsv's BrowserStorage (the ruled
+    // precedent, halheinrich/backgammon#91) catches: a serialization bug in a
+    // caller, or a host callback that throws, is not a storage failure and
+    // must still surface. The host is told once per mount, from the first
+    // refused call, outside the catch — see OnStorageUnavailable.
+    private async Task<string?> TryGetItemAsync(string key)
+    {
+        if (_storageUnavailable) return null;
+
+        string? stored;
+        try
+        {
+            stored = await JS.InvokeAsync<string?>("localStorage.getItem", key);
+        }
+        catch (JSException)
+        {
+            await RecordStorageUnavailableAsync();
+            return null;
+        }
+
+        return stored;
+    }
+
+    private async Task TrySetItemAsync(string key, string value)
+    {
+        if (_storageUnavailable) return;
+
+        try
+        {
+            await JS.InvokeVoidAsync("localStorage.setItem", key, value);
+        }
+        catch (JSException)
+        {
+            await RecordStorageUnavailableAsync();
+        }
+    }
+
+    private Task RecordStorageUnavailableAsync()
+    {
+        _storageUnavailable = true;
+        return OnStorageUnavailable.InvokeAsync();
     }
 
     /// <summary>
@@ -1318,24 +1409,39 @@
     }
 
     /// <summary>
-    /// Adopts <paramref name="config"/> as the last-committed config — the
-    /// exact mirror of <see cref="ForgetCommitted"/>, for a fresh mount
-    /// resuming a commit an earlier mount made. The committed config dies on
-    /// unmount while the caller's applied state outlives it, so without this
-    /// a remount arms Apply over a selection that is already applied: nothing
-    /// to do, and the disabled-because-nothing-changed explanation missing
-    /// with it. The buffers, the persisted <c>localStorage</c> state, and
-    /// which rows are open are all untouched — this moves the reference point, never
-    /// the selection — and nothing is written: the committed config stays
-    /// unpersisted by contract (see this panel's Pitfalls), derived at mount
-    /// from what the caller already holds.
+    /// Resumes <paramref name="config"/> as the selection a previous mount
+    /// applied — the mirror of <see cref="ForgetCommitted"/>, for a fresh
+    /// mount over a source the caller's applied holder says is already
+    /// filtered. It stages the config into the edit buffers <em>and</em>
+    /// adopts it as the last-committed config, so the screen shows the
+    /// applied selection and Apply does not re-arm over it. The committed
+    /// config dies on unmount while the caller's applied state outlives it;
+    /// without this a remount would arm Apply over a selection that is
+    /// already applied, with the disabled-because-nothing-changed
+    /// explanation missing.
+    /// <para>
+    /// <b>The buffers come from the holder too, never from storage.</b> The
+    /// stored selection and the applied one agree only while remembering
+    /// works: after an Apply whose write the browser refused
+    /// (halheinrich/backgammon#102), storage still holds the previous
+    /// selection, and a refused read holds nothing. A remount that hydrated
+    /// from storage would then show one selection while the holder — and
+    /// the host's gate — said another was applied. So this suppresses the
+    /// first-render storage restore the way <see cref="LoadConfig"/> does,
+    /// and overwrites it if it already ran: whichever lands first, the
+    /// applied holder's selection is what the mount ends on. Nothing is
+    /// written — the committed config stays unpersisted by contract (see
+    /// this panel's Pitfalls) — and which rows are open is untouched.
+    /// </para>
     /// <para>
     /// <b>Silent, unlike <see cref="ForgetCommitted"/> — deliberately.</b>
     /// Forgetting is news: a gate the consumer believes clean just went
-    /// stale, and only <see cref="OnAppliedStateChanged"/> can say so. A seed
-    /// is by definition no news — the caller seeds from applied state it is
-    /// already holding, so a report would only tell it what it just said.
-    /// The asymmetry is the contract, not an oversight.
+    /// stale, and only <see cref="OnAppliedStateChanged"/> can say so. A
+    /// resume is by definition no news — the caller resumes from applied
+    /// state it is already holding, so a report would only tell it what it
+    /// just said. The asymmetry is the contract, not an oversight. The
+    /// restored-selection notice is not touched either: an applied holder
+    /// means a commit happened this boot, which already spent it.
     /// </para>
     /// <c>internal</c> for exactly <see cref="ForgetCommitted"/>'s reason: the
     /// composite component is the only intended caller (tests reach it via
@@ -1343,13 +1449,15 @@
     /// holder and can therefore say what was committed; a host holds no such
     /// answer about <em>this</em> panel.
     /// </summary>
-    /// <param name="config">The config to treat as last-committed.</param>
+    /// <param name="config">The applied config to resume.</param>
     /// <exception cref="ArgumentNullException">
     /// Thrown when <paramref name="config"/> is <see langword="null"/>.
     /// </exception>
-    internal void SeedCommitted(FilterConfig config)
+    internal void ResumeApplied(FilterConfig config)
     {
         ArgumentNullException.ThrowIfNull(config);
+        _externalConfigLoaded = true;
+        HydrateFrom(config);
         _committedConfig = config;
         StateHasChanged();
     }
@@ -1423,17 +1531,24 @@
     }
 
     // The single commit point — Apply and Clear filters both land here, and it
-    // is the only place _committedConfig moves. A commit is the other gesture
-    // that makes the selection the user's own, so the restored-selection
-    // notice dies here too (Apply is additionally the very consent the
-    // notice asks for); and it writes a fresh document over whatever was
-    // stored, so the failed-restore notice ends here as well.
+    // is the only place _committedConfig moves on a gesture (ResumeApplied
+    // moves it at mount). A commit is the other gesture that makes the
+    // selection the user's own, so the restored-selection notice dies here
+    // too (Apply is additionally the very consent the notice asks for); and
+    // it writes a fresh document over whatever was stored, so the
+    // failed-restore notice ends here as well.
+    //
+    // The committed config is assigned before the write and both callbacks
+    // are raised after it whether or not the write landed: the host must
+    // hear of the applied selection even when remembering it fails
+    // (Hal's ruling, halheinrich/backgammon#367), and the write is guarded
+    // so a refused one costs only the next visit's memory.
     private async Task PersistAndRaiseAsync(FilterConfig cfg)
     {
         RestoreNotice.Dismiss();
         RestoreNotice.DismissFailure();
         _committedConfig = cfg;
-        await JS.InvokeVoidAsync("localStorage.setItem", ConfigKey, cfg.ToJson());
+        await TrySetItemAsync(ConfigKey, cfg.ToJson());
         await OnFilterConfigChanged.InvokeAsync(cfg);
 
         // Re-derived through MatchedCommittedConfig rather than handing cfg
@@ -1449,7 +1564,7 @@
     {
         _disclosureTouched = true;
         if (!_expandedFacets.Remove(facet)) _expandedFacets.Add(facet);
-        await JS.InvokeVoidAsync("localStorage.setItem", DisclosureKey, SerializeExpandedFacets());
+        await TrySetItemAsync(DisclosureKey, SerializeExpandedFacets());
     }
 
     // Fold or unfold the container + persist the one bit, ToggleFacetAsync's
@@ -1461,8 +1576,7 @@
     {
         _moreFiltersTouched = true;
         _moreFiltersExpanded = !_moreFiltersExpanded;
-        await JS.InvokeVoidAsync("localStorage.setItem", MoreFiltersKey,
-            _moreFiltersExpanded ? "true" : "false");
+        await TrySetItemAsync(MoreFiltersKey, _moreFiltersExpanded ? "true" : "false");
     }
 
     // The open rows as the stored JSON array. Written in RowFacets order rather

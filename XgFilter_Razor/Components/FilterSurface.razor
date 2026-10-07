@@ -21,7 +21,10 @@
    - an IDocumentStorage adapter for the saved-filters document (null =
      no context), plus the host's CanPersist capability ruling and its
      host-specific disabled-reason wording,
-   - the two panel-shaped events, re-raised after mediation.
+   - the two panel-shaped events, re-raised after mediation,
+   - optionally, the panel's storage-unavailable report (OnStorageUnavailable,
+     halheinrich/backgammon#102), forwarded as-is: the panel discovers the
+     condition and the host owns the page's notice about it.
 
    Notice copy lives here — the producer — so every host degrades with
    identical wording; only host-specific reasons (FS-Access phrasing etc.)
@@ -112,7 +115,8 @@
 <FilterPanel @ref="_filterPanel"
              RestoreNotice="RestoreNotice"
              OnFilterConfigChanged="HandleFilterConfigChanged"
-             OnAppliedStateChanged="HandleAppliedStateChanged" />
+             OnAppliedStateChanged="HandleAppliedStateChanged"
+             OnStorageUnavailable="OnStorageUnavailable" />
 
 @code {
     /// <summary>
@@ -129,11 +133,15 @@
     /// <para>
     /// It is also read, once, at this component's first render: when it
     /// already carries a config applied for the current <see cref="Source"/>,
-    /// the panel's committed config is seeded from it, so a remount does not
-    /// re-arm Apply over a selection that is already applied. That seed comes
-    /// from here and never from the panel's <c>localStorage</c> state — the
-    /// holder resets on a browser reload and storage does not, so seeding
-    /// from storage would leave Apply disabled with the gate closed.
+    /// the panel resumes that selection — buffers and committed config both —
+    /// so a remount shows the applied selection and does not re-arm Apply
+    /// over it. That resume comes from here and never from the panel's
+    /// <c>localStorage</c> state: the holder resets on a browser reload and
+    /// storage does not, so a storage-seeded reference point would leave
+    /// Apply disabled with the gate closed; and storage may hold a stale
+    /// selection, or nothing, after a write the browser refused, so
+    /// storage-hydrated buffers would show a selection other than the
+    /// applied one.
     /// </para>
     /// </summary>
     [Parameter, EditorRequired]
@@ -235,6 +243,23 @@
     [Parameter, EditorRequired]
     public EventCallback<FilterConfig?> OnAppliedStateChanged { get; set; }
 
+    /// <summary>
+    /// The inner panel's storage-unavailable report, forwarded unmediated
+    /// (halheinrich/backgammon#102): raised once per mount of the panel, the
+    /// first time the browser refuses a <c>localStorage</c> call it makes.
+    /// The panel has already degraded — defaults where a read was refused,
+    /// in-memory state kept where a write was, Apply still delivering the
+    /// applied selection through the two events above — so this carries no
+    /// payload and asks nothing of the host but to know. What the page says,
+    /// and whether this is one page-level fact shared with the host's own
+    /// keys, is the host's (the condition notice under the umbrella's
+    /// <c>SPEC-notices.md</c>). Optional: a host that binds nothing behaves as
+    /// before. Forwarded rather than re-raised because this component holds
+    /// no state about storage and has nothing to mediate.
+    /// </summary>
+    [Parameter]
+    public EventCallback OnStorageUnavailable { get; set; }
+
     // ── The saved-filters mount ─────────────────────────────────────────────
     //
     // The generic pick list knows no document, so the saved-filters identity
@@ -320,28 +345,32 @@
     //
     // The panel's committed config dies with each mount; the host's holder
     // does not. So a fresh mount over a source the holder says is already
-    // filtered would arm Apply with nothing to do — the panel restores the
-    // applied selection from localStorage as *staged*, sees nothing
-    // committed, and offers a re-apply that would change nothing. Apply is
-    // offered only when there is something to do, so the mount reconciles:
-    // the panel's reference point is seeded from the holder.
+    // filtered would arm Apply with nothing to do — the panel restores a
+    // selection from localStorage as *staged*, sees nothing committed, and
+    // offers a re-apply. Apply is offered only when there is something to do,
+    // so the mount reconciles: the panel resumes the applied selection from
+    // the holder — its buffers and its reference point both.
     //
     // From the holder, NEVER from storage — the rule this reconcile lives or
-    // dies by. localStorage survives a full browser reload; the holder
-    // deliberately does not (it documents that reset-on-reload posture). A
-    // storage-seeded reconcile would therefore, after a reload, disable Apply
-    // while the holder is empty: the host's start gate closed and the only
-    // control that could re-open it greyed out. The holder is the one source
-    // that cannot produce that lock-out, because it is the very state the
-    // gate reads.
+    // dies by, in both directions. localStorage survives a full browser
+    // reload; the holder deliberately does not (it documents that
+    // reset-on-reload posture). A storage-seeded reference point would
+    // therefore, after a reload, disable Apply while the holder is empty: the
+    // host's start gate closed and the only control that could re-open it
+    // greyed out. And storage-hydrated buffers would, after an Apply whose
+    // write the browser refused (halheinrich/backgammon#102), show the
+    // previous selection while the holder — and the host's gate — said the
+    // new one was applied. The holder is the one source that cannot produce
+    // either lie, because it is the very state the gate reads; the applied
+    // selection it carries survives a same-source remount whatever storage
+    // holds or refuses to.
     //
     // Here rather than in the first OnParametersSetAsync because @ref is null
     // until after the first render — copying EndSetup's `_filterPanel?.` idiom
     // into that branch would silently no-op. The panel's own localStorage
-    // restore may still be in flight when this lands; that converges because
-    // the panel's cleanliness is an equality comparison against the live
-    // buffers rather than a latched flag, and the restore's StateHasChanged
-    // re-evaluates it. One more reason never to latch that comparison.
+    // restore may still be in flight when this lands, or may already have
+    // run; ResumeApplied suppresses the one and overwrites the other, so the
+    // mount ends on the holder's selection whichever lands first.
     //
     // Silent by design: no OnAppliedStateChanged. ForgetCommitted reports
     // because it creates news; a reconcile derives from the holder, which
@@ -351,7 +380,7 @@
     // Asked source-relatively, the only way the holder answers: ConfigFor
     // yields a config exactly when one is applied *and* it belongs to this
     // Source, so a config applied against some other source reads as nothing
-    // applied and the seed correctly declines.
+    // applied and the resume correctly declines.
     protected override Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender
@@ -359,7 +388,7 @@
             && Source is { } source
             && AppliedFilter.ConfigFor(source) is { } applied)
         {
-            panel.SeedCommitted(applied);
+            panel.ResumeApplied(applied);
         }
 
         return Task.CompletedTask;

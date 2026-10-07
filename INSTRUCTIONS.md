@@ -125,7 +125,10 @@ Pitfalls), a `FilterSourceToken?` for the current source, an
 host's `CanPersist` capability ruling with its host-specific
 `PersistDisabledReason` wording, and the two panel-shaped events
 (`OnFilterConfigChanged` / `OnAppliedStateChanged`), re-raised after
-mediation with the panel's exact names, payloads, and per-gesture contract.
+mediation with the panel's exact names, payloads, and per-gesture contract;
+optionally, the panel's storage-unavailable report (`OnStorageUnavailable`,
+halheinrich/backgammon#102), forwarded as-is — the panel discovers the
+condition and the host owns the page's notice about it.
 
 **The source-change rule is composite-owned — "told, never asks."** The
 composite never sees pickers, paths, or capabilities; the host mints tokens
@@ -142,18 +145,20 @@ armed, which is the holder's whole purpose.
 **The first-mount reconcile** (halheinrich/backgammon#82) is the other
 half of that survival. The panel's committed config dies each mount while
 the holder does not, so a remount over an already-filtered source would
-restore the applied selection as merely *staged* and re-arm Apply with
-nothing to do. At its first render the composite seeds the panel's
-committed config from the holder — `SeedCommitted`, the mirror of the
-source-change rule's `ForgetCommitted` — via the keyed lookup
-`ConfigFor(Source)`, which yields a config exactly when one is applied
-*and* it belongs to the current `Source`. It runs from
-`OnAfterRenderAsync(firstRender: true)`, not the first parameters-set,
-because `@ref` is null until after the first render. The seed is
-**silent** (no `OnAppliedStateChanged`) and comes **from the holder, never
-from `localStorage`** — both non-negotiable; see Pitfalls for the lock-out
-that storage-seeding produces and why the asymmetry with `ForgetCommitted`
-is deliberate.
+restore a selection from storage as merely *staged* and re-arm Apply with
+nothing to do. At its first render the composite resumes the applied
+selection from the holder — `ResumeApplied`, the mirror of the
+source-change rule's `ForgetCommitted`: the panel's buffers and its
+committed config both — via the keyed lookup `ConfigFor(Source)`, which
+yields a config exactly when one is applied *and* it belongs to the
+current `Source`. It runs from `OnAfterRenderAsync(firstRender: true)`,
+not the first parameters-set, because `@ref` is null until after the first
+render. The resume is **silent** (no `OnAppliedStateChanged`) and comes
+**from the holder, never from `localStorage`** — both non-negotiable; see
+Pitfalls for the lock-out that a storage-seeded reference point produces,
+the stale screen that storage-hydrated buffers produce once a write has
+been refused (halheinrich/backgammon#102), and why the asymmetry with
+`ForgetCommitted` is deliberate.
 
 The composite owns its `SavedFiltersStore` over the bound adapter (rebuilt
 on an adapter reference change), so a remount re-reads the document — a
@@ -500,16 +505,19 @@ they are exact mirrors:
   and open rows all untouched) so Apply re-arms and
   `OnAppliedStateChanged` re-reports (necessarily `null`) through the
   normal path.
-- `void SeedCommitted(FilterConfig)` — for a fresh mount resuming an
-  earlier mount's commit: it adopts the given config as last-committed, so
-  Apply does not re-arm over a selection that is already applied. Same
-  untouched buffers, same nothing written. **Silent**, unlike its mirror:
+- `void ResumeApplied(FilterConfig)` — for a fresh mount resuming an
+  earlier mount's commit: it stages the given config into the buffers and
+  adopts it as last-committed, so the screen shows the applied selection
+  and Apply does not re-arm over it; the first-render storage restore is
+  suppressed, or overwritten if it already ran, since storage and the
+  holder agree only while remembering works (halheinrich/backgammon#102).
+  Nothing written, open rows untouched. **Silent**, unlike its mirror:
   forgetting is news the consumer can only hear through the event, while a
-  seed derives from applied state the caller already holds. That
+  resume derives from applied state the caller already holds. That
   asymmetry is contract, not oversight.
 
 Both are internal by design — the composite is their only intended caller
-(see Pitfalls). Because of `SeedCommitted`, "a fresh mount starts with
+(see Pitfalls). Because of `ResumeApplied`, "a fresh mount starts with
 Apply enabled" is the *panel's* posture in isolation; under the composite
 a remount over an already-filtered source starts with Apply disabled, the
 mount having reconciled from the holder.
@@ -519,9 +527,10 @@ Consumers that want a `DecisionFilterSet` for in-memory filtering call
 to a server send `cfg` as JSON. Single callback by design — see Pitfalls
 for the encapsulation rationale.
 
-`OnAfterRenderAsync(firstRender: true)` rehydrates both localStorage keys
-once on first render — the open-row set, then the config — and calls
-`StateHasChanged`. Each restore double-checks its guard
+`OnAfterRenderAsync(firstRender: true)` rehydrates the three localStorage
+keys once on first render — the container's bit, the open-row set, then
+the config — through the panel's guarded seam (a refused read is nothing
+stored; see Pitfalls) and calls `StateHasChanged`. Each restore double-checks its guard
 (`_disclosureTouched` / `_externalConfigLoaded`) after its await, so a
 user toggle or a host `LoadConfig` landing mid-interop is never
 clobbered.
@@ -922,6 +931,13 @@ Parameters:
   `[EditorRequired]` — the inner panel's events re-raised after mediation,
   with identical names, payloads, and contracts (per-gesture, stateless,
   idempotent — see the `FilterPanel` section below and Pitfalls).
+- `EventCallback OnStorageUnavailable` — optional; the inner panel's
+  storage-unavailable report forwarded as-is (halheinrich/backgammon#102):
+  raised once per mount of the panel, at the first `localStorage` call the
+  browser refuses, with no payload. The panel has already degraded by
+  then; the host owns what the page says (a condition notice under
+  `SPEC-notices.md`) and whether this is one page-level fact shared with
+  its own keys. A host that binds nothing behaves as before.
 
 ### `FilterPanel` (`.Internal` — via `FilterSurface` only)
 
@@ -962,7 +978,7 @@ saved-filters arc):
   raw through both paths — so a saved document is never minted from a
   selection Apply would itself have refused.
 
-Two further methods, `ForgetCommitted()` and `SeedCommitted(FilterConfig)`,
+Two further methods, `ForgetCommitted()` and `ResumeApplied(FilterConfig)`,
 are deliberately `internal` — `FilterSurface` is their only intended
 caller (its source-change rule and its first-mount reconcile
 respectively), so neither is host-facing surface (see Architecture and
@@ -1095,12 +1111,23 @@ producer-side, so neither widens what consumers can see.
 - **`IJSRuntime` / localStorage coupling.** `FilterPanel` depends on
   `Microsoft.JSInterop.IJSRuntime` and assumes the host provides a
   browser-style `localStorage` global (Blazor WebAssembly, Blazor
-  Server, MAUI Blazor Hybrid all qualify). A non-Blazor host or a
-  rendering harness without JS interop will see exceptions on the
-  `localStorage.getItem` / `localStorage.setItem` calls. Tests in this
-  subproject paper over this with `JSInterop.Mode = JSRuntimeMode.Loose`
-  on `BunitContext`. Real-host consumers must register `IJSRuntime` in
-  DI (Blazor's defaults do).
+  Server, MAUI Blazor Hybrid all qualify). Real-host consumers must
+  register `IJSRuntime` in DI (Blazor's defaults do); a host without one
+  fails at injection. A browser that *refuses* storage is a different
+  case and is handled (halheinrich/backgammon#102): every `localStorage`
+  call goes through the panel's guarded seam, a refused read is "nothing
+  stored" and the read site's own default applies, a refused write keeps
+  the in-memory state, Apply still delivers the applied selection through
+  both events, and the host is told once per mount through
+  `OnStorageUnavailable`. The catch is `JSException` only, the ruled
+  precedent (ExtractFromXgToCsv's `BrowserStorage`,
+  halheinrich/backgammon#91): a serialization bug or a host callback that
+  throws is never relabelled as unavailable storage. The latch is per
+  mount — the panel holds no app-scoped state — so a remount rediscovers
+  the condition at one refused call and reports again; a host's
+  page-level fact absorbs that idempotently. Tests in this subproject use
+  `JSInterop.Mode = JSRuntimeMode.Loose` on `BunitContext` for the working
+  case and a throwing setup for the refused one.
 - **JSON round-trip needs `JsonStringEnumConverter`.** Consumers that
   serialize `FilterConfig` for HTTP transport must register
   `JsonStringEnumConverter` (e.g. on `JsonSerializerOptions.Converters`
@@ -1144,8 +1171,8 @@ producer-side, so neither widens what consumers can see.
   re-enables Apply" fall out of a host remount for free. Persisting it, or
   hoisting it into a holder, would break both properties at once. The
   composite's first-mount reconcile narrows *when* that re-arm is offered
-  without touching either property: it seeds the panel in memory from the
-  applied holder, writing nothing (next entry).
+  without touching either property: it resumes the panel in memory from
+  the applied holder, writing nothing (next entry).
 - **The depth facet's clause union is derived in `Build()`, not the panel.**
   The Analysis-depth control writes only raw intent — three per-mode pairs,
   each a toggle plus its own checked-level set — and calls
@@ -1404,7 +1431,7 @@ producer-side, so neither widens what consumers can see.
   migration legs bind the per-row Save — the deliberate alternative to a
   silently splatted, dead affordance (see the Razor silent-splat entry
   above).
-- **`ForgetCommitted` and `SeedCommitted` stay `internal`.**
+- **`ForgetCommitted` and `ResumeApplied` stay `internal`.**
   `FilterSurface` is their only intended caller — its source-change rule
   and its first-mount reconcile; a host either remounts the panel (getting
   the re-arm for free) or hosts the composite, which owns both rules. And
@@ -1459,19 +1486,30 @@ producer-side, so neither widens what consumers can see.
   is settled rather than mount it against a placeholder;
   `ExtractFromXgToCsv`'s `_restoreComplete` gate
   (halheinrich/backgammon#85) is the consumer-side statement of this rule.
-- **The first-mount reconcile seeds from the holder — NEVER from
-  `localStorage`** (ruled, halheinrich/backgammon#82). Apply is offered
-  only when there is something to do: a filter change or a source change. A
-  remount over an already-filtered source has neither, so the composite
-  seeds the fresh panel's committed config from `AppliedFilter` at its
-  first render. The tempting shortcut — seed from the restored
-  `localStorage` selection, which the panel already has in hand — is a
-  **lock-out**. That blob survives a full browser reload; the holder
-  deliberately does not. After a reload, storage-seeding would disable
-  Apply while nothing is applied: the host's start gate closed and the one
-  control that could re-open it greyed out. Pinned from the other side by
+- **The first-mount reconcile resumes from the holder — NEVER from
+  `localStorage`, in either direction** (ruled, halheinrich/backgammon#82;
+  widened by halheinrich/backgammon#102). Apply is offered only when there
+  is something to do: a filter change or a source change. A remount over
+  an already-filtered source has neither, so the composite resumes the
+  fresh panel — its buffers and its committed config — from
+  `AppliedFilter` at its first render. The tempting shortcut — seed the
+  reference point from the restored `localStorage` selection, which the
+  panel already has in hand — is a **lock-out**. That blob survives a full
+  browser reload; the holder deliberately does not. After a reload,
+  storage-seeding would disable Apply while nothing is applied: the host's
+  start gate closed and the one control that could re-open it greyed out.
+  Pinned from the other side by
   `Mount_EmptyHolder_WithRestorableStorage_LeavesApplyEnabled`, which is
-  exactly the test that fails if anyone ever makes that swap.
+  exactly the test that fails if anyone ever makes that swap. The other
+  direction — resume the reference point from the holder but let the
+  buffers hydrate from storage, which is what the reconcile did until
+  halheinrich/backgammon#102 — is a **stale screen**: after an Apply whose
+  write the browser refused, storage holds the previous selection (or,
+  with reads refused, nothing), so the remount would show one selection
+  while the holder and the host's gate said another was applied. Pinned by
+  `FilterSurfaceStorageUnavailableTests`' two remount cases. Storage and
+  the holder agree only while remembering works, and the holder is the
+  owner of the applied selection.
   Three more properties are load-bearing:
   - **It runs from `OnAfterRenderAsync(firstRender: true)`, not the first
     parameters-set.** `@ref` is null until after the first render, so
@@ -1485,13 +1523,12 @@ producer-side, so neither widens what consumers can see.
     only way the holder answers.** "Something is applied" and "it was
     applied to *this* source" are one question under the keyed surface: a
     config applied against another source reads as nothing applied, and
-    the seed correctly declines.
-  Ordering against the panel's own `localStorage` restore is safe but not
-  accidental: the child's after-render runs first and parks on its interop
-  await, so the seed can land before the buffers hydrate. It converges only
-  because cleanliness is an equality comparison re-evaluated by the
-  restore's `StateHasChanged`, not a latched flag — one more reason that
-  comparison must never become a flag.
+    the resume correctly declines.
+  Ordering against the panel's own `localStorage` restore is settled by
+  the panel, not by timing: `ResumeApplied` suppresses a restore still in
+  flight (the `LoadConfig` guard, checked again after the await) and
+  overwrites one that already ran, so the mount ends on the holder's
+  selection whichever lands first.
   **Reachability note** (re-checked after halheinrich/backgammon#85, and the reason the keyed
   lookup's decline path is defence in depth rather than the load-bearing
   part): neither host can present a fresh mount with a holder keyed to a
@@ -1509,7 +1546,7 @@ producer-side, so neither widens what consumers can see.
   render rather than a placeholder — non-null whenever a source was in
   fact restored — so over an unchanged folder the reconcile genuinely
   *fires* there, opening with Apply disabled and the "already applied"
-  notice. That is the reconcile seeding the fresh panel, not a non-null
+  notice. That is the reconcile resuming the fresh panel, not a non-null
   guard declining. (A restored blank path is the other truthful answer:
   `Source` is null, the reconcile declines, and the host's restore has
   already cleared the holder on the same condition.)
@@ -1703,7 +1740,8 @@ producer-side, so neither widens what consumers can see.
   pattern. Pure refactor; no behavior change.
 - **Migrate `localStorage` calls behind a `Persistence` abstraction.**
   Once a non-WASM consumer (or a unit-test harness wanting real
-  state-rehydration coverage) appears, factor the `localStorage.getItem`
-  / `setItem` block into an injected `IFilterStateStore` so the
-  component is host-agnostic. Until a second consumer exists, this is
-  speculative and YAGNI applies.
+  state-rehydration coverage) appears, factor the panel's guarded seam
+  (`TryGetItemAsync` / `TrySetItemAsync`, the one place its
+  `localStorage` calls live since halheinrich/backgammon#102) into an
+  injected `IFilterStateStore` so the component is host-agnostic. Until a
+  second consumer exists, this is speculative and YAGNI applies.
