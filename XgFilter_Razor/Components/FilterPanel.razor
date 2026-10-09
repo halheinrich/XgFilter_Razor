@@ -162,16 +162,16 @@
                        style="max-width:140px"
                        aria-labelledby="errorRangeLabel"
                        type="number" step="0.001" placeholder="Min"
-                       value="@_errorMinText"
-                       @oninput="e => { _errorMinText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
+                       value="@_draft.ErrorMinText"
+                       @oninput="e => Edit(_draft with { ErrorMinText = e.Value?.ToString() ?? string.Empty })" />
                 <span>–</span>
                 <input id="errorMax"
                        @attributes="@(FieldAttributes(invalidFields, FilterField.ErrorMax, "errorRangeHint", "errorRangeFeedback"))"
                        style="max-width:140px"
                        aria-labelledby="errorRangeLabel"
                        type="number" step="0.001" placeholder="Max"
-                       value="@_errorMaxText"
-                       @oninput="e => { _errorMaxText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
+                       value="@_draft.ErrorMaxText"
+                       @oninput="e => Edit(_draft with { ErrorMaxText = e.Value?.ToString() ?? string.Empty })" />
             </div>
             @* Rendered only while it applies, the #applyDisabledReason idiom,
                rather than left in the DOM for Bootstrap's sibling selector to
@@ -383,8 +383,8 @@
                                aria-labelledby="facetToggle_Players"
                                aria-describedby="facetHint_Players"
                                placeholder="e.g. Hal, Magriel"
-                               value="@_playerText"
-                               @oninput="e => { _playerText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
+                               value="@_draft.PlayersText"
+                               @oninput="e => Edit(_draft with { PlayersText = e.Value?.ToString() ?? string.Empty })" />
                     </div>)
 
                     @* ── Decision type ───────────────────────────────────────
@@ -398,8 +398,8 @@
                                 <input class="form-check-input" type="radio"
                                        name="decisionType"
                                        id="dt_@opt"
-                                       checked="@(_decisionType == opt)"
-                                       @onchange="() => { _decisionType = opt; ReportAppliedState(); }" />
+                                       checked="@(_draft.DecisionType == opt)"
+                                       @onchange="() => Edit(_draft with { DecisionType = opt })" />
                                 <label class="form-check-label" for="dt_@opt">
                                     @opt.ToLabel()
                                 </label>
@@ -435,8 +435,8 @@
                         <input @attributes="@(FieldAttributes(invalidFields, FilterField.MatchScores, "facetHint_MatchScores", "matchScoreFeedback"))"
                                aria-labelledby="facetToggle_MatchScores"
                                placeholder="e.g. 4a5a, 1a1a, @MatchScoreToken.DoubleMatchPoint, 1a2aC, @MatchScoreToken.MoneyWithJacoby, @MatchScoreToken.MoneyWithoutJacoby"
-                               value="@_matchScoreText"
-                               @oninput="e => { _matchScoreText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
+                               value="@_draft.MatchScoresText"
+                               @oninput="e => Edit(_draft with { MatchScoresText = e.Value?.ToString() ?? string.Empty })" />
                         <div class="form-text">
                             MaNa is on-roll-anchored — M = points the player on roll needs, N = the
                             opponent — so 4a5a and 5a4a are distinct (list both to catch either
@@ -501,16 +501,16 @@
                                    style="max-width:140px"
                                    aria-labelledby="facetToggle_MoveNumberRange"
                                    type="number" step="1" min="1" placeholder="Min"
-                                   value="@_moveNumberMinText"
-                                   @oninput="e => { _moveNumberMinText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
+                                   value="@_draft.MoveNumberMinText"
+                                   @oninput="e => Edit(_draft with { MoveNumberMinText = e.Value?.ToString() ?? string.Empty })" />
                             <span>–</span>
                             <input id="moveNumberMax"
                                    @attributes="@(FieldAttributes(invalidFields, FilterField.MoveNumberMax, "facetHint_MoveNumberRange", "moveNumberFeedback"))"
                                    style="max-width:140px"
                                    aria-labelledby="facetToggle_MoveNumberRange"
                                    type="number" step="1" min="1" placeholder="Max"
-                                   value="@_moveNumberMaxText"
-                                   @oninput="e => { _moveNumberMaxText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
+                                   value="@_draft.MoveNumberMaxText"
+                                   @oninput="e => Edit(_draft with { MoveNumberMaxText = e.Value?.ToString() ?? string.Empty })" />
                         </div>
                         @* #errorRangeFeedback's shape, for the same reasons: the
                            explicit @if and d-block because the inputs sit one level
@@ -552,8 +552,8 @@
                                 <div class="form-check form-check-inline">
                                     <input class="form-check-input" type="checkbox"
                                            id="ct_@ct"
-                                           checked="@_contactTypes.Contains(ct)"
-                                           @onchange="(e) => { if (e.Value is bool b && b) _contactTypes.Add(ct); else _contactTypes.Remove(ct); ReportAppliedState(); }" />
+                                           checked="@_draft.ContactTypes.Contains(ct)"
+                                           @onchange="(e) => Edit(_draft.WithContactType(ct, e.Value is true))" />
                                     <label class="form-check-label" for="ct_@ct">@ct.ToLabel()</label>
                                 </div>
                             }
@@ -600,11 +600,11 @@
                                 <div class="form-check">
                                     <input class="form-check-input" type="checkbox"
                                            id="md_@group.Mode"
-                                           checked="@group.Include"
-                                           @onchange="(e) => { group.Include = e.Value is bool b && b; ReportAppliedState(); }" />
+                                           checked="@_draft.Includes(group.Mode)"
+                                           @onchange="(e) => Edit(_draft.WithIncludes(group.Mode, e.Value is true))" />
                                     <label class="form-check-label" for="md_@group.Mode">@group.Mode.ToLabel()</label>
                                 </div>
-                                @if (group.Include)
+                                @if (_draft.Includes(group.Mode))
                                 {
                                     <div class="ms-4 mb-2">
                                         <button type="button" id="lvlToggle_@group.Mode"
@@ -615,9 +615,10 @@
                                             Analysis level
                                             @if (!group.LevelsExpanded)
                                             {
+                                                var levelCount = _draft.LevelsOf(group.Mode).Count;
                                                 <span id="lvlBadge_@group.Mode"
-                                                      class="badge ms-1 @(group.Levels.Count > 0 ? "text-bg-primary" : "text-bg-secondary")">
-                                                    @(group.Levels.Count > 0 ? $"{group.Levels.Count} selected" : "any")
+                                                      class="badge ms-1 @(levelCount > 0 ? "text-bg-primary" : "text-bg-secondary")">
+                                                    @(levelCount > 0 ? $"{levelCount} selected" : "any")
                                                 </span>
                                             }
                                         </button>
@@ -630,8 +631,8 @@
                                                         <div class="form-check form-check-inline">
                                                             <input class="form-check-input" type="checkbox"
                                                                    id="lv_@(group.Mode)_@level"
-                                                                   checked="@group.Levels.Contains(level)"
-                                                                   @onchange="(e) => { if (e.Value is bool b && b) group.Levels.Add(level); else group.Levels.Remove(level); ReportAppliedState(); }" />
+                                                                   checked="@_draft.LevelsOf(group.Mode).Contains(level)"
+                                                                   @onchange="(e) => Edit(_draft.WithLevel(group.Mode, level, e.Value is true))" />
                                                             <label class="form-check-label" for="lv_@(group.Mode)_@level">@level.ToLabel()</label>
                                                         </div>
                                                     }
@@ -654,7 +655,7 @@
                        by the type, exactly as the enum facets defer to ToLabel. (A hyphenated
                        "3-1" presentation was considered; "31" keeps the panel free of any
                        label-munging and matches the lib's token one-for-one.) Selections are
-                       stored raw in _diceRolls and handed to FilterConfig.Build() verbatim —
+                       held raw in the draft and handed to FilterConfig.Build() verbatim —
                        the panel derives nothing. None checked = facet off (Build() skips the
                        filter); the roll set is canonical/unordered, so checking "31" admits
                        both dice orders, and cube rows (no roll) never pass an active filter. *@
@@ -668,8 +669,8 @@
                                 <div class="form-check form-check-inline">
                                     <input class="form-check-input" type="checkbox"
                                            id="dr_@roll"
-                                           checked="@_diceRolls.Contains(roll)"
-                                           @onchange="(e) => { if (e.Value is bool b && b) _diceRolls.Add(roll); else _diceRolls.Remove(roll); ReportAppliedState(); }" />
+                                           checked="@_draft.DiceRolls.Contains(roll)"
+                                           @onchange="(e) => Edit(_draft.WithDiceRoll(roll, e.Value is true))" />
                                     <label class="form-check-label" for="dr_@roll">@roll</label>
                                 </div>
                             }
@@ -724,8 +725,8 @@
                                @attributes="@(FieldAttributes(invalidFields, FilterField.PositionPattern, "facetHint_PositionPattern", "positionPatternFeedback"))"
                                aria-labelledby="facetToggle_PositionPattern"
                                placeholder="e.g. [6,2,] [5,,-2] [7-12,3,] [@CheckerLocation.OpponentOff,,-2]"
-                               value="@_positionPatternText"
-                               @oninput="e => { _positionPatternText = e.Value?.ToString() ?? string.Empty; ReportAppliedState(); }" />
+                               value="@_draft.PositionPatternText"
+                               @oninput="e => Edit(_draft with { PositionPatternText = e.Value?.ToString() ?? string.Empty })" />
                         <div class="form-text">
                             [location,min,max] per location; blank bound = unbounded; positive counts
                             belong to the player on roll, negative to the opponent.
@@ -984,29 +985,24 @@
     private string MoreFiltersLabel =>
         _moreFiltersExpanded ? MoreFiltersExpandedLabel : MoreFiltersFoldedLabel;
 
-    // Free-text / numeric buffers. These exist only because in-progress typing
-    // needs a string distinct from the parsed value; they are transient
-    // view-state — hydrated from the config on restore, flushed back into a
-    // config on Apply, and never persisted on their own.
-    private string _playerText = string.Empty;
-    private string _matchScoreText = string.Empty;
-    private string _errorMinText = string.Empty;
-    private string _errorMaxText = string.Empty;
-    private string _moveNumberMinText = string.Empty;
-    private string _moveNumberMaxText = string.Empty;
-    private string _positionPatternText = string.Empty;
+    // The selection as the user is editing it — every box's text as typed,
+    // valid or not, and every choice — held as one immutable FilterDraft
+    // (halheinrich/backgammon#374). The parsed config and the lib's verdicts
+    // on it are derived from this on every ask, never kept beside it, and an
+    // edit is a new draft through Edit. Holding the text rather than its
+    // config is what keeps a box the config cannot represent ("1.5" in a
+    // move-number bound) on screen and marked, instead of rebuilt as no
+    // criterion; see FilterDraft.
+    private FilterDraft _draft = FilterDraft.Empty;
 
-    // Enum state needs no string buffer — the controls bind directly.
-    private DecisionTypeOption _decisionType = DecisionTypeOption.Both;
-    private HashSet<ContactType> _contactTypes = new();
-
-    // Depth facet — raw user intent as three per-mode pairs, stored verbatim
-    // and handed to FilterConfig.Build() which owns the clause-union
-    // derivation. The panel never maps toggles and level lists to clauses
-    // itself (that SSOT lives in the lib; see the Analysis-depth markup
-    // comment). Each group also carries its level disclosure's session-only
-    // open/closed state — navigation, never persisted (see the markup comment
-    // for why, in contrast to DisclosureKey).
+    // Depth facet — raw user intent as three per-mode pairs, held in the
+    // draft verbatim and handed to FilterConfig.Build(), which owns the
+    // clause-union derivation. The panel never maps toggles and level lists
+    // to clauses itself (that SSOT lives in the lib; see the Analysis-depth
+    // markup comment). A group here is the rendering of one pair: its mode,
+    // its hint copy, and its level disclosure's session-only open/closed
+    // state — navigation, never persisted (see the markup comment for why, in
+    // contrast to DisclosureKey). The pair's values are the draft's.
     private sealed class DepthModeGroup
     {
         public required AnalysisMode Mode { get; init; }
@@ -1016,8 +1012,6 @@
         // means for this mode.
         public required string LevelHint { get; init; }
 
-        public bool Include { get; set; }
-        public HashSet<AnalysisLevel> Levels { get; set; } = new();
         public bool LevelsExpanded { get; set; }
     }
 
@@ -1045,11 +1039,6 @@
     // BookRollout). A property rather than a field because field initializers
     // cannot reference the instance fields above.
     private IReadOnlyList<DepthModeGroup> DepthGroups => [_evaluations, _rollouts, _bookRollouts];
-
-    // Dice facet — the raw set of admitted rolls, stored verbatim and handed to
-    // FilterConfig.Build(); empty = facet off. The roll set and its order are the
-    // lib's (DiceRoll.All), never re-derived here.
-    private HashSet<DiceRoll> _diceRolls = new();
 
     // The config this panel last committed — the one it raised through
     // OnFilterConfigChanged from Apply or Clear filters — and the reference
@@ -1489,12 +1478,14 @@
     // FilterConfig's own value equality, which is precisely why an edit undone
     // back to the committed values counts as clean again — a one-way dirty flag
     // would strand the user behind a disabled Apply in exactly that state.
-    // A committed config always parsed (the gate saw to it), and the lib's
-    // equality never matches text that parses to text that does not, so
-    // unparseable pattern text reads as a different config; it never opens
-    // the gate either, because CanApply also requires IsCommittable.
+    // Only a committable draft can match: a committed config always passed
+    // the gate, and a draft the gate refuses is not the selection that was
+    // committed, whatever it parses to. That is load-bearing, not cosmetic —
+    // a box the config cannot represent parses as no criterion, so "1.5" in
+    // a move-number bound over a committed config with no such bound would
+    // otherwise compare equal and read as the applied selection.
     private FilterConfig? MatchedCommittedConfig =>
-        _committedConfig is not null && _committedConfig.Equals(BuildConfig())
+        _committedConfig is not null && IsCommittable && _committedConfig.Equals(BuildConfig())
             ? _committedConfig
             : null;
 
@@ -1538,15 +1529,14 @@
     private Task ApplyAsync() =>
         CanApply ? PersistAndRaiseAsync(BuildConfig()) : Task.CompletedTask;
 
-    // "Clear filters" — the full-clear gesture: hydrate every edit buffer back
-    // to defaults, then persist + raise the empty config (consumers treat it
-    // as applied). Filter values only: the panel has no path to host state,
-    // and which rows are open is the user's choice, not this gesture's.
+    // "Clear filters" — the full-clear gesture: the draft back to an untouched
+    // panel, then persist + raise the empty config (consumers treat it as
+    // applied). Filter values only: the panel has no path to host state, and
+    // which rows are open is the user's choice, not this gesture's.
     private Task ClearFiltersAsync()
     {
-        var cfg = new FilterConfig();
-        HydrateFrom(cfg);              // clear every edit-field back to defaults
-        return PersistAndRaiseAsync(cfg);
+        _draft = FilterDraft.Empty;
+        return PersistAndRaiseAsync(BuildConfig());
     }
 
     // The single commit point — Apply and Clear filters both land here, and it
@@ -1621,11 +1611,13 @@
 
     // Which facets currently hold active filters — the presence half of every
     // row's badge. Judged by the lib's activation predicates via
-    // GetActiveFacets() on the live buffers, the same build path Apply commits
-    // through, never by re-inspecting a buffer or a config field here.
-    // Recomputed per render; the cost is a buffer flush plus predicate sweep,
+    // GetActiveFacets() on the draft's parsed config, the same build path Apply
+    // commits through, never by re-inspecting a box or a config field here —
+    // joined, by the draft, by any box whose text its field cannot be, which
+    // is a criterion the user meant rather than none (FilterDraft.ActiveFacets).
+    // Recomputed per render; the cost is a parse plus predicate sweep,
     // accepted over caching.
-    private IReadOnlySet<FilterFacet> ActiveFacets => BuildConfig().GetActiveFacets();
+    private IReadOnlySet<FilterFacet> ActiveFacets => _draft.ActiveFacets;
 
     // The words on an active row's badge — the panel's display concern, and
     // the only half of the badge that is. It says how much the collapsed row
@@ -1645,72 +1637,39 @@
         // not a number this panel could arrive at differently.
         FilterFacet.DecisionType => "1 selected",
 
-        FilterFacet.ContactTypes => $"{_contactTypes.Count} selected",
-        FilterFacet.AnalysisDepth => $"{DepthGroups.Count(g => g.Include)} selected",
-        FilterFacet.DiceRolls => $"{_diceRolls.Count} selected",
+        FilterFacet.ContactTypes => $"{_draft.ContactTypes.Count} selected",
+        FilterFacet.AnalysisDepth => $"{DepthGroups.Count(g => _draft.Includes(g.Mode))} selected",
+        FilterFacet.DiceRolls => $"{_draft.DiceRolls.Count} selected",
 
         _ => throw new ArgumentOutOfRangeException(
             nameof(facet), facet, "Not a facet this panel gives a row."),
     };
 
-    // Flush the current buffers / enum state into a single FilterConfig.
-    private FilterConfig BuildConfig() => new()
-    {
-        Players = SplitTokens(_playerText),
-        DecisionType = _decisionType,
-        MatchScores = SplitTokens(_matchScoreText),
-        ErrorMin = ParseDouble(_errorMinText),
-        ErrorMax = ParseDouble(_errorMaxText),
-        MoveNumberMin = ParseInt(_moveNumberMinText),
-        MoveNumberMax = ParseInt(_moveNumberMaxText),
-        ContactTypes = _contactTypes.ToList(),
-        IncludeEvaluations = _evaluations.Include,
-        EvaluationLevels = _evaluations.Levels.ToList(),
-        IncludeRollouts = _rollouts.Include,
-        RolloutLevels = _rollouts.Levels.ToList(),
-        IncludeBookRollouts = _bookRollouts.Include,
-        BookRolloutLevels = _bookRollouts.Levels.ToList(),
-        DiceRolls = _diceRolls.ToList(),
-        // The text as typed, or null for a blank buffer: null is the lib's
-        // "no pattern filter", so a field never touched and a field cleared
-        // build the same config a fresh one does, and no document is minted
-        // with an empty pattern the user never wrote. Never trimmed — the
-        // stored value is the user's own spelling.
-        PositionPattern = string.IsNullOrWhiteSpace(_positionPatternText) ? null : _positionPatternText,
-    };
+    // The draft's parsed config — a fresh instance each call, so what Apply
+    // commits and what a save snapshots share nothing with the draft.
+    private FilterConfig BuildConfig() => _draft.ToConfig();
 
-    // Inverse of BuildConfig: project a config onto the buffers / enum state.
-    private void HydrateFrom(FilterConfig cfg)
+    // Put a config on screen: the draft becomes the editor showing it, values
+    // copied, a stored value a rule outlaws kept exactly as stored.
+    private void HydrateFrom(FilterConfig cfg) => _draft = FilterDraft.From(cfg);
+
+    // One edit gesture: the draft it produced becomes the draft, and the panel
+    // reports what that now equals. Every control's handler comes through
+    // here, so no control can change the selection without reporting it.
+    private void Edit(FilterDraft edited)
     {
-        _playerText = string.Join(", ", cfg.Players);
-        _decisionType = cfg.DecisionType;
-        _matchScoreText = string.Join(", ", cfg.MatchScores);
-        _errorMinText = FormatNumber(cfg.ErrorMin);
-        _errorMaxText = FormatNumber(cfg.ErrorMax);
-        _moveNumberMinText = FormatNumber(cfg.MoveNumberMin);
-        _moveNumberMaxText = FormatNumber(cfg.MoveNumberMax);
-        _contactTypes = new HashSet<ContactType>(cfg.ContactTypes);
-        _evaluations.Include = cfg.IncludeEvaluations;
-        _evaluations.Levels = new HashSet<AnalysisLevel>(cfg.EvaluationLevels);
-        _rollouts.Include = cfg.IncludeRollouts;
-        _rollouts.Levels = new HashSet<AnalysisLevel>(cfg.RolloutLevels);
-        _bookRollouts.Include = cfg.IncludeBookRollouts;
-        _bookRollouts.Levels = new HashSet<AnalysisLevel>(cfg.BookRolloutLevels);
-        _diceRolls = new HashSet<DiceRoll>(cfg.DiceRolls);
-        // The stored text exactly as stored, parse or not: a pattern a newer
-        // grammar rule refuses shows the user what they wrote, marked invalid
-        // by the lib's verdict below, never repaired and never dropped.
-        _positionPatternText = cfg.PositionPattern ?? string.Empty;
+        _draft = edited;
+        ReportAppliedState();
     }
 
-    // The lib's verdict on every value it rules for — the bounds, the score
-    // tokens, the pattern text — asked of the same build path Apply commits
-    // through, so what the panel reds and what Build() would throw on are one
-    // answer, not two encodings of it. Safe on every render: GetInvalidFields
-    // never throws, judging a value not being using it. Recomputed per render
-    // like the active-facet set, at the same accepted cost (a buffer flush
-    // plus a predicate sweep).
-    private IReadOnlySet<FilterField> InvalidFields => BuildConfig().GetInvalidFields();
+    // The verdict on every value that can be wrong — the lib's on the bounds,
+    // the score tokens and the pattern text, asked of the same parsed config
+    // Apply commits, so what the panel reds and what Build() would throw on
+    // are one answer; and the draft's own on a box whose text its field cannot
+    // be at all (FilterDraft.InvalidFields). Safe on every render: neither
+    // verdict throws. Recomputed per render like the active-facet set, at the
+    // same accepted cost.
+    private IReadOnlySet<FilterField> InvalidFields => _draft.InvalidFields;
 
     // How an input wears the lib's verdict — the one place a field's validity
     // is rendered (halheinrich/backgammon#270), splatted onto every text and
@@ -1754,26 +1713,12 @@
                      .Where(f => f != MatchScoreTokenFault.None)
                      .ToHashSet();
 
-    // The panel's whole validity truth, in one place, and it is the lib's: the
-    // lib must name no invalid field. Since halheinrich/backgammon#269 that
-    // covers the pattern text too, so the panel keeps no rule of its own
-    // beside it. Both surfaces that must refuse an uncommittable selection
-    // read this one member — the Apply gate and TryGetEditedConfig — so a save
-    // can never capture a selection Apply itself would refuse.
-    private bool IsCommittable => InvalidFields.Count == 0;
-
-    private static List<string> SplitTokens(string raw) =>
-        raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-           .Where(s => s.Length > 0).ToList();
-
-    private static double? ParseDouble(string raw) =>
-        double.TryParse(raw, System.Globalization.NumberStyles.Any,
-                        System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : null;
-
-    private static int? ParseInt(string raw) =>
-        int.TryParse(raw, System.Globalization.NumberStyles.Integer,
-                     System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : null;
-
-    private static string FormatNumber<T>(T? value) where T : struct, IFormattable =>
-        value?.ToString(null, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
+    // The panel's whole validity truth, in one place: no field is wrong. The
+    // domain rules are the lib's — since halheinrich/backgammon#269 the
+    // pattern text's too — and the one rule beside them is the draft's own
+    // about representation, so the panel keeps no rule of its own. Both
+    // surfaces that must refuse an uncommittable selection read this one
+    // member — the Apply gate and TryGetEditedConfig — so a save can never
+    // capture a selection Apply itself would refuse.
+    private bool IsCommittable => _draft.IsValid;
 }

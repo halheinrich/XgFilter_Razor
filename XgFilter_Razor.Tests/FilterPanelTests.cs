@@ -2296,6 +2296,109 @@ public class FilterPanelTests : BunitContext
         Assert.Empty(cut.FindAll("#applyDisabledReason"));
     }
 
+    // ── A box its field cannot be (halheinrich/backgammon#374) ─────────────
+    //
+    // The draft is the editor's state, not its config: a move-number box
+    // holding "1.5" has no config value, and the panel used to parse it as no
+    // bound at all — the input dropped, the facet off, the selection counted
+    // as having no move filter. It is input that cannot be its field's value,
+    // so it is invalid, marked where it was typed, refused at Apply and at
+    // save, and a criterion the user meant rather than none.
+
+    [Theory]
+    [InlineData("1.5")]
+    [InlineData("abc")]
+    public void UnrepresentableMoveNumberBound_MarksTheField_AndGatesApplyAndSave(string text)
+    {
+        var cut = RenderExpanded(FilterFacet.MoveNumberRange);
+
+        MoveNumberMin(cut).Input(text);
+
+        Assert.Equal(text, MoveNumberMin(cut).GetAttribute("value"));
+        Assert.Contains("is-invalid", MoveNumberMin(cut).GetAttribute("class"));
+        Assert.NotNull(cut.Find("#moveNumberFeedback"));
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+        Assert.False(cut.Instance.TryGetEditedConfig(out _));
+    }
+
+    [Fact]
+    public void UnrepresentableErrorBound_MarksTheField_AndGatesApply()
+    {
+        var cut = Render<FilterPanel>();
+
+        ErrorMax(cut).Input("abc");
+
+        Assert.Contains("is-invalid", ErrorMax(cut).GetAttribute("class"));
+        Assert.DoesNotContain("is-invalid", ErrorMin(cut).GetAttribute("class"));
+        Assert.NotNull(cut.Find("#errorRangeFeedback"));
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+    }
+
+    // The defect's sharpest form: over an applied selection with no move
+    // bound, "1.5" parses to exactly that selection. It must not read as it —
+    // not reported clean, and Apply off for the invalid value rather than for
+    // "nothing changed".
+    [Fact]
+    public async Task UnrepresentableBound_OverTheAppliedSelection_IsNotThatSelection()
+    {
+        var reports = new List<FilterConfig?>();
+        var cut = RenderExpandedReporting(reports, FilterFacet.MoveNumberRange);
+        await Apply(cut).ClickAsync(new());
+        Assert.NotNull(reports[^1]);
+
+        MoveNumberMin(cut).Input("1.5");
+
+        Assert.Null(reports[^1]);
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+        Assert.Empty(cut.FindAll("#applyDisabledReason"));
+    }
+
+    // Not a blank criterion: the row badges set while it is collapsed, and
+    // the folded container counts it.
+    [Fact]
+    public void UnrepresentableBound_BadgesItsRow_AndCountsOnTheFold()
+    {
+        var cut = RenderExpanded(FilterFacet.MoveNumberRange);
+        MoveNumberMin(cut).Input("1.5");
+
+        cut.Find("#facetToggle_MoveNumberRange").Click();
+
+        Assert.Equal("set", cut.Find("#facetBadge_MoveNumberRange").TextContent.Trim());
+        FoldMoreFilters(cut);
+        Assert.Equal("1 set", cut.Find("#moreFiltersBadge").TextContent.Trim());
+    }
+
+    // A whole number spelled with a fraction is that whole number: "3.0" is
+    // three, which a move-number bound can be, so it is no fault and applies
+    // as three.
+    [Fact]
+    public async Task WholeMoveNumberSpelledWithAFraction_AppliesAsThatNumber()
+    {
+        FilterConfig? committed = null;
+        var cut = RenderExpanded(
+            parameters => parameters.Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { committed = c; }),
+            FilterFacet.MoveNumberRange);
+
+        MoveNumberMin(cut).Input("3.0");
+
+        Assert.DoesNotContain("is-invalid", MoveNumberMin(cut).GetAttribute("class"));
+        await Apply(cut).ClickAsync(new());
+        Assert.Equal(3, committed!.MoveNumberMin);
+    }
+
+    [Fact]
+    public void FixingUnrepresentableBound_ClearsMark_AndReEnablesApply()
+    {
+        var cut = RenderExpanded(FilterFacet.MoveNumberRange);
+        MoveNumberMin(cut).Input("1.5");
+
+        MoveNumberMin(cut).Input("2");
+
+        Assert.DoesNotContain("is-invalid", MoveNumberMin(cut).GetAttribute("class"));
+        Assert.Empty(cut.FindAll("#moveNumberFeedback"));
+        Assert.False(Apply(cut).HasAttribute("disabled"));
+    }
+
     // ── More filters container ─────────────────────────────────────────────
 
     // Fold the container again, OpenMoreFilters' twin and waited on for the
