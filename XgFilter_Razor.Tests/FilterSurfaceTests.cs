@@ -935,7 +935,7 @@ public class FilterSurfaceTests : BunitContext
         Assert.NotNull(cut.Find("#savedFiltersWriteFailed"));
     }
 
-    // ── The restore's outcomes (halheinrich/backgammon#367, #346) ───────────
+    // ── The restore's outcomes (halheinrich/backgammon#367, halheinrich/backgammon#346) ───────────
     //
     // The remembered selection reaches the owner in one of four states, and
     // each has its own answer. Readable: restored and staged, under the
