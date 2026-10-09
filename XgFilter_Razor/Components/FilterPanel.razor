@@ -488,13 +488,14 @@
                            fault kind, so its space is per kind too: a kind it has shown
                            and the list no longer has keeps its place in the line, saying
                            nothing (_heldScoreFaults), and the kinds still true stay where
-                           they were. The faults are read only while the line is shown:
-                           asking them costs a parse plus a sweep of the list, and
-                           otherwise the answer is always "none". *@
+                           they were. Its words are revealed per kind as well
+                           (ShownScoreFaults): a kind typed while another already shows
+                           takes no words and no space until the box is left, so the line
+                           never grows under the caret. *@
                         @if (IsLineRendered(shownFields, FilterFacet.MatchScores))
                         {
                             var scoresShown = IsLineShown(shownFields, FilterFacet.MatchScores);
-                            var scoreFaults = scoresShown ? MatchScoreFaults : NoScoreFaults;
+                            var scoreFaults = ShownScoreFaults;
                             <div @attributes="@(FeedbackLineAttributes(scoresShown, "matchScoreFeedback"))">
                                 @if (scoreFaults.Contains(MatchScoreTokenFault.Malformed)
                                      || _heldScoreFaults.Contains(MatchScoreTokenFault.Malformed))
@@ -899,16 +900,21 @@
         // once and a fresh error waits for the user to leave the box; a draft
         // changed any other way — restored, staged, cleared — shows every
         // wrong value at once, as a value that arrives rather than one being
-        // typed.
+        // typed. The match-score line keeps the same rule per fault kind
+        // (_revealedScoreFaults): a kind typed while another already shows
+        // waits for the leave too.
         if (previous is null || !snapshot.Draft.Equals(previous.Draft))
         {
+            var scoreFaults = CurrentScoreFaults;
             if (previous is not null && _typing)
             {
                 _revealed.IntersectWith(snapshot.InvalidFields);
+                _revealedScoreFaults.IntersectWith(scoreFaults);
             }
             else
             {
                 _revealed = [.. snapshot.InvalidFields];
+                _revealedScoreFaults = [.. scoreFaults];
             }
         }
 
@@ -1376,9 +1382,19 @@
     // deserves. Never wider than the verdict: ShownFields intersects it.
     private HashSet<FilterField> _revealed = [];
 
+    // The match-score fault kinds whose words this panel shows — _revealed's
+    // rule one level down (halheinrich/backgammon#272, SPEC-filtering.md §1).
+    // The field holds a list, and its line speaks once per kind of mistake,
+    // so a field-wide reveal would let a kind typed while another already
+    // shows appear at the keystroke. Revealed on leaving the box, kept by
+    // typing only while still true, and set to every current kind by a
+    // change that arrives (a stage, a restore, a mount).
+    private HashSet<MatchScoreTokenFault> _revealedScoreFaults = [];
+
     // The user left a box: reveal what is wrong in the group of fields its
     // message speaks for — the two bounds of a range share one line, and a
-    // misordered pair blames both — and nothing elsewhere.
+    // misordered pair blames both — and nothing elsewhere; for the match
+    // scores, every kind of mistake the list holds now.
     private void LeaveField(FilterField field)
     {
         foreach (var member in FieldsOf(LineOf(field)))
@@ -1387,6 +1403,11 @@
             {
                 _revealed.Add(member);
             }
+        }
+
+        if (field == FilterField.MatchScores)
+        {
+            _revealedScoreFaults.UnionWith(CurrentScoreFaults);
         }
 
         HoldShownLines();
@@ -1470,7 +1491,7 @@
             _heldLines.Add(line);
             if (line == FilterFacet.MatchScores)
             {
-                _heldScoreFaults.UnionWith(MatchScoreFaults);
+                _heldScoreFaults.UnionWith(ShownScoreFaults);
             }
         }
     }
@@ -1532,9 +1553,26 @@
     // panel reds and what Build() would throw on are one answer; and the
     // draft's own on a box whose text its field cannot be at all
     // (FilterDraft.InvalidFields). Never wider than the verdict, so a
-    // corrected box clears at once whatever was revealed.
+    // corrected box clears at once whatever was revealed. The match-score
+    // field is shown exactly while one of its kinds is (ShownScoreFaults), so
+    // its mark never stands over a line that says nothing, nor waits on one
+    // that speaks.
     private IReadOnlySet<FilterField> ShownFields =>
-        _snapshot.InvalidFields.Where(_revealed.Contains).ToHashSet();
+        _snapshot.InvalidFields
+            .Where(invalid => invalid == FilterField.MatchScores
+                ? ShownScoreFaults.Count > 0
+                : _revealed.Contains(invalid))
+            .ToHashSet();
+
+    // The match-score kinds the line speaks: those the list holds now, as far
+    // as they are revealed.
+    private IReadOnlySet<MatchScoreTokenFault> ShownScoreFaults =>
+        CurrentScoreFaults.Where(_revealedScoreFaults.Contains).ToHashSet();
+
+    // The list's fault kinds, asked only when the lib names the field — a
+    // valid list has none, and asking costs a parse plus a sweep.
+    private IReadOnlySet<MatchScoreTokenFault> CurrentScoreFaults =>
+        _snapshot.InvalidFields.Contains(FilterField.MatchScores) ? MatchScoreFaults : NoScoreFaults;
 
     // How an input wears the verdict — the one place a field's validity is
     // rendered (halheinrich/backgammon#270), splatted onto every box on the

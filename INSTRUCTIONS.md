@@ -492,8 +492,14 @@ what is wrong in the group its message speaks for: a range's two bounds
 share one line, and a misordered pair blames both. A draft change this
 panel's own typing made keeps only the reveals still true (`Edit` marks the
 panel's gestures, since the owner publishes inside the call). Any other
-draft change shows every wrong value at once. So typing never makes a
-message appear under the box.
+draft change shows every wrong value at once. The match-score field holds a
+list and its line speaks once per kind of mistake, so the same rule runs per
+fault kind there (`_revealedScoreFaults`, `ShownScoreFaults`): a kind typed
+while another already shows waits for the leave and takes no space until
+then; a shown kind clears at its correction; staged, restored and
+remount-found kinds show at once. The field's mark follows the kinds the
+line speaks, so it never stands over a line that says nothing. So typing
+never makes a message appear under the box.
 
 **A shown message's box keeps its place** (`halheinrich/backgammon#272`,
 Hal's ruling of 2026-10-08). A message leaves at the keystroke that

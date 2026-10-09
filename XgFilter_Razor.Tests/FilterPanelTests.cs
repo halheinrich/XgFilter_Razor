@@ -2857,6 +2857,120 @@ public class FilterPanelTests : BunitContext
         Assert.Equal("true", parts[1].GetAttribute("aria-hidden"));
     }
 
+    // ── The match-score line reveals per fault kind (halheinrich/backgammon#272) ─
+    //
+    // SPEC-filtering §1's rule for a typed error — wait for the leave, clear
+    // at the correction, no layout jump while typing — holds per kind of
+    // mistake on the match-score line, including while another kind already
+    // shows there.
+
+    // The retired-token explanation shows; the user returns to the box and
+    // appends a malformed token. Its explanation takes no words and no space
+    // until the box is left, so the line does not grow under the caret, and
+    // appears when it is.
+    [Fact]
+    public void AKindTypedWhileAnotherShows_WaitsForLeavingTheBox()
+    {
+        var cut = RenderExpanded(FilterFacet.MatchScores);
+        MatchScores(cut).Input(MatchScoreToken.RetiredMoney);
+        MatchScores(cut).Blur();
+        var retired = Assert.Single(MatchScoreVerdicts(cut));
+
+        MatchScores(cut).Input($"{MatchScoreToken.RetiredMoney}, not-a-score");
+
+        Assert.Equal([retired], MatchScoreVerdicts(cut));
+        Assert.Single(cut.FindAll("#matchScoreFeedback span"));
+
+        MatchScores(cut).Blur();
+
+        var both = MatchScoreVerdicts(cut);
+        Assert.Equal(2, both.Length);
+        Assert.StartsWith("Not a valid score", both[0]);
+        Assert.Equal(retired, both[1]);
+    }
+
+    // A shown kind corrected while typing clears at once — words, mark and
+    // announcement — and its space stays. Typed again, it is a new error and
+    // waits for the leave, in the space it kept.
+    [Fact]
+    public void AShownKindCorrectedThenTypedAgain_ClearsAtOnce_KeepsItsSpace_AndWaitsForTheLeave()
+    {
+        var cut = RenderExpanded(FilterFacet.MatchScores);
+        var held = $"[{FilterPanel.HeldLineAttribute}='matchScoreFeedback']";
+        MatchScores(cut).Input(MatchScoreToken.RetiredMoney);
+        MatchScores(cut).Blur();
+        var retired = Assert.Single(MatchScoreVerdicts(cut));
+
+        MatchScores(cut).Input("4a5a");
+
+        Assert.Empty(MatchScoreVerdicts(cut));
+        Assert.DoesNotContain("is-invalid", MatchScores(cut).GetAttribute("class"));
+        Assert.False(MatchScores(cut).HasAttribute("aria-invalid"));
+        Assert.Single(cut.Find(held).QuerySelectorAll("span"));
+
+        MatchScores(cut).Input(MatchScoreToken.RetiredMoney);
+
+        Assert.Empty(MatchScoreVerdicts(cut));
+        Assert.DoesNotContain("is-invalid", MatchScores(cut).GetAttribute("class"));
+        Assert.Single(cut.Find(held).QuerySelectorAll("span"));
+
+        MatchScores(cut).Blur();
+
+        Assert.Equal([retired], MatchScoreVerdicts(cut));
+        Assert.Contains("is-invalid", MatchScores(cut).GetAttribute("class"));
+    }
+
+    // Validity stays continuous while the words wait: replacing the shown
+    // kind with a new one in one keystroke keeps Apply gated, with neither
+    // mark nor words until the box is left — the field's mark follows the
+    // kinds the line speaks, so it never stands over a line that says nothing.
+    [Fact]
+    public void ANewKindReplacingAShownOne_StaysGated_ButIsMarkedOnlyOnTheLeave()
+    {
+        var cut = RenderExpanded(FilterFacet.MatchScores);
+        MatchScores(cut).Input(MatchScoreToken.RetiredMoney);
+        MatchScores(cut).Blur();
+
+        MatchScores(cut).Input("not-a-score");
+
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+        Assert.DoesNotContain("is-invalid", MatchScores(cut).GetAttribute("class"));
+        Assert.False(MatchScores(cut).HasAttribute("aria-invalid"));
+        Assert.Empty(MatchScoreVerdicts(cut));
+
+        MatchScores(cut).Blur();
+
+        Assert.Contains("is-invalid", MatchScores(cut).GetAttribute("class"));
+        Assert.StartsWith("Not a valid score", Assert.Single(MatchScoreVerdicts(cut)));
+    }
+
+    // Kinds that arrive rather than being typed show at once, every one: a
+    // staged saved filter, and a draft a remount finds.
+    [Fact]
+    public async Task StagedFaultKinds_AreShownAtOnce()
+    {
+        var cut = RenderExpanded(FilterFacet.MatchScores);
+
+        await cut.InvokeAsync(() => Setup.Stage(
+            new FilterConfig { MatchScores = ["not-a-score", MatchScoreToken.RetiredMoney] }));
+
+        Assert.Equal(2, MatchScoreVerdicts(cut).Length);
+        Assert.Contains("is-invalid", MatchScores(cut).GetAttribute("class"));
+    }
+
+    [Fact]
+    public async Task FaultKindsARemountFinds_AreShownAtOnce()
+    {
+        var first = RenderExpanded(FilterFacet.MatchScores);
+        MatchScores(first).Input($"not-a-score, {MatchScoreToken.RetiredMoney}");
+        Assert.Empty(MatchScoreVerdicts(first));
+        await DisposeComponentsAsync();
+
+        var cut = RenderExpanded(FilterFacet.MatchScores);
+
+        Assert.Equal(2, MatchScoreVerdicts(cut).Length);
+    }
+
     // A feedback line's words, whitespace folded — what its box's size is made of.
     private static string Words(IElement line) => Regex.Replace(line.TextContent.Trim(), @"\s+", " ");
 
