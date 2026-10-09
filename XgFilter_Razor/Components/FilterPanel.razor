@@ -1540,11 +1540,12 @@
     // rendered (halheinrich/backgammon#270), splatted onto every box on the
     // panel that bears a verdict, given the fields whose verdict is shown
     // (ShownFields, halheinrich/backgammon#272). Shown: the is-invalid class, aria-invalid, and
-    // aria-describedby naming the field's hint and its feedback line, which
-    // every site renders exactly while its field is invalid (so the reference
-    // never names an element that is not there). Valid: the class alone and
-    // the hint alone — nothing says "invalid" in any form, and nothing points
-    // at a feedback line that does not exist. Only the attributes that vary
+    // aria-describedby naming the field's hint and its feedback line, whose
+    // id every site gives it exactly while the verdict is shown
+    // (FeedbackLineAttributes), so the reference never names an element that
+    // is not there, or a box that is only holding its place. Not shown: the
+    // class alone and the hint alone — nothing says "invalid" in any form,
+    // and nothing points at a feedback line. Only the attributes that vary
     // with validity, plus the class they ride in, so a site keeps its own id,
     // name reference and type beside the splat. Attribution stays the lib's:
     // the field asked for is the one the lib names, never a facet-wide red.
