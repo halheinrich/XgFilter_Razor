@@ -119,8 +119,20 @@
            into a local like the active-facet set below: every marked input
            and every feedback line on the panel — this facet's, the score
            tokens', the move numbers', the pattern's — reads that one
-           evaluation, and the Apply gate reads the same verdict, the owner's.
-           The panel writes no rule of its own here — only the words for it.
+           evaluation. The panel writes no rule of its own here — only the
+           words for it.
+
+           What a box SHOWS of the verdict is a second fact beside validity
+           (halheinrich/backgammon#272, SPEC-filtering.md §1). Validity is
+           continuous: the Apply gate reads the owner's verdict on every
+           keystroke. The mark and its message for a newly typed error appear
+           when the user leaves the box, and clear as soon as the value is
+           corrected; a wrong value that was not typed here — restored, staged
+           from a saved filter, or still on screen when this panel mounts —
+           shows at once. So typing never makes a message appear under the
+           box, which is what kept moving the layout beneath the caret.
+           shownFields is that second fact: the wrong fields this panel has
+           revealed (ShownFields).
 
            How an input wears the verdict is rendered from one place too
            (FieldAttributes, halheinrich/backgammon#270): the is-invalid class,
@@ -128,7 +140,7 @@
            always and its rendered feedback line only while that line exists.
            Every text and number box on the panel splats that one result, so a
            seventh field cannot carry the class and miss the announcement. *@
-        @{ var invalidFields = InvalidFields; }
+        @{ var shownFields = ShownFields; }
         <div class="mb-3">
             @* The heading and its hint carry ids of their own because the two
                boxes below name themselves by reference off them
@@ -156,20 +168,22 @@
                first. *@
             <div class="d-flex gap-2 align-items-center">
                 <input id="errorMin"
-                       @attributes="@(FieldAttributes(invalidFields, FilterField.ErrorMin, "errorRangeHint", "errorRangeFeedback"))"
+                       @attributes="@(FieldAttributes(shownFields, FilterField.ErrorMin, "errorRangeHint", "errorRangeFeedback"))"
                        style="max-width:140px"
                        aria-labelledby="errorRangeLabel"
                        type="number" step="0.001" placeholder="Min"
                        value="@Draft.ErrorMinText"
-                       @oninput="e => Edit(d => d with { ErrorMinText = e.Value?.ToString() ?? string.Empty })" />
+                       @oninput="e => Edit(d => d with { ErrorMinText = e.Value?.ToString() ?? string.Empty })"
+                       @onblur="() => LeaveField(FilterField.ErrorMin)" />
                 <span>–</span>
                 <input id="errorMax"
-                       @attributes="@(FieldAttributes(invalidFields, FilterField.ErrorMax, "errorRangeHint", "errorRangeFeedback"))"
+                       @attributes="@(FieldAttributes(shownFields, FilterField.ErrorMax, "errorRangeHint", "errorRangeFeedback"))"
                        style="max-width:140px"
                        aria-labelledby="errorRangeLabel"
                        type="number" step="0.001" placeholder="Max"
                        value="@Draft.ErrorMaxText"
-                       @oninput="e => Edit(d => d with { ErrorMaxText = e.Value?.ToString() ?? string.Empty })" />
+                       @oninput="e => Edit(d => d with { ErrorMaxText = e.Value?.ToString() ?? string.Empty })"
+                       @onblur="() => LeaveField(FilterField.ErrorMax)" />
             </div>
             @* Rendered only while it applies, the #applyDisabledReason idiom,
                rather than left in the DOM for Bootstrap's sibling selector to
@@ -188,8 +202,8 @@
                joined it in halheinrich/backgammon#121), and a line that fired
                on any membership would explain the error bounds over a fault
                the user committed three sections down. *@
-            @if (invalidFields.Contains(FilterField.ErrorMin)
-                 || invalidFields.Contains(FilterField.ErrorMax))
+            @if (shownFields.Contains(FilterField.ErrorMin)
+                 || shownFields.Contains(FilterField.ErrorMax))
             {
                 <div id="errorRangeFeedback" class="invalid-feedback d-block">
                     Each bound must be a number, zero or greater, and Min can't be
@@ -430,11 +444,12 @@
                         <label class="form-label">
                             <small class="text-muted" id="facetHint_MatchScores">(comma-separated; blank = all scores)</small>
                         </label>
-                        <input @attributes="@(FieldAttributes(invalidFields, FilterField.MatchScores, "facetHint_MatchScores", "matchScoreFeedback"))"
+                        <input @attributes="@(FieldAttributes(shownFields, FilterField.MatchScores, "facetHint_MatchScores", "matchScoreFeedback"))"
                                aria-labelledby="facetToggle_MatchScores"
                                placeholder="e.g. 4a5a, 1a1a, @MatchScoreToken.DoubleMatchPoint, 1a2aC, @MatchScoreToken.MoneyWithJacoby, @MatchScoreToken.MoneyWithoutJacoby"
                                value="@Draft.MatchScoresText"
-                               @oninput="e => Edit(d => d with { MatchScoresText = e.Value?.ToString() ?? string.Empty })" />
+                               @oninput="e => Edit(d => d with { MatchScoresText = e.Value?.ToString() ?? string.Empty })"
+                               @onblur="() => LeaveField(FilterField.MatchScores)" />
                         <div class="form-text">
                             MaNa is on-roll-anchored — M = points the player on roll needs, N = the
                             opponent — so 4a5a and 5a4a are distinct (list both to catch either
@@ -449,7 +464,7 @@
                            The faults are read only inside the branch: asking them costs a
                            parse plus a sweep of the list, and outside the branch
                            the answer is always "none". *@
-                        @if (invalidFields.Contains(FilterField.MatchScores))
+                        @if (shownFields.Contains(FilterField.MatchScores))
                         {
                             var scoreFaults = MatchScoreFaults;
                             <div id="matchScoreFeedback" class="invalid-feedback d-block">
@@ -482,7 +497,7 @@
                        the lib rules on these bounds too, GetInvalidFields names the
                        offending one, each input reds itself on its own FilterField,
                        and a misordered pair blames both while neither bound is
-                       wrong alone. It reads the hoisted invalidFields evaluation
+                       wrong alone. It reads the hoisted shownFields evaluation
                        the error range reads, and closes Apply through the same
                        verdict — no rule of the panel's own, here or
                        there. The facets differ only in the floor each bound must
@@ -495,20 +510,22 @@
                         </label>
                         <div class="d-flex gap-2 align-items-center">
                             <input id="moveNumberMin"
-                                   @attributes="@(FieldAttributes(invalidFields, FilterField.MoveNumberMin, "facetHint_MoveNumberRange", "moveNumberFeedback"))"
+                                   @attributes="@(FieldAttributes(shownFields, FilterField.MoveNumberMin, "facetHint_MoveNumberRange", "moveNumberFeedback"))"
                                    style="max-width:140px"
                                    aria-labelledby="facetToggle_MoveNumberRange"
                                    type="number" step="1" min="1" placeholder="Min"
                                    value="@Draft.MoveNumberMinText"
-                                   @oninput="e => Edit(d => d with { MoveNumberMinText = e.Value?.ToString() ?? string.Empty })" />
+                                   @oninput="e => Edit(d => d with { MoveNumberMinText = e.Value?.ToString() ?? string.Empty })"
+                                   @onblur="() => LeaveField(FilterField.MoveNumberMin)" />
                             <span>–</span>
                             <input id="moveNumberMax"
-                                   @attributes="@(FieldAttributes(invalidFields, FilterField.MoveNumberMax, "facetHint_MoveNumberRange", "moveNumberFeedback"))"
+                                   @attributes="@(FieldAttributes(shownFields, FilterField.MoveNumberMax, "facetHint_MoveNumberRange", "moveNumberFeedback"))"
                                    style="max-width:140px"
                                    aria-labelledby="facetToggle_MoveNumberRange"
                                    type="number" step="1" min="1" placeholder="Max"
                                    value="@Draft.MoveNumberMaxText"
-                                   @oninput="e => Edit(d => d with { MoveNumberMaxText = e.Value?.ToString() ?? string.Empty })" />
+                                   @oninput="e => Edit(d => d with { MoveNumberMaxText = e.Value?.ToString() ?? string.Empty })"
+                                   @onblur="() => LeaveField(FilterField.MoveNumberMax)" />
                         </div>
                         @* #errorRangeFeedback's shape, for the same reasons: the
                            explicit @if and d-block because the inputs sit one level
@@ -528,8 +545,8 @@
                            "(inclusive; blank = no bound)" above, "zero or greater"
                            down here — so a reader who learns one facet's boxes
                            knows where to look for the other's. *@
-                        @if (invalidFields.Contains(FilterField.MoveNumberMin)
-                             || invalidFields.Contains(FilterField.MoveNumberMax))
+                        @if (shownFields.Contains(FilterField.MoveNumberMin)
+                             || shownFields.Contains(FilterField.MoveNumberMax))
                         {
                             <div id="moveNumberFeedback" class="invalid-feedback d-block">
                                 Each bound must be a whole number, one or greater, and
@@ -721,11 +738,12 @@
                             <small class="text-muted" id="facetHint_PositionPattern">(checker counts by location or range of locations; blank = no pattern filter)</small>
                         </label>
                         <input id="positionPattern"
-                               @attributes="@(FieldAttributes(invalidFields, FilterField.PositionPattern, "facetHint_PositionPattern", "positionPatternFeedback"))"
+                               @attributes="@(FieldAttributes(shownFields, FilterField.PositionPattern, "facetHint_PositionPattern", "positionPatternFeedback"))"
                                aria-labelledby="facetToggle_PositionPattern"
                                placeholder="e.g. [6,2,] [5,,-2] [7-12,3,] [@CheckerLocation.OpponentOff,,-2]"
                                value="@Draft.PositionPatternText"
-                               @oninput="e => Edit(d => d with { PositionPatternText = e.Value?.ToString() ?? string.Empty })" />
+                               @oninput="e => Edit(d => d with { PositionPatternText = e.Value?.ToString() ?? string.Empty })"
+                               @onblur="() => LeaveField(FilterField.PositionPattern)" />
                         <div class="form-text">
                             [location,min,max] per location; blank bound = unbounded; positive counts
                             belong to the player on roll, negative to the opponent.
@@ -749,7 +767,7 @@
                            it. It used to sit in the DOM for Bootstrap's sibling
                            selector to reveal; a described-by reference to a hidden
                            element is read out regardless, which is why it moved. *@
-                        @if (invalidFields.Contains(FilterField.PositionPattern))
+                        @if (shownFields.Contains(FilterField.PositionPattern))
                         {
                             <div id="positionPatternFeedback" class="invalid-feedback d-block">
                                 Not a valid pattern — check each entry against the rules above; fix it to apply, or clear it for no pattern filter.
@@ -836,9 +854,30 @@
     // arrives inside Attach, before the first render, so it needs none.
     private void OnSetupChanged(FilterSetupSnapshot snapshot)
     {
-        var attached = _snapshot is not null;
+        var previous = _snapshot;
         _snapshot = snapshot;
-        if (attached)
+
+        // What each box shows of its verdict (halheinrich/backgammon#272). A
+        // mount shows every wrong value at once — none of them was typed
+        // here. After that, a draft this panel's own typing changed keeps
+        // only the reveals still true, so a correction clears its message at
+        // once and a fresh error waits for the user to leave the box; a draft
+        // changed any other way — restored, staged, cleared — shows every
+        // wrong value at once, as a value that arrives rather than one being
+        // typed.
+        if (previous is null || !snapshot.Draft.Equals(previous.Draft))
+        {
+            if (previous is not null && _typing)
+            {
+                _revealed.IntersectWith(snapshot.InvalidFields);
+            }
+            else
+            {
+                _revealed = [.. snapshot.InvalidFields];
+            }
+        }
+
+        if (previous is not null)
         {
             _ = InvokeAsync(StateHasChanged);
         }
@@ -1244,21 +1283,68 @@
     // One edit gesture, the owner's: the draft it produces becomes the
     // draft, applied to whatever the draft is when it arrives. Every
     // control's handler comes through here, so no control can change the
-    // selection behind the owner's back.
-    private void Edit(Func<FilterDraft, FilterDraft> edit) => Setup.Edit(edit);
+    // selection behind the owner's back. It is also how this panel knows a
+    // change is its user typing, not a value arriving: the owner publishes
+    // inside the call, so the snapshot it delivers meanwhile is this
+    // gesture's (see OnSetupChanged).
+    private void Edit(Func<FilterDraft, FilterDraft> edit)
+    {
+        _typing = true;
+        try
+        {
+            Setup.Edit(edit);
+        }
+        finally
+        {
+            _typing = false;
+        }
+    }
 
-    // The verdict on every value that can be wrong — the lib's on the bounds,
-    // the score tokens and the pattern text, asked of the same parsed config
-    // Apply commits, so what the panel reds and what Build() would throw on
-    // are one answer; and the draft's own on a box whose text its field cannot
-    // be at all (FilterDraft.InvalidFields). Safe on every render: neither
-    // verdict throws. Recomputed per render like the active-facet set, at the
-    // same accepted cost.
-    private IReadOnlySet<FilterField> InvalidFields => _snapshot.InvalidFields;
+    // True only while this panel's own Edit is in the owner's hands.
+    private bool _typing;
 
-    // How an input wears the lib's verdict — the one place a field's validity
-    // is rendered (halheinrich/backgammon#270), splatted onto every text and
-    // number box on the panel. Invalid: the is-invalid class, aria-invalid, and
+    // The wrong fields whose mark and message this panel shows. Panel state,
+    // per mount, because it is presentation: a remount starts from "every
+    // wrong value is shown", which is what a value not typed in this mount
+    // deserves. Never wider than the verdict: ShownFields intersects it.
+    private HashSet<FilterField> _revealed = [];
+
+    // The user left a box: reveal what is wrong in the group of fields its
+    // message speaks for — the two bounds of a range share one line, and a
+    // misordered pair blames both — and nothing elsewhere.
+    private void LeaveField(FilterField field)
+    {
+        foreach (var member in FeedbackGroup(field))
+        {
+            if (_snapshot.InvalidFields.Contains(member))
+            {
+                _revealed.Add(member);
+            }
+        }
+    }
+
+    // The fields one feedback line speaks for.
+    private static FilterField[] FeedbackGroup(FilterField field) => field switch
+    {
+        FilterField.ErrorMin or FilterField.ErrorMax => [FilterField.ErrorMin, FilterField.ErrorMax],
+        FilterField.MoveNumberMin or FilterField.MoveNumberMax => [FilterField.MoveNumberMin, FilterField.MoveNumberMax],
+        _ => [field],
+    };
+
+    // What the boxes show: the verdict, as far as it is revealed. The verdict
+    // is the snapshot's — the lib's on the bounds, the score tokens and the
+    // pattern text, asked of the same parsed config Apply commits, so what the
+    // panel reds and what Build() would throw on are one answer; and the
+    // draft's own on a box whose text its field cannot be at all
+    // (FilterDraft.InvalidFields). Never wider than the verdict, so a
+    // corrected box clears at once whatever was revealed.
+    private IReadOnlySet<FilterField> ShownFields =>
+        _snapshot.InvalidFields.Where(_revealed.Contains).ToHashSet();
+
+    // How an input wears the verdict — the one place a field's validity is
+    // rendered (halheinrich/backgammon#270), splatted onto every text and
+    // number box on the panel, given the fields whose verdict is shown
+    // (ShownFields, halheinrich/backgammon#272). Shown: the is-invalid class, aria-invalid, and
     // aria-describedby naming the field's hint and its feedback line, which
     // every site renders exactly while its field is invalid (so the reference
     // never names an element that is not there). Valid: the class alone and
@@ -1268,9 +1354,9 @@
     // name reference and type beside the splat. Attribution stays the lib's:
     // the field asked for is the one the lib names, never a facet-wide red.
     private static IReadOnlyDictionary<string, object> FieldAttributes(
-        IReadOnlySet<FilterField> invalidFields, FilterField field, string hintId, string feedbackId)
+        IReadOnlySet<FilterField> shownFields, FilterField field, string hintId, string feedbackId)
     {
-        var invalid = invalidFields.Contains(field);
+        var invalid = shownFields.Contains(field);
         var attributes = new Dictionary<string, object>(StringComparer.Ordinal)
         {
             ["class"] = invalid ? "form-control is-invalid" : "form-control",

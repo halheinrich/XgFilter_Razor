@@ -1360,6 +1360,7 @@ public class FilterPanelTests : BunitContext
         var cut = RenderExpanded(FilterFacet.PositionPattern);
 
         cut.Find("#positionPattern").Input(text);
+        cut.Find("#positionPattern").Blur();
 
         Assert.Contains("is-invalid", cut.Find("#positionPattern").GetAttribute("class"));
         Assert.NotNull(cut.Find("#positionPattern ~ .invalid-feedback"));
@@ -1377,6 +1378,7 @@ public class FilterPanelTests : BunitContext
     {
         var cut = RenderExpanded(FilterFacet.PositionPattern);
         cut.Find("#positionPattern").Input(text);
+        cut.Find("#positionPattern").Blur();
 
         Assert.DoesNotContain("is-invalid", cut.Find("#positionPattern").GetAttribute("class"));
         Assert.False(Apply(cut).HasAttribute("disabled"));
@@ -1445,6 +1447,7 @@ public class FilterPanelTests : BunitContext
         var cut = RenderExpanded(FilterFacet.PositionPattern);
 
         cut.Find("#positionPattern").Input("[off,,-2]");
+        cut.Find("#positionPattern").Blur();
 
         Assert.Contains("is-invalid", cut.Find("#positionPattern").GetAttribute("class"));
         Assert.True(cut.Find("button.btn-primary").HasAttribute("disabled"));
@@ -1508,11 +1511,13 @@ public class FilterPanelTests : BunitContext
         var cut = RenderExpanded(FilterFacet.PositionPattern);
 
         cut.Find("#positionPattern").Input("[6,2");
+        cut.Find("#positionPattern").Blur();
 
         Assert.Contains("is-invalid", cut.Find("#positionPattern").GetAttribute("class"));
         Assert.True(cut.Find("button.btn-primary").HasAttribute("disabled"));
 
         cut.Find("#positionPattern").Input(string.Empty);
+        cut.Find("#positionPattern").Blur();
 
         // Cleared, the field is unmarked and the panel is back to the empty
         // selection — in effect, so Apply is off for the other reason.
@@ -1608,6 +1613,7 @@ public class FilterPanelTests : BunitContext
 
         var hint = MatchScores(cut).ParentElement!.QuerySelector(".form-text")!.TextContent;
         MatchScores(cut).Input("not-a-score");
+        MatchScores(cut).Blur();
         var verdict = Assert.Single(MatchScoreVerdicts(cut));
 
         Assert.Contains(MatchScoreToken.DoubleMatchPoint, PlaceholderExamples(cut));
@@ -1623,6 +1629,7 @@ public class FilterPanelTests : BunitContext
         var cut = RenderExpanded(FilterFacet.MatchScores);
 
         MatchScores(cut).Input(MatchScoreToken.DoubleMatchPoint);
+        MatchScores(cut).Blur();
 
         Assert.DoesNotContain("is-invalid", MatchScores(cut).GetAttribute("class"));
         Assert.Empty(MatchScoreVerdicts(cut));
@@ -1659,6 +1666,7 @@ public class FilterPanelTests : BunitContext
         var cut = RenderExpanded(FilterFacet.MatchScores);
 
         MatchScores(cut).Input(token);
+        MatchScores(cut).Blur();
 
         Assert.Contains("is-invalid", MatchScores(cut).GetAttribute("class"));
         Assert.Single(MatchScoreVerdicts(cut));
@@ -1693,6 +1701,7 @@ public class FilterPanelTests : BunitContext
         var cut = RenderExpanded(FilterFacet.MatchScores);
 
         MatchScores(cut).Input("not-a-score");
+        MatchScores(cut).Blur();
 
         var verdict = Assert.Single(MatchScoreVerdicts(cut));
         Assert.Contains(MatchScoreToken.MoneyWithJacoby, verdict);
@@ -1711,6 +1720,7 @@ public class FilterPanelTests : BunitContext
         var cut = RenderExpanded(FilterFacet.MatchScores);
 
         MatchScores(cut).Input(MatchScoreToken.RetiredMoney);
+        MatchScores(cut).Blur();
 
         var verdict = Assert.Single(MatchScoreVerdicts(cut));
         Assert.Equal([MatchScoreToken.RetiredMoney], RetiredWordsIn(verdict));
@@ -1727,14 +1737,17 @@ public class FilterPanelTests : BunitContext
         var cut = RenderExpanded(FilterFacet.MatchScores);
 
         MatchScores(cut).Input("not-a-score");
+        MatchScores(cut).Blur();
         var malformed = Assert.Single(MatchScoreVerdicts(cut));
 
         MatchScores(cut).Input(MatchScoreToken.RetiredMoney);
+        MatchScores(cut).Blur();
         var retired = Assert.Single(MatchScoreVerdicts(cut));
 
         Assert.NotEqual(malformed, retired);
 
         MatchScores(cut).Input($"not-a-score, {MatchScoreToken.RetiredMoney}");
+        MatchScores(cut).Blur();
 
         Assert.Equal([malformed, retired], MatchScoreVerdicts(cut));
     }
@@ -1747,6 +1760,7 @@ public class FilterPanelTests : BunitContext
         var cut = RenderExpanded(FilterFacet.MatchScores);
 
         MatchScores(cut).Input("not-a-score, 0a5a, 3a5aC");
+        MatchScores(cut).Blur();
 
         Assert.Single(MatchScoreVerdicts(cut));
     }
@@ -1760,9 +1774,11 @@ public class FilterPanelTests : BunitContext
         var cut = RenderExpanded(FilterFacet.MatchScores);
 
         MatchScores(cut).Input(MatchScoreToken.RetiredMoney);
+        MatchScores(cut).Blur();
         Assert.True(Apply(cut).HasAttribute("disabled"));
 
         MatchScores(cut).Input(MatchScoreToken.MoneyWithoutJacoby);
+        MatchScores(cut).Blur();
 
         Assert.DoesNotContain("is-invalid", MatchScores(cut).GetAttribute("class"));
         Assert.Empty(MatchScoreVerdicts(cut));
@@ -1781,6 +1797,7 @@ public class FilterPanelTests : BunitContext
         var cut = RenderExpanded(FilterFacet.MatchScores, FilterFacet.MoveNumberRange);
 
         MatchScores(cut).Input(MatchScoreToken.RetiredMoney);
+        MatchScores(cut).Blur();
 
         Assert.Single(MatchScoreVerdicts(cut));
         Assert.Empty(cut.FindAll("#errorRangeFeedback"));
@@ -1797,6 +1814,7 @@ public class FilterPanelTests : BunitContext
         var cut = RenderExpanded(FilterFacet.MatchScores);
 
         ErrorMin(cut).Input("-1");
+        ErrorMin(cut).Blur();
 
         Assert.NotNull(cut.Find("#errorRangeFeedback"));
         Assert.Empty(MatchScoreVerdicts(cut));
@@ -1972,6 +1990,7 @@ public class FilterPanelTests : BunitContext
         var cut = Render<FilterPanel>();
 
         ErrorMin(cut).Input("-1");
+        ErrorMin(cut).Blur();
 
         Assert.Contains("is-invalid", ErrorMin(cut).GetAttribute("class"));
         Assert.True(Apply(cut).HasAttribute("disabled"));
@@ -1988,7 +2007,9 @@ public class FilterPanelTests : BunitContext
         var cut = Render<FilterPanel>();
 
         ErrorMin(cut).Input("1");
+        ErrorMin(cut).Blur();
         ErrorMax(cut).Input("-2");
+        ErrorMax(cut).Blur();
 
         Assert.DoesNotContain("is-invalid", ErrorMin(cut).GetAttribute("class"));
         Assert.Contains("is-invalid", ErrorMax(cut).GetAttribute("class"));
@@ -2004,7 +2025,9 @@ public class FilterPanelTests : BunitContext
         var cut = Render<FilterPanel>();
 
         ErrorMin(cut).Input("5");
+        ErrorMin(cut).Blur();
         ErrorMax(cut).Input("2");
+        ErrorMax(cut).Blur();
 
         Assert.Contains("is-invalid", ErrorMin(cut).GetAttribute("class"));
         Assert.Contains("is-invalid", ErrorMax(cut).GetAttribute("class"));
@@ -2021,6 +2044,7 @@ public class FilterPanelTests : BunitContext
         var cut = Render<FilterPanel>();
 
         ErrorMin(cut).Input("NaN");
+        ErrorMin(cut).Blur();
 
         Assert.Contains("is-invalid", ErrorMin(cut).GetAttribute("class"));
         Assert.True(Apply(cut).HasAttribute("disabled"));
@@ -2038,9 +2062,11 @@ public class FilterPanelTests : BunitContext
         var cut = RenderExpanded(FilterFacet.PositionPattern);
 
         cut.Find("#positionPattern").Input("[6,2,]");
+        cut.Find("#positionPattern").Blur();
         Assert.False(Apply(cut).HasAttribute("disabled"));
 
         ErrorMin(cut).Input("-1");
+        ErrorMin(cut).Blur();
 
         Assert.True(Apply(cut).HasAttribute("disabled"));
         Assert.DoesNotContain("is-invalid", cut.Find("#positionPattern").GetAttribute("class"));
@@ -2056,10 +2082,13 @@ public class FilterPanelTests : BunitContext
         var cut = RenderExpanded(FilterFacet.PositionPattern);
 
         ErrorMin(cut).Input("1");
+        ErrorMin(cut).Blur();
         ErrorMax(cut).Input("2");
+        ErrorMax(cut).Blur();
         Assert.False(Apply(cut).HasAttribute("disabled"));
 
         cut.Find("#positionPattern").Input("[6,2");
+        cut.Find("#positionPattern").Blur();
 
         Assert.True(Apply(cut).HasAttribute("disabled"));
         Assert.Empty(cut.FindAll("#errorRangeFeedback"));
@@ -2073,9 +2102,11 @@ public class FilterPanelTests : BunitContext
         var cut = Render<FilterPanel>();
 
         ErrorMin(cut).Input("-1");
+        ErrorMin(cut).Blur();
         Assert.True(Apply(cut).HasAttribute("disabled"));
 
         ErrorMin(cut).Input("1");
+        ErrorMin(cut).Blur();
 
         Assert.DoesNotContain("is-invalid", ErrorMin(cut).GetAttribute("class"));
         Assert.Empty(cut.FindAll("#errorRangeFeedback"));
@@ -2136,6 +2167,7 @@ public class FilterPanelTests : BunitContext
         var cut = RenderExpanded(FilterFacet.MoveNumberRange);
 
         MoveNumberMin(cut).Input(bound);
+        MoveNumberMin(cut).Blur();
 
         Assert.Contains("is-invalid", MoveNumberMin(cut).GetAttribute("class"));
         Assert.True(Apply(cut).HasAttribute("disabled"));
@@ -2152,7 +2184,9 @@ public class FilterPanelTests : BunitContext
         var cut = RenderExpanded(FilterFacet.MoveNumberRange);
 
         MoveNumberMin(cut).Input("1");
+        MoveNumberMin(cut).Blur();
         MoveNumberMax(cut).Input("0");
+        MoveNumberMax(cut).Blur();
 
         Assert.DoesNotContain("is-invalid", MoveNumberMin(cut).GetAttribute("class"));
         Assert.Contains("is-invalid", MoveNumberMax(cut).GetAttribute("class"));
@@ -2168,7 +2202,9 @@ public class FilterPanelTests : BunitContext
         var cut = RenderExpanded(FilterFacet.MoveNumberRange);
 
         MoveNumberMin(cut).Input("5");
+        MoveNumberMin(cut).Blur();
         MoveNumberMax(cut).Input("2");
+        MoveNumberMax(cut).Blur();
 
         Assert.Contains("is-invalid", MoveNumberMin(cut).GetAttribute("class"));
         Assert.Contains("is-invalid", MoveNumberMax(cut).GetAttribute("class"));
@@ -2186,7 +2222,9 @@ public class FilterPanelTests : BunitContext
         var cut = RenderExpanded(FilterFacet.MoveNumberRange);
 
         MoveNumberMin(cut).Input("1");
+        MoveNumberMin(cut).Blur();
         MoveNumberMax(cut).Input("30");
+        MoveNumberMax(cut).Blur();
 
         Assert.DoesNotContain("is-invalid", MoveNumberMin(cut).GetAttribute("class"));
         Assert.DoesNotContain("is-invalid", MoveNumberMax(cut).GetAttribute("class"));
@@ -2206,6 +2244,7 @@ public class FilterPanelTests : BunitContext
         var cut = RenderExpanded(FilterFacet.MatchScores, FilterFacet.MoveNumberRange);
 
         MoveNumberMin(cut).Input("0");
+        MoveNumberMin(cut).Blur();
 
         Assert.NotNull(cut.Find("#moveNumberFeedback"));
         Assert.Empty(cut.FindAll("#errorRangeFeedback"));
@@ -2221,6 +2260,7 @@ public class FilterPanelTests : BunitContext
         var cut = RenderExpanded(FilterFacet.MoveNumberRange);
 
         ErrorMin(cut).Input("-1");
+        ErrorMin(cut).Blur();
 
         Assert.NotNull(cut.Find("#errorRangeFeedback"));
         Assert.Empty(cut.FindAll("#moveNumberFeedback"));
@@ -2236,9 +2276,11 @@ public class FilterPanelTests : BunitContext
         var cut = RenderExpanded(FilterFacet.MoveNumberRange);
 
         MoveNumberMin(cut).Input("0");
+        MoveNumberMin(cut).Blur();
         Assert.True(Apply(cut).HasAttribute("disabled"));
 
         MoveNumberMin(cut).Input("1");
+        MoveNumberMin(cut).Blur();
 
         Assert.DoesNotContain("is-invalid", MoveNumberMin(cut).GetAttribute("class"));
         Assert.Empty(cut.FindAll("#moveNumberFeedback"));
@@ -2294,7 +2336,9 @@ public class FilterPanelTests : BunitContext
         var cut = RenderExpanded(FilterFacet.MoveNumberRange);
 
         ErrorMin(cut).Input("-1");
+        ErrorMin(cut).Blur();
         MoveNumberMax(cut).Input("0");
+        MoveNumberMax(cut).Blur();
 
         Assert.Contains("is-invalid", ErrorMin(cut).GetAttribute("class"));
         Assert.Contains("is-invalid", MoveNumberMax(cut).GetAttribute("class"));
@@ -2321,6 +2365,7 @@ public class FilterPanelTests : BunitContext
         var cut = RenderExpanded(FilterFacet.MoveNumberRange);
 
         MoveNumberMin(cut).Input(text);
+        MoveNumberMin(cut).Blur();
 
         Assert.Equal(text, MoveNumberMin(cut).GetAttribute("value"));
         Assert.Contains("is-invalid", MoveNumberMin(cut).GetAttribute("class"));
@@ -2335,6 +2380,7 @@ public class FilterPanelTests : BunitContext
         var cut = Render<FilterPanel>();
 
         ErrorMax(cut).Input("abc");
+        ErrorMax(cut).Blur();
 
         Assert.Contains("is-invalid", ErrorMax(cut).GetAttribute("class"));
         Assert.DoesNotContain("is-invalid", ErrorMin(cut).GetAttribute("class"));
@@ -2401,6 +2447,7 @@ public class FilterPanelTests : BunitContext
         var cut = RenderExpanded(FilterFacet.MoveNumberRange);
 
         MoveNumberMin(cut).Input("3.0");
+        MoveNumberMin(cut).Blur();
 
         Assert.DoesNotContain("is-invalid", MoveNumberMin(cut).GetAttribute("class"));
         await Apply(cut).ClickAsync(new());
@@ -2412,12 +2459,144 @@ public class FilterPanelTests : BunitContext
     {
         var cut = RenderExpanded(FilterFacet.MoveNumberRange);
         MoveNumberMin(cut).Input("1.5");
+        MoveNumberMin(cut).Blur();
 
         MoveNumberMin(cut).Input("2");
+        MoveNumberMin(cut).Blur();
 
         Assert.DoesNotContain("is-invalid", MoveNumberMin(cut).GetAttribute("class"));
         Assert.Empty(cut.FindAll("#moveNumberFeedback"));
         Assert.False(Apply(cut).HasAttribute("disabled"));
+    }
+
+    // ── How an invalid field is shown (halheinrich/backgammon#272) ─────────
+    //
+    // Validity and its display are two facts (SPEC-filtering.md §1).
+    // Validity is continuous, because the gates read it: Apply goes dark on
+    // the keystroke that makes a value wrong. The mark and the message for a
+    // newly typed error appear when the user leaves the box, and clear as
+    // soon as the value is corrected; a wrong value that was not typed here
+    // shows at once. bUnit can pin all of that. It cannot establish that
+    // typing keeps the browser's focus and caret or that the layout holds
+    // still — that check is the BgQuiz_Blazor leg's, in a real browser.
+
+    public static TheoryData<FilterFacet?, string, string, string> Boxes => new()
+    {
+        { null, "#errorMin", "-1", "0.1" },
+        { null, "#errorMax", "-1", "0.1" },
+        { FilterFacet.MatchScores, "input[placeholder^='e.g. 4a5a']", "not-a-score", "4a5a" },
+        { FilterFacet.MoveNumberRange, "#moveNumberMin", "1.5", "3" },
+        { FilterFacet.MoveNumberRange, "#moveNumberMax", "0", "3" },
+        { FilterFacet.PositionPattern, "#positionPattern", "[6,2", "[6,2,]" },
+    };
+
+    // While typing, a wrong value closes Apply and shows nothing: no class, no
+    // aria-invalid, no message, the description the hint alone. Leaving the
+    // box shows all of it.
+    [Theory]
+    [MemberData(nameof(Boxes))]
+    public void ANewlyTypedError_IsShownOnlyOnLeavingTheBox(
+        FilterFacet? facet, string selector, string invalid, string valid)
+    {
+        _ = valid;
+        var cut = facet is { } row ? RenderExpanded(row) : Render<FilterPanel>();
+
+        cut.Find(selector).Input(invalid);
+
+        var typing = cut.Find(selector);
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+        Assert.DoesNotContain("is-invalid", typing.GetAttribute("class"));
+        Assert.False(typing.HasAttribute("aria-invalid"));
+        Assert.DoesNotContain(DescribedBy(cut, typing), e => e.ClassList.Contains("invalid-feedback"));
+        Assert.Empty(cut.FindAll(".invalid-feedback"));
+
+        cut.Find(selector).Blur();
+
+        var left = cut.Find(selector);
+        Assert.Contains("is-invalid", left.GetAttribute("class"));
+        Assert.Equal("true", left.GetAttribute("aria-invalid"));
+        Assert.Single(DescribedBy(cut, left), e => e.ClassList.Contains("invalid-feedback"));
+    }
+
+    // A shown error clears the moment the value is right — no need to leave
+    // the box first.
+    [Theory]
+    [MemberData(nameof(Boxes))]
+    public void AShownError_ClearsAsSoonAsCorrected_WithoutLeavingTheBox(
+        FilterFacet? facet, string selector, string invalid, string valid)
+    {
+        var cut = facet is { } row ? RenderExpanded(row) : Render<FilterPanel>();
+        cut.Find(selector).Input(invalid);
+        cut.Find(selector).Blur();
+        Assert.Contains("is-invalid", cut.Find(selector).GetAttribute("class"));
+
+        cut.Find(selector).Input(valid);
+
+        Assert.DoesNotContain("is-invalid", cut.Find(selector).GetAttribute("class"));
+        Assert.False(cut.Find(selector).HasAttribute("aria-invalid"));
+        Assert.Empty(cut.FindAll(".invalid-feedback"));
+    }
+
+    // Corrected and then made wrong again, it is a newly typed error again,
+    // and waits for the user to leave the box.
+    [Fact]
+    public void AnErrorTypedAgainAfterACorrection_WaitsForLeavingTheBoxAgain()
+    {
+        var cut = Render<FilterPanel>();
+        ErrorMin(cut).Input("-1");
+        ErrorMin(cut).Blur();
+        ErrorMin(cut).Input("0.1");
+
+        ErrorMin(cut).Input("-2");
+
+        Assert.DoesNotContain("is-invalid", ErrorMin(cut).GetAttribute("class"));
+        ErrorMin(cut).Blur();
+        Assert.Contains("is-invalid", ErrorMin(cut).GetAttribute("class"));
+    }
+
+    // Leaving a box shows what is wrong there and nothing elsewhere: an error
+    // still being typed in another box stays quiet until that box is left.
+    [Fact]
+    public void LeavingAValidBox_ShowsNothingElsewhere()
+    {
+        var cut = RenderExpanded(FilterFacet.MoveNumberRange);
+        ErrorMin(cut).Input("-1");
+
+        MoveNumberMin(cut).Input("3");
+        MoveNumberMin(cut).Blur();
+
+        Assert.DoesNotContain("is-invalid", ErrorMin(cut).GetAttribute("class"));
+        Assert.Empty(cut.FindAll("#errorRangeFeedback"));
+    }
+
+    // A range's two bounds share one message, and a misordered pair blames
+    // both: leaving either shows the pair.
+    [Fact]
+    public void LeavingOneBound_ShowsWhatItsPairIsBlamedFor()
+    {
+        var cut = Render<FilterPanel>();
+        ErrorMin(cut).Input("5");
+        ErrorMax(cut).Input("2");
+
+        ErrorMax(cut).Blur();
+
+        Assert.Contains("is-invalid", ErrorMin(cut).GetAttribute("class"));
+        Assert.Contains("is-invalid", ErrorMax(cut).GetAttribute("class"));
+        Assert.NotNull(cut.Find("#errorRangeFeedback"));
+    }
+
+    // A wrong value that arrives rather than being typed — a saved filter
+    // staged into the panel — shows at once, as a restored one does
+    // (StoredConfigWithInvalidBound_LoadsAndShowsInvalid_WithApplyGated).
+    [Fact]
+    public async Task AStagedInvalidValue_IsShownAtOnce()
+    {
+        var cut = Render<FilterPanel>();
+
+        await cut.InvokeAsync(() => Setup.Stage(new FilterConfig { ErrorMin = -1 }));
+
+        Assert.Contains("is-invalid", ErrorMin(cut).GetAttribute("class"));
+        Assert.NotNull(cut.Find("#errorRangeFeedback"));
     }
 
     // ── More filters container ─────────────────────────────────────────────
@@ -2961,6 +3140,7 @@ public class FilterPanelTests : BunitContext
         Assert.True(hint.ClassList.Contains("text-muted"));
 
         input.Input(invalidValue);
+        input.Blur();
 
         input = cut.Find(selector);
         Assert.Equal("true", input.GetAttribute("aria-invalid"));
@@ -2971,6 +3151,7 @@ public class FilterPanelTests : BunitContext
         Assert.NotEmpty(feedback.TextContent.Trim());
 
         input.Input(string.Empty);
+        input.Blur();
 
         input = cut.Find(selector);
         Assert.False(input.HasAttribute("aria-invalid"));

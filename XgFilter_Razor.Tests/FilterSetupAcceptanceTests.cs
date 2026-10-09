@@ -559,6 +559,7 @@ public class FilterSetupAcceptanceTests : BunitContext
         var cut = Mount();
         OpenRow(cut, facet);
         cut.Find(box).Input(invalid);
+        cut.Find(box).Blur();
         Assert.True(Apply(cut).HasAttribute("disabled"));
 
         await NavigateAwayAsync();
@@ -572,6 +573,7 @@ public class FilterSetupAcceptanceTests : BunitContext
         Assert.False(Setup.Current.TryGetSavable(out _));
 
         back.Find(box).Input(corrected);
+        back.Find(box).Blur();
 
         Assert.DoesNotContain("is-invalid", back.Find(box).GetAttribute("class"));
         Assert.False(Apply(back).HasAttribute("disabled"));
