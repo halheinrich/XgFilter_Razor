@@ -287,11 +287,40 @@ that is not a whole number, is an `UnrepresentableFields` member. It joins
 the lib's `GetInvalidFields` in `InvalidFields`, which the gates, the marks
 and the save refusal read, and its facet joins `GetActiveFacets`, so the
 row badges `set`: such input is a criterion the user meant, never a blank
-one, and it cannot make the selection ready-empty. `"3.0"` is three. Blank
-text is no bound and no fault. The domain rules — floors, order, `NaN` —
-stay XgFilter_Lib's. `RestrictsNothing` is the empty selection: valid, with
-no criterion by the lib's activation predicates. The sets are sorted, so one
-selection has one order and one JSON.
+one, and it cannot make the selection ready-empty. Blank text is no bound
+and no fault; unfinished text (`1e-`, `-`) is not blank, and is
+unrepresentable until it becomes a number. `RestrictsNothing` is the empty
+selection: valid, with no criterion by the lib's activation predicates. The
+sets are sorted, so one selection has one order and one JSON.
+
+**What a bound reads as a number** (`halheinrich/backgammon#379`, Hal's
+ruling of 2026-10-08, the four bound boxes only). Every spelling a
+browser's number control accepted — a sign, digits with or without a
+fraction, a bare fraction, an exponent — plus a leading `+` and a mark with
+nothing after it (`5.` is 5), with either `.` or `,` as the decimal mark,
+whatever the locale. There is no grouping: the mantissa holds one mark at
+most, so `0.05` and `0,05` are one number, `1,234` is 1.234 and never 1234,
+and a mixed, grouped or repeated mark is no number at all — nothing is
+removed to make one. Space around the text is not part of it. A move
+number must be whole however it is spelled (`3`, `3.0`, `3,0` are three;
+`3.5`, `3,5` are not move numbers) and within the field's range. The text
+stays as typed; the config, and so what is remembered, carries the number
+in its own canonical form. The grammar is `FilterDraft`'s
+(`BoundNumber`); the domain rules — floors, order, finiteness, `NaN` —
+stay XgFilter_Lib's and are not restated: `1e999` reads as infinity, and
+the lib's verdict decides it. Position Pattern's commas are its own
+grammar's delimiters, and nothing here touches that box, the player names
+or the match scores.
+
+The four bound boxes are text boxes (`type="text"`, with `inputmode`
+`decimal` for the error range and `numeric` for the move numbers), never
+number controls. A browser's number control hands the page an empty value
+for text it cannot read yet — `1e-`, `-`, a decimal comma in a locale that
+writes a point — so the draft would hold "no bound" while the user is
+still typing one, and the selection could read as the empty one. A text box
+hands over what is typed. Whether real keystrokes, blank versus unfinished
+text, navigation and correction behave so in a browser is the BgQuiz_Blazor
+leg's check; bUnit sets values, it does not type.
 
 ### The surface's storage — `FilterStorage`
 
@@ -423,8 +452,8 @@ membership, so the lib's attribution rules carry straight to the screen: a
 negative Max never reds a Min the user got right, while a misordered pair
 blames both and leaves the user to pick an end. The message is the panel's
 alone — the lib returns no strings by design — and covers both violations
-in one line, worded to stay true for the literal `NaN` that
-`double.TryParse` accepts and the lib rejects. Rendered only while it
+in one line, worded to stay true for text that is not a number yet
+(unfinished input, or a word such as `NaN`). Rendered only while it
 applies (the `#applyDisabledReason` idiom) rather than left in the DOM for
 Bootstrap's sibling selector, which cannot reach the inputs one level down
 inside the flex row — and since `halheinrich/backgammon#270` every
@@ -463,7 +492,7 @@ it always names, the feedback line that says why — rendered exactly while
 the field is invalid, so the reference never names an element that is not
 there — and a valid input carries neither mark and keeps its hint. The
 private `FieldAttributes` on `FilterPanel` is the one place that decides
-all of it, and every text and number box on the panel splats its result
+all of it, and every box on the panel that bears a verdict splats its result
 (class, `aria-describedby`, and `aria-invalid` when it applies) rather
 than typing a class expression of its own: a seventh field joins the splat
 or fails to be announced, and the suite's per-box theory is where that
@@ -560,7 +589,7 @@ first to do that (`aria-labelledby` at the header, `aria-describedby` at
 the hint), and its hint's wrapper is a plain container: a `<label for>`
 whose text is the hint would have made the hint the field's *name*.
 `halheinrich/backgammon#196` made the pair of references the rule for every
-text and number box on the panel (the error-range pair names itself off
+box on the panel the user types into (the error-range pair names itself off
 its own heading's words, outside the rows), and
 `halheinrich/backgammon#270` made the description carry the field's
 invalid verdict as well — see the validity paragraph above. The regions
@@ -1766,6 +1795,15 @@ are producer-side, so neither widens what consumers can see.
   defect the draft exists to end. Hold and retain the draft; derive the
   config. Don't cache a derived value on the draft either: it is a record,
   and `with` would copy the cache into a draft it was not computed for.
+- **The bound boxes stay text boxes, and their grammar stays the draft's.**
+  A `type="number"` input "for the keyboard" brings the defect back: the
+  browser withholds text it cannot read, so unfinished input arrives as a
+  blank bound (`ABoundBox_IsATextBox_AskingForDigits` sweeps the panel for
+  a number control). `inputmode` is what asks for digits. Don't widen the
+  grammar to strip a separator, and don't narrow it with a domain rule —
+  finiteness, floors and order are the lib's; the draft decides only what
+  text is a number at all. The pattern box's commas are its own grammar's:
+  no decimal reading reaches it.
 - **What a box shows is per mount; validity is not.** The panel's
   `_revealed` set is presentation (halheinrich/backgammon#272): it starts at
   "every wrong value shown" on each mount, and keys on the panel's own

@@ -138,8 +138,9 @@
            (FieldAttributes, halheinrich/backgammon#270): the is-invalid class,
            aria-invalid, and an aria-describedby that names the field's hint
            always and its rendered feedback line only while that line exists.
-           Every text and number box on the panel splats that one result, so a
-           seventh field cannot carry the class and miss the announcement. *@
+           Every box on the panel that bears a verdict splats that one result,
+           so a seventh field cannot carry the class and miss the
+           announcement. *@
         @{ var shownFields = ShownFields; }
         <div class="mb-3">
             @* The heading and its hint carry ids of their own because the two
@@ -165,13 +166,25 @@
             @* Both range facets carry the same Min/Max placeholders, so the
                boxes carry ids: a handle that says which facet it belongs to,
                rather than one that resolves by whichever section renders
-               first. *@
+               first.
+
+               Text boxes, not number controls (halheinrich/backgammon#374,
+               halheinrich/backgammon#379). A browser's number control hands the
+               page an empty value for text it cannot read yet — "1e-", "-",
+               or a decimal comma in a locale that writes a point — so the draft
+               would record no bound while the user is still typing one, and the
+               selection could read as the empty one. A text box hands over what
+               is typed, and the draft keeps it; what it means as a number is
+               the draft's reading (FilterDraft), which accepts either decimal
+               mark. inputmode asks a touch keyboard for digits: decimal here,
+               where a fraction is the common case, and numeric for the move
+               numbers, which are whole. *@
             <div class="d-flex gap-2 align-items-center">
                 <input id="errorMin"
                        @attributes="@(FieldAttributes(shownFields, FilterField.ErrorMin, "errorRangeHint", "errorRangeFeedback"))"
                        style="max-width:140px"
                        aria-labelledby="errorRangeLabel"
-                       type="number" step="0.001" placeholder="Min"
+                       type="text" inputmode="decimal" placeholder="Min"
                        value="@Draft.ErrorMinText"
                        @oninput="e => Edit(d => d with { ErrorMinText = e.Value?.ToString() ?? string.Empty })"
                        @onblur="() => LeaveField(FilterField.ErrorMin)" />
@@ -180,7 +193,7 @@
                        @attributes="@(FieldAttributes(shownFields, FilterField.ErrorMax, "errorRangeHint", "errorRangeFeedback"))"
                        style="max-width:140px"
                        aria-labelledby="errorRangeLabel"
-                       type="number" step="0.001" placeholder="Max"
+                       type="text" inputmode="decimal" placeholder="Max"
                        value="@Draft.ErrorMaxText"
                        @oninput="e => Edit(d => d with { ErrorMaxText = e.Value?.ToString() ?? string.Empty })"
                        @onblur="() => LeaveField(FilterField.ErrorMax)" />
@@ -195,8 +208,8 @@
                reference to a hidden element is read out regardless.
                One line for both violations, because the
                user fixes them at the same two boxes: "a number, zero or
-               greater" is also the true verdict on the literal NaN that
-               double.TryParse accepts and the lib rejects.
+               greater" is also the true verdict on text that is not a number
+               yet — unfinished input such as "1e-", or a word like NaN.
                Keyed to this facet's own two fields, never to "the lib named
                something": the invalid set spans facets (the score tokens
                joined it in halheinrich/backgammon#121), and a line that fired
@@ -513,7 +526,7 @@
                                    @attributes="@(FieldAttributes(shownFields, FilterField.MoveNumberMin, "facetHint_MoveNumberRange", "moveNumberFeedback"))"
                                    style="max-width:140px"
                                    aria-labelledby="facetToggle_MoveNumberRange"
-                                   type="number" step="1" min="1" placeholder="Min"
+                                   type="text" inputmode="numeric" placeholder="Min"
                                    value="@Draft.MoveNumberMinText"
                                    @oninput="e => Edit(d => d with { MoveNumberMinText = e.Value?.ToString() ?? string.Empty })"
                                    @onblur="() => LeaveField(FilterField.MoveNumberMin)" />
@@ -522,7 +535,7 @@
                                    @attributes="@(FieldAttributes(shownFields, FilterField.MoveNumberMax, "facetHint_MoveNumberRange", "moveNumberFeedback"))"
                                    style="max-width:140px"
                                    aria-labelledby="facetToggle_MoveNumberRange"
-                                   type="number" step="1" min="1" placeholder="Max"
+                                   type="text" inputmode="numeric" placeholder="Max"
                                    value="@Draft.MoveNumberMaxText"
                                    @oninput="e => Edit(d => d with { MoveNumberMaxText = e.Value?.ToString() ?? string.Empty })"
                                    @onblur="() => LeaveField(FilterField.MoveNumberMax)" />
@@ -731,7 +744,7 @@
                        text is the hint would have made the hint the field's name, which
                        is the lie this replaces. This was the panel's only named input
                        until halheinrich/backgammon#196 made the pair of references the
-                       rule for every text and number box on the screen; it is the
+                       rule for every box the user types into; it is the
                        precedent the others follow, not a special case. *@
                     @FacetRow(FilterFacet.PositionPattern, @<div class="ms-3">
                         <label class="form-label">
@@ -1342,8 +1355,8 @@
         _snapshot.InvalidFields.Where(_revealed.Contains).ToHashSet();
 
     // How an input wears the verdict — the one place a field's validity is
-    // rendered (halheinrich/backgammon#270), splatted onto every text and
-    // number box on the panel, given the fields whose verdict is shown
+    // rendered (halheinrich/backgammon#270), splatted onto every box on the
+    // panel that bears a verdict, given the fields whose verdict is shown
     // (ShownFields, halheinrich/backgammon#272). Shown: the is-invalid class, aria-invalid, and
     // aria-describedby naming the field's hint and its feedback line, which
     // every site renders exactly while its field is invalid (so the reference

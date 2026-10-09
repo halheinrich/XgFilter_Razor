@@ -135,9 +135,17 @@ public class FilterDraftTests
         Assert.NotEqual(draft, rebuilt);
     }
 
+    // A move number is whole however it is spelled: either decimal mark, a
+    // bare trailing mark, a sign, an exponent (halheinrich/backgammon#379).
     [Theory]
     [InlineData("3", 3)]
     [InlineData("3.0", 3)]
+    [InlineData("3,0", 3)]
+    [InlineData("3.", 3)]
+    [InlineData("3,", 3)]
+    [InlineData("+3", 3)]
+    [InlineData("3e0", 3)]
+    [InlineData("1,2e1", 12)]
     [InlineData(" 7 ", 7)]
     public void AWholeMoveNumber_IsThatNumber(string text, int expected)
     {
@@ -145,6 +153,118 @@ public class FilterDraftTests
 
         Assert.Empty(draft.UnrepresentableFields);
         Assert.Equal(expected, draft.ToConfig().MoveNumberMin);
+        Assert.Equal(text, draft.MoveNumberMinText);
+    }
+
+    // A number that is not whole is no move number, whichever mark it uses;
+    // nor is one the config's field cannot hold, infinity included.
+    [Theory]
+    [InlineData("3.5")]
+    [InlineData("3,5")]
+    [InlineData("1e-1")]
+    [InlineData("1e999")]
+    public void AMoveNumberThatIsNotWhole_IsUnrepresentable(string text)
+    {
+        var draft = FilterDraft.Empty with { MoveNumberMaxText = text };
+
+        Assert.Equal([FilterField.MoveNumberMax], draft.UnrepresentableFields);
+        Assert.Null(draft.ToConfig().MoveNumberMax);
+    }
+
+    // ── The bound boxes' numbers (halheinrich/backgammon#379) ───────────────
+
+    // Hal's ruling of 2026-10-08: '.' or ',' is the decimal mark, whatever the
+    // locale, so 0.05 and 0,05 are one number; every spelling the browser's
+    // number control took is kept, an exponent included, with a leading '+'
+    // and a bare trailing mark besides. There is no grouping, so "1,234" is
+    // 1.234 — never 1234. The text is held as typed whatever it reads as.
+    [Theory]
+    [InlineData("0.05", 0.05)]
+    [InlineData("0,05", 0.05)]
+    [InlineData("1,234", 1.234)]
+    [InlineData("1.234", 1.234)]
+    [InlineData(".5", 0.5)]
+    [InlineData(",5", 0.5)]
+    [InlineData("5.", 5)]
+    [InlineData("5,", 5)]
+    [InlineData("+0,5", 0.5)]
+    [InlineData("-0,5", -0.5)]
+    [InlineData("1e-3", 0.001)]
+    [InlineData("1,5e-3", 0.0015)]
+    [InlineData("2E+1", 20)]
+    [InlineData(" 0,05 ", 0.05)]
+    public void AnErrorBound_ReadsEitherDecimalMark(string text, double expected)
+    {
+        var draft = FilterDraft.Empty with { ErrorMinText = text, ErrorMaxText = text };
+
+        Assert.Empty(draft.UnrepresentableFields);
+        Assert.Equal(expected, draft.ToConfig().ErrorMin);
+        Assert.Equal(expected, draft.ToConfig().ErrorMax);
+        Assert.Equal(text, draft.ErrorMinText);
+    }
+
+    // Marks mixed, grouped or repeated are no number: nothing is removed to
+    // make one, so none of these reads as a different value. Nor is a word,
+    // or a spelling outside the number grammar.
+    [Theory]
+    [InlineData("1.234,5")]
+    [InlineData("1,234.5")]
+    [InlineData("1,234,567")]
+    [InlineData("1.234.567")]
+    [InlineData("1 234")]
+    [InlineData("1..2")]
+    [InlineData("1,,2")]
+    [InlineData("..5")]
+    [InlineData("1e3,5")]
+    [InlineData("1_000")]
+    [InlineData("0x10")]
+    [InlineData("NaN")]
+    [InlineData("Infinity")]
+    public void ABoundWithMixedGroupedOrRepeatedMarks_IsNoNumber(string text)
+    {
+        var draft = FilterDraft.Empty with { ErrorMinText = text, MoveNumberMinText = text };
+
+        Assert.Equal([FilterField.ErrorMin, FilterField.MoveNumberMin], draft.UnrepresentableFields);
+        Assert.Null(draft.ToConfig().ErrorMin);
+        Assert.Null(draft.ToConfig().MoveNumberMin);
+        Assert.Equal(text, draft.ErrorMinText);
+    }
+
+    // Unfinished input is not blank. Blank text is no bound and the empty
+    // selection; text on its way to being a number is a criterion the user
+    // has not finished — invalid, badged, and never the empty selection.
+    [Theory]
+    [InlineData("-")]
+    [InlineData("+")]
+    [InlineData(".")]
+    [InlineData(",")]
+    [InlineData("1e")]
+    [InlineData("1e-")]
+    [InlineData("e5")]
+    public void UnfinishedText_IsNotBlank(string text)
+    {
+        var unfinished = FilterDraft.Empty with { ErrorMaxText = text };
+        var blank = FilterDraft.Empty with { ErrorMaxText = string.Empty };
+
+        Assert.True(blank.RestrictsNothing);
+        Assert.False(unfinished.RestrictsNothing);
+        Assert.False(unfinished.IsValid);
+        Assert.Equal([FilterField.ErrorMax], unfinished.UnrepresentableFields);
+        Assert.Contains(FilterFacet.ErrorRange, unfinished.ActiveFacets);
+        Assert.Equal(text, unfinished.ErrorMaxText);
+    }
+
+    // An exponent past double's range reads as infinity, and whether that is
+    // an admissible bound is the lib's verdict on the config: the editor
+    // states no finite rule of its own (Hal's ruling, 2026-10-08).
+    [Fact]
+    public void AnOverflowingErrorBound_IsInfinity_AndTheLibRulesOnIt()
+    {
+        var draft = FilterDraft.Empty with { ErrorMaxText = "1e999" };
+
+        Assert.Empty(draft.UnrepresentableFields);
+        Assert.Equal(double.PositiveInfinity, draft.ToConfig().ErrorMax);
+        Assert.Equal(draft.ToConfig().GetInvalidFields().Order(), draft.InvalidFields.Order());
     }
 
     [Theory]
@@ -160,13 +280,13 @@ public class FilterDraftTests
         Assert.Null(draft.ToConfig().MoveNumberMax);
     }
 
-    // Representation is the editor's only rule. NaN is a number, so it is
-    // representable; whether it is an admissible bound is the lib's verdict,
-    // which still names it.
+    // Representation is the editor's only rule. A negative error bound and a
+    // move number of zero are numbers, so they are representable; whether
+    // they are admissible bounds is the lib's verdict, which still names them.
     [Fact]
     public void AnInadmissibleNumber_IsTheLibsFault_NotARepresentationFault()
     {
-        var draft = FilterDraft.Empty with { ErrorMinText = "NaN", MoveNumberMinText = "0" };
+        var draft = FilterDraft.Empty with { ErrorMinText = "-1", MoveNumberMinText = "0" };
 
         Assert.Empty(draft.UnrepresentableFields);
         Assert.Equal([FilterField.ErrorMin, FilterField.MoveNumberMin], draft.InvalidFields);

@@ -2034,10 +2034,10 @@ public class FilterPanelTests : BunitContext
         Assert.True(Apply(cut).HasAttribute("disabled"));
     }
 
-    // double.TryParse accepts the literal "NaN", so a text-entry panel really
-    // can hand the lib one — and the lib rejects it. Pinned because the
-    // feedback line's "a number, zero or greater" is worded to stay true for
-    // exactly this input.
+    // The bounds are text boxes, so a user really can type a word into one.
+    // "NaN" is not a number to the draft's grammar, so it is marked like any
+    // other text that is not a number — and the feedback line's "a number,
+    // zero or greater" is worded to stay true for exactly this input.
     [Fact]
     public void NaNErrorBound_MarksField_AndGatesApply()
     {
@@ -2049,6 +2049,68 @@ public class FilterPanelTests : BunitContext
         Assert.Contains("is-invalid", ErrorMin(cut).GetAttribute("class"));
         Assert.True(Apply(cut).HasAttribute("disabled"));
         Assert.NotNull(cut.Find("#errorRangeFeedback"));
+    }
+
+    // ── The bound boxes are text boxes (halheinrich/backgammon#379) ────────
+
+    // A browser's number control hands the page an empty value for text it
+    // cannot read yet, so the draft would hold "no bound" while the user is
+    // still typing one. The four bounds are text boxes, then, asking a touch
+    // keyboard for digits through inputmode, and nothing on the panel is a
+    // number control: one coming back would bring the defect with it.
+    [Theory]
+    [InlineData("#errorMin", "decimal")]
+    [InlineData("#errorMax", "decimal")]
+    [InlineData("#moveNumberMin", "numeric")]
+    [InlineData("#moveNumberMax", "numeric")]
+    public void ABoundBox_IsATextBox_AskingForDigits(string box, string inputMode)
+    {
+        var cut = RenderExpanded(RowFacets);
+
+        var input = cut.Find(box);
+
+        Assert.Equal("text", input.GetAttribute("type"));
+        Assert.Equal(inputMode, input.GetAttribute("inputmode"));
+        Assert.Null(input.GetAttribute("step"));
+        Assert.Null(input.GetAttribute("min"));
+        Assert.Empty(cut.FindAll("input[type='number']"));
+    }
+
+    // What the user typed stays in the box, a decimal comma included, through
+    // Apply; what is remembered is the config's canonical form, the number.
+    [Theory]
+    [InlineData("0,05")]
+    [InlineData("0.05")]
+    [InlineData("5e-2")]
+    public async Task ABoundTypedWithEitherMark_StaysAsTyped_AndCommitsTheNumber(string text)
+    {
+        var cut = Render<FilterPanel>();
+
+        ErrorMin(cut).Input(text);
+        await Apply(cut).ClickAsync(new());
+
+        Assert.Equal(text, ErrorMin(cut).GetAttribute("value"));
+        Assert.Equal(new FilterConfig { ErrorMin = 0.05 }, LastCommit);
+        Assert.Equal(new FilterConfig { ErrorMin = 0.05 }, InEffect);
+    }
+
+    // Typing a bound that is not finished is not clearing it: the selection
+    // stops being the empty one — which was in effect — at the keystroke, and
+    // goes back to it only when the box is blank again.
+    [Fact]
+    public void AnUnfinishedBound_IsNotABlankOne()
+    {
+        var cut = Render<FilterPanel>();
+        Assert.Equal(new FilterConfig(), InEffect);
+
+        ErrorMin(cut).Input("1e-");
+
+        Assert.Null(InEffect);
+        Assert.Equal("1e-", ErrorMin(cut).GetAttribute("value"));
+
+        ErrorMin(cut).Input(string.Empty);
+
+        Assert.Equal(new FilterConfig(), InEffect);
     }
 
     // Gate composition, first direction: the two validity rules are
@@ -3117,7 +3179,7 @@ public class FilterPanelTests : BunitContext
     // Resolved through the DOM as a screen reader would (follow each id to
     // its element, which must exist), never as an attribute string, and the
     // feedback is recognised by what it is rather than by a literal id. One
-    // row per text and number box on the panel: the panel renders all six
+    // row per box on the panel that bears a verdict: the panel renders all six
     // from one place (FieldAttributes), which is what makes the rule hold
     // without this list being the rule — a seventh box would join the splat
     // or fail to be announced, and this list is where that shows.
@@ -3169,7 +3231,7 @@ public class FilterPanelTests : BunitContext
              .Select(id => cut.Find($"#{id}"))
              .ToArray();
 
-    // Every text and number box inside a row takes its name by reference from
+    // Every text box inside a row takes its name by reference from
     // the row's own header, so the name a user hears is the facet's label —
     // the lib's, via ToLabel() — and not the hint sitting above the box. The
     // hint is its description instead. The position-pattern field was the
@@ -3247,17 +3309,18 @@ public class FilterPanelTests : BunitContext
             describedBy.TextContent.Trim(), namedBy.TextContent.Trim(), StringComparison.Ordinal);
     }
 
-    // Nothing the user can type into is left unnamed: every text and number
-    // box on the panel, with every row open, carries both references. The
-    // sweep is what makes the two pins above a rule rather than a list — a box
-    // added tomorrow with no name fails here without anyone remembering to
-    // extend a theory.
+    // Nothing the user can type into is left unnamed: every text box on the
+    // panel, with every row open, carries both references. The sweep is what
+    // makes the two pins above a rule rather than a list — a box added
+    // tomorrow with no name fails here without anyone remembering to extend
+    // a theory. The bounds declare type="text" and the other boxes no type,
+    // which is text too; the selector names both.
     [Fact]
-    public void EveryTextAndNumberInput_CarriesBothReferences()
+    public void EveryTextInput_CarriesBothReferences()
     {
         var cut = RenderExpanded(RowFacets);
 
-        var boxes = cut.FindAll("input[type='number'], input:not([type])").ToArray();
+        var boxes = cut.FindAll("input[type='text'], input:not([type])").ToArray();
 
         Assert.Equal(7, boxes.Length);
         Assert.All(boxes, box =>

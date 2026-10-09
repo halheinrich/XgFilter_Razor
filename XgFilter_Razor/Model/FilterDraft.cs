@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Globalization;
+using System.Text.RegularExpressions;
 using BgDataTypes_Lib;
 using XgFilter_Lib.Enums;
 using XgFilter_Lib.Filtering;
@@ -42,7 +43,7 @@ namespace XgFilter_Razor;
 /// writes its lists in, and so the order its JSON carries.
 /// </para>
 /// </summary>
-internal sealed record FilterDraft
+internal sealed partial record FilterDraft
 {
     /// <summary>The draft of a panel nobody has touched: every box empty, nothing checked.</summary>
     public static FilterDraft Empty { get; } = new();
@@ -179,11 +180,14 @@ internal sealed record FilterDraft
 
     /// <summary>
     /// The boxes holding text their field cannot be: a range bound that is
-    /// not a number, and a move-number bound that is not a whole number. This
-    /// is the editor's one rule of its own, and it is about representation,
-    /// not the domain — whether a number is an admissible bound (non-negative,
-    /// at least one, in order) stays the lib's question, asked of the parsed
-    /// config. Blank text is no bound and never appears here.
+    /// not a number, unfinished input such as <c>1e-</c> or <c>-</c>
+    /// included, and a move-number bound that is not a whole number. A number
+    /// takes either <c>.</c> or <c>,</c> as its decimal mark and has no
+    /// grouping (halheinrich/backgammon#379). This is the editor's one rule of
+    /// its own, and it is about representation, not the domain — whether a
+    /// number is an admissible bound (finite, non-negative, at least one, in
+    /// order) stays the lib's question, asked of the parsed config. Blank text
+    /// is no bound and never appears here.
     /// </summary>
     public IReadOnlySet<FilterField> UnrepresentableFields
     {
@@ -384,25 +388,44 @@ internal sealed record FilterDraft
     }
 
     // A range bound's text read as its field: blank text is no bound (true,
-    // null); a number is that number; anything else is unrepresentable
-    // (false, null). The number styles are the ones the panel has always
-    // read bounds with, and a NaN the styles accept is a number here — the
-    // lib rules it out as a bound.
+    // null); a number (BoundNumber) is that number; anything else is
+    // unrepresentable (false, null), unfinished text such as "1e-" included.
+    // The one mark the grammar admits is the decimal one, so reading it as a
+    // point gives the number the user wrote, never another. Whether the number
+    // is an admissible bound — finite, non-negative, in order — is the lib's
+    // verdict on the parsed config, and is not restated here: "1e999" reads
+    // as infinity, and the lib decides it.
     private static bool TryReadNumber(string text, out double? value)
     {
         value = null;
-        if (string.IsNullOrWhiteSpace(text)) return true;
+        var trimmed = text.Trim();
+        if (trimmed.Length == 0) return true;
 
-        if (!double.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out var number)) return false;
+        if (!BoundNumber().IsMatch(trimmed)) return false;
 
-        value = number;
+        value = double.Parse(trimmed.Replace(',', '.'), NumberStyles.Float, CultureInfo.InvariantCulture);
         return true;
     }
 
+    // What the four bound boxes accept as a number (halheinrich/backgammon#379,
+    // Hal's ruling of 2026-10-08): every spelling a browser's number control
+    // accepted — a sign, digits with or without a fraction or a bare
+    // fraction, and an exponent — plus a leading '+', a mark with nothing
+    // after it ("5." is 5), and either '.' or ',' as the decimal mark,
+    // whatever the locale. There is no grouping: the mantissa holds one mark
+    // at most, so "1,234" is 1.234, never 1234, and a second mark of either
+    // kind is no number at all — nothing is removed to make one. ASCII digits
+    // only; the space around the text is not part of it. The pattern box's
+    // commas are its own grammar's and never come here.
+    [GeneratedRegex(@"\A[+-]?(?:[0-9]+(?:[.,][0-9]*)?|[.,][0-9]+)(?:[eE][+-]?[0-9]+)?\z")]
+    private static partial Regex BoundNumber();
+
     // A move-number bound's text read as its field: a number that is a whole
-    // one within int's range — "3" and "3.0" alike, since both are three —
-    // and no other. "1.5" is a number but not a move number, so it is
-    // unrepresentable here rather than quietly no bound.
+    // one within int's range — "3", "3.0", "3,0" and "3e0" alike, since all
+    // are three — and no other. "1.5" and "1,5" are numbers but not move
+    // numbers, so they are unrepresentable here rather than quietly no bound;
+    // so is one past int's range, infinity included, which the config's field
+    // cannot hold. The floor is the lib's.
     private static bool TryReadWholeNumber(string text, out int? value)
     {
         value = null;

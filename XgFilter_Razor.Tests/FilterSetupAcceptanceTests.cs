@@ -580,6 +580,64 @@ public class FilterSetupAcceptanceTests : BunitContext
         _storage.Verify();
     }
 
+    // ── Unfinished numeric input (halheinrich/backgammon#379) ─────────────
+
+    public static TheoryData<FilterFacet?, string, string, string> UnfinishedBounds => new()
+    {
+        { null, "#errorMin", "1e-", "1e-3" },
+        { null, "#errorMax", "-", "0,5" },
+        { FilterFacet.MoveNumberRange, "#moveNumberMin", "+", "3,0" },
+        { FilterFacet.MoveNumberRange, "#moveNumberMax", ".", "12" },
+    };
+
+    // A bound on its way to being a number is the user's unfinished text, not
+    // a blank box: it closes the host's gate the moment it is typed, where a
+    // blank bound would leave the empty selection in effect; it is back on
+    // screen as typed after a remount, marked and unsavable; and correcting
+    // it — with either decimal mark — makes it a selection, its text still
+    // the user's. The error range is always on screen; a move number's row is
+    // opened first.
+    [Theory]
+    [MemberData(nameof(UnfinishedBounds))]
+    public async Task AnUnfinishedBound_IsNotBlank_AndSurvivesUnmountRemountAndCorrection(
+        FilterFacet? row, string box, string unfinished, string corrected)
+    {
+        _storage.ExpectFilterRestore(FilterRestoration.NothingStored);
+        _storage.ExpectFilterPanelMount(times: 2);
+        if (row is { } rowFacet)
+        {
+            _storage.ExpectFilterFoldToggle(open: true, BrowserStorageWriteAnswer.Succeeded, times: 2);
+            _storage.ExpectFilterRowsToggle([rowFacet], BrowserStorageWriteAnswer.Succeeded, times: 2);
+        }
+        Setup.ReportSource(TokenA);
+        var cut = Mount();
+        if (row is { } first) OpenRow(cut, first);
+        Assert.True(Setup.Current.IsInEffectFor(TokenA));
+
+        cut.Find(box).Input(unfinished);
+
+        Assert.False(Setup.Current.IsInEffectFor(TokenA));
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+
+        await NavigateAwayAsync();
+        var back = Mount();
+        if (row is { } again) OpenRow(back, again);
+
+        Assert.Equal(unfinished, back.Find(box).GetAttribute("value"));
+        Assert.Contains("is-invalid", back.Find(box).GetAttribute("class"));
+        Assert.True(Apply(back).HasAttribute("disabled"));
+        Assert.False(Setup.Current.IsInEffectFor(TokenA));
+        Assert.False(Setup.Current.TryGetSavable(out _));
+
+        back.Find(box).Input(corrected);
+
+        Assert.Equal(corrected, back.Find(box).GetAttribute("value"));
+        Assert.DoesNotContain("is-invalid", back.Find(box).GetAttribute("class"));
+        Assert.False(Apply(back).HasAttribute("disabled"));
+        Assert.True(Setup.Current.TryGetSavable(out _));
+        _storage.Verify();
+    }
+
     // Open the container and one row through their real toggles, waiting on
     // each to land.
     private static void OpenRow(IRenderedComponent<FilterSurface> cut, FilterFacet facet)
