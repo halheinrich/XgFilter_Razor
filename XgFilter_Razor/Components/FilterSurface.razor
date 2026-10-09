@@ -1,30 +1,28 @@
 @using XgFilter_Lib.Filtering
 @using XgFilter_Razor.Components.Internal
+@implements IDisposable
 
 @* ── FilterSurface.razor ─────────────────────────────────────────────────────
    The one consumer-facing filter component: owns FilterPanel + the saved-
-   filters mount of NamedEntriesPanel and the interaction wiring end to end
-   — load→stage,
-   save/save-as→snapshot-or-refuse, delete, applied-state mediation onto the
-   host's AppliedFilter holder, the saved-filters degrade notices, the
-   source-change rule, and the first-mount reconcile that seeds the panel's
-   committed config back from that holder. Hosts embed this and bind:
+   filters mount of NamedEntriesPanel and the interaction wiring between them
+   — load→stage, save/save-as→snapshot-or-refuse, delete, the saved-filters
+   degrade notices, and the setup-change rule for the saved-filters context.
 
-   - the AppliedFilter holder (host-registered, at whatever lifetime its
-     start-gate must survive),
-   - the FilterRestoreNotice (host-registered, app-scoped: the state behind
-     the restored-from-a-previous-session notice, which must survive
-     navigation and die on reload),
-   - a FilterSourceToken? for "which source is current" (told, never asks:
-     this component never sees pickers, paths, or capabilities — the host
-     mints tokens and the composite only compares them),
-   - an IDocumentStorage adapter for the saved-filters document (null =
-     no context), plus the host's CanPersist capability ruling and its
-     host-specific disabled-reason wording,
-   - the two panel-shaped events, re-raised after mediation,
-   - optionally, the panel's storage-unavailable report (OnStorageUnavailable,
-     halheinrich/backgammon#102), forwarded as-is: the panel discovers the
-     condition and the host owns the page's notice about it.
+   It holds no filter state. The selection, what is applied, and what this
+   boot's restoration found belong to the app-scoped FilterSetup
+   (halheinrich/backgammon#374, SPEC-filtering.md §4), which outlives this
+   component and every page that mounts it; the host reports its source to
+   that owner and reads its gate there. So the host binds only what is the
+   host's to say here:
+
+   - an IDocumentStorage adapter for the saved-filters document (null = no
+     context),
+   - the host's CanPersist capability ruling and its host-specific
+     disabled-reason wording.
+
+   Storage refusals go to the host's registered sink, not through this
+   component (IFilterStorageRefusalSink): a refusal can arrive after the
+   component that started the call has gone.
 
    Notice copy lives here — the producer — so every host degrades with
    identical wording; only host-specific reasons (FS-Access phrasing etc.)
@@ -45,14 +43,14 @@
                        PersistDisabledReason="@EffectivePersistDisabledReason" />
 }
 
-@* Save refusal: the current filter holds a value the panel cannot commit — an
-   unparseable position pattern or an error bound the lib rules invalid — so
-   TryGetEditedConfig refused (exactly the states Apply also refuses). The panel's
-   confirm/name affordances have already reacted, so a silent no-op would read
-   as a lost save — say why. The copy names no particular field: the offending
-   one is already marked in the panel with its own explanation, and a second
-   naming here would be a second encoding of which rule failed. Assertive, like
-   a failed user action.
+@* Save refusal: the current filter holds a value that cannot be committed — an
+   unparseable position pattern, an error bound the lib rules invalid, a box
+   whose text its field cannot be — so the snapshot was refused (exactly the
+   states Apply also refuses). The panel's confirm/name affordances have already
+   reacted, so a silent no-op would read as a lost save — say why. The copy
+   names no particular field: the offending one is already marked in the panel
+   with its own explanation, and a second naming here would be a second
+   encoding of which rule failed. Assertive, like a failed user action.
 
    An error, so dismissible (the umbrella's SPEC-notices.md, Fork A). The
    occurrence is one refused save and this component owns it outright:
@@ -112,84 +110,9 @@
     </Notice>
 }
 
-<FilterPanel @ref="_filterPanel"
-             RestoreNotice="RestoreNotice"
-             OnFilterConfigChanged="HandleFilterConfigChanged"
-             OnAppliedStateChanged="HandleAppliedStateChanged"
-             OnStorageUnavailable="OnStorageUnavailable" />
+<FilterPanel />
 
 @code {
-    /// <summary>
-    /// The host's applied-filter holder, mediated by this component: a commit
-    /// (Apply / Clear filters) <see cref="AppliedFilter.Set"/>s it keyed to
-    /// <see cref="Source"/>; an uncommitted-edits report
-    /// <see cref="AppliedFilter.Clear"/>s it; a clean re-affirm re-Sets it. A
-    /// <em>parameter</em>, not internal state, by necessity: the host's
-    /// start/run gates must survive whatever navigation the host allows, and
-    /// only a host-registered holder outlives this component. Hosts read
-    /// their gates from the holder (<see cref="AppliedFilter.ConfigFor"/>
-    /// against their own current token) and re-render off the events below.
-    /// Required: an unmediated holder is a gate that never moves.
-    /// <para>
-    /// It is also read, once, at this component's first render: when it
-    /// already carries a config applied for the current <see cref="Source"/>,
-    /// the panel resumes that selection — buffers and committed config both —
-    /// so a remount shows the applied selection and does not re-arm Apply
-    /// over it. That resume comes from here and never from the panel's
-    /// <c>localStorage</c> state: the holder resets on a browser reload and
-    /// storage does not, so a storage-seeded reference point would leave
-    /// Apply disabled with the gate closed; and storage may hold a stale
-    /// selection, or nothing, after a write the browser refused, so
-    /// storage-hydrated buffers would show a selection other than the
-    /// applied one.
-    /// </para>
-    /// </summary>
-    [Parameter, EditorRequired]
-    public AppliedFilter AppliedFilter { get; set; } = default!;
-
-    /// <summary>
-    /// The host's token for the current source, or <see langword="null"/>
-    /// while there is none. <b>The source-change rule is this component's</b>:
-    /// when the bound token changes (against the token seen at mount), the
-    /// setup ends — the holder is cleared, the panel forget-commits so Apply
-    /// re-arms and
-    /// re-reports through the normal path, the save-refusal notice clears,
-    /// and the saved-filters context reloads through the seam (or resets, on
-    /// a change to <see langword="null"/>). The first parameters-set
-    /// <em>initializes</em> the comparison token and loads the context —
-    /// nothing else, so a remount over an unchanged source leaves an
-    /// already-applied holder untouched and the host's gate armed. While
-    /// <see langword="null"/>, applies are not recorded on the holder.
-    /// <para>
-    /// This token is also the reconcile's key: the first render seeds the
-    /// panel's committed config from <see cref="AppliedFilter"/> only while
-    /// this token is non-null and the holder carries a config keyed to it, so
-    /// a config applied against some other source is never adopted as this
-    /// one's.
-    /// </para>
-    /// </summary>
-    [Parameter]
-    public FilterSourceToken? Source { get; set; }
-
-    /// <summary>
-    /// The host's restored-filter-notice state, forwarded to the inner panel
-    /// which arms it (first-render restore of a stored selection) and
-    /// dismisses it (first buffer-affecting gesture or commit). A
-    /// <em>parameter</em> for <see cref="AppliedFilter"/>'s reason: the
-    /// notice must survive whatever navigation the host allows and die on a
-    /// reload, and only a host-registered, app-scoped instance has that
-    /// lifetime by construction — a fresh instance per boot is the very fact
-    /// that distinguishes a reload from a remount within a setup. Hosts
-    /// register it and bind it; they never read or move it (the movers are
-    /// producer-internal), so the notice behaves identically in every host.
-    /// Required: an unbound notice would silently fall back to the panel's
-    /// own per-mount instance, which re-announces the restore on every
-    /// navigate-back — exactly the misfire the app-scoped lifetime exists to
-    /// prevent.
-    /// </summary>
-    [Parameter, EditorRequired]
-    public FilterRestoreNotice RestoreNotice { get; set; } = default!;
-
     /// <summary>
     /// The host's storage adapter for the saved-filters document, or
     /// <see langword="null"/> for a host (or mode) with no readable storage —
@@ -221,44 +144,9 @@
     [Parameter]
     public string? PersistDisabledReason { get; set; }
 
-    /// <summary>
-    /// The panel's commit event, re-raised to the host after this component
-    /// has recorded the applied state on <see cref="AppliedFilter"/> — same
-    /// name, payload, and per-commit contract as the inner panel's, so host
-    /// side effects (BgQuiz's match count) migrate mechanically. Required for
-    /// the panel's own silent-splat reasons.
-    /// </summary>
-    [Parameter, EditorRequired]
-    public EventCallback<FilterConfig> OnFilterConfigChanged { get; set; }
-
-    /// <summary>
-    /// The panel's per-gesture applied-state report, re-raised to the host
-    /// after mediation onto <see cref="AppliedFilter"/> — the committed
-    /// config the buffers now equal, or <see langword="null"/> when they
-    /// equal none. Same stateless, idempotent contract as the inner panel's:
-    /// assign from the payload (or just re-render and read the holder), never
-    /// diff against a remembered previous value. Required: it is the only
-    /// channel telling a host its gate went stale.
-    /// </summary>
-    [Parameter, EditorRequired]
-    public EventCallback<FilterConfig?> OnAppliedStateChanged { get; set; }
-
-    /// <summary>
-    /// The inner panel's storage-unavailable report, forwarded unmediated
-    /// (halheinrich/backgammon#102): raised once per mount of the panel, the
-    /// first time the browser refuses a <c>localStorage</c> call it makes.
-    /// The panel has already degraded — defaults where a read was refused,
-    /// in-memory state kept where a write was, Apply still delivering the
-    /// applied selection through the two events above — so this carries no
-    /// payload and asks nothing of the host but to know. What the page says,
-    /// and whether this is one page-level fact shared with the host's own
-    /// keys, is the host's (the condition notice under the umbrella's
-    /// <c>SPEC-notices.md</c>). Optional: a host that binds nothing behaves as
-    /// before. Forwarded rather than re-raised because this component holds
-    /// no state about storage and has nothing to mediate.
-    /// </summary>
-    [Parameter]
-    public EventCallback OnStorageUnavailable { get; set; }
+    // The app-scoped owner of the selection (SPEC-filtering.md §4). Injected:
+    // the same instance the host reads its gate from, by construction.
+    [Inject] private FilterSetup Setup { get; set; } = default!;
 
     // ── The saved-filters mount ─────────────────────────────────────────────
     //
@@ -270,7 +158,7 @@
     // Internal, not private: this repo's panel suite mounts the generic panel
     // with this very instance rather than retyping the ids and copy, which
     // would be the second encoding the preset exists to prevent. The same
-    // producer-side idiom as FilterPanel's storage-key constants; it widens
+    // producer-side idiom as FilterStorage's key constants; it widens
     // nothing for consumers.
     internal static readonly NamedEntriesSurface SavedFilters = new()
     {
@@ -283,179 +171,99 @@
         LoadedNoticeId = "savedFilterLoadedNotice",
     };
 
-    private FilterPanel? _filterPanel;
-
     // The composite-owned saved-filters lifecycle over the host's adapter.
     // Replaced (never mutated in place) when the Storage parameter changes;
     // starts over a null adapter so the pre-first-parameters state is the
     // same Disabled the null-adapter contract gives.
     private SavedFiltersStore _store = new(null);
 
-    // Last-seen parameter values, for change detection across parameter sets.
-    // _initialized separates the first set (initialize + load only — pin: no
-    // end-setup choreography on mount) from a genuine change.
+    // The owner's latest snapshot, delivered on attach and replaced at every
+    // change; and the attachment, released at disposal.
+    private FilterSetupSnapshot _setup = default!;
+    private IDisposable? _attachment;
+
+    // Last-seen Storage parameter, for change detection; _initialized
+    // separates the first parameters-set (build the store and load the
+    // context — nothing else) from a genuine change.
     private bool _initialized;
-    private FilterSourceToken? _lastSource;
     private IDocumentStorage? _lastStorage;
 
     // Composite-owned refusal copy for a save the panel optimistically
-    // confirmed but TryGetEditedConfig refused. Non-null exactly while a
-    // refusal stands, which makes it the refusal notice's whole state:
-    // cleared on any panel gesture, the next save attempt, a source change,
-    // and the user closing the notice.
+    // confirmed but the snapshot refused. Non-null exactly while a refusal
+    // stands, which makes it the refusal notice's whole state: cleared on any
+    // change to the selection or to what is applied, the next save attempt,
+    // the end of a setup, and the user closing the notice.
     private string? _saveRefusalNotice;
+
+    protected override void OnInitialized() => _attachment = Setup.Attach(OnSetupChanged);
+
+    // ── The setup-change rule for the saved-filters context ─────────────────
+    //
+    // The first snapshot arrives inside Attach, before anything renders: it is
+    // the existing setup, learned, and ends nothing — a remount over an
+    // unchanged source keeps everything, which is what the owner is for. Every
+    // later snapshot is a real change. A new generation is the end of a setup
+    // (the host reported a different source): the refusal posed against the
+    // outgoing context drops, and the context reloads through the seam — or
+    // resets, when there is no source. A change to the selection or to what is
+    // applied moots a stale save refusal, as any gesture on the panel always
+    // has — fixing the offending value is one, and so is committing.
+    private void OnSetupChanged(FilterSetupSnapshot next)
+    {
+        var previous = _setup;
+        _setup = next;
+        if (previous is null) return;
+
+        if (next.Generation != previous.Generation)
+        {
+            _saveRefusalNotice = null;
+            _ = InvokeAsync(ReloadContextAndRenderAsync);
+            return;
+        }
+
+        if (!next.Draft.Equals(previous.Draft) || !Equals(next.Baseline, previous.Baseline))
+        {
+            _saveRefusalNotice = null;
+        }
+
+        _ = InvokeAsync(StateHasChanged);
+    }
 
     protected override async Task OnParametersSetAsync()
     {
         if (!_initialized)
         {
-            // First parameters-set: initialize the comparison state and load
-            // the saved-filters context — nothing else. No holder clear, no
-            // forget-commit, no notice choreography: a remount over an
-            // unchanged source must leave an already-applied holder untouched
-            // and the host's gate armed.
             _initialized = true;
-            _lastSource = Source;
             _lastStorage = Storage;
             _store = new SavedFiltersStore(Storage);
             await ReloadContextAsync();
             return;
         }
 
-        var storageChanged = !ReferenceEquals(_lastStorage, Storage);
-        if (storageChanged)
+        if (!ReferenceEquals(_lastStorage, Storage))
         {
             _lastStorage = Storage;
             _store = new SavedFiltersStore(Storage);
-        }
-
-        if (_lastSource != Source)
-        {
-            _lastSource = Source;
-            EndSetup();
-            await ReloadContextAsync();
-        }
-        else if (storageChanged)
-        {
             await ReloadContextAsync();
         }
     }
 
-    // ── The first-mount reconcile ───────────────────────────────────────────
-    //
-    // The panel's committed config dies with each mount; the host's holder
-    // does not. So a fresh mount over a source the holder says is already
-    // filtered would arm Apply with nothing to do — the panel restores a
-    // selection from localStorage as *staged*, sees nothing committed, and
-    // offers a re-apply. Apply is offered only when there is something to do,
-    // so the mount reconciles: the panel resumes the applied selection from
-    // the holder — its buffers and its reference point both.
-    //
-    // From the holder, NEVER from storage — the rule this reconcile lives or
-    // dies by, in both directions. localStorage survives a full browser
-    // reload; the holder deliberately does not (it documents that
-    // reset-on-reload posture). A storage-seeded reference point would
-    // therefore, after a reload, disable Apply while the holder is empty: the
-    // host's start gate closed and the only control that could re-open it
-    // greyed out. And storage-hydrated buffers would, after an Apply whose
-    // write the browser refused (halheinrich/backgammon#102), show the
-    // previous selection while the holder — and the host's gate — said the
-    // new one was applied. The holder is the one source that cannot produce
-    // either lie, because it is the very state the gate reads; the applied
-    // selection it carries survives a same-source remount whatever storage
-    // holds or refuses to.
-    //
-    // Here rather than in the first OnParametersSetAsync because @ref is null
-    // until after the first render — copying EndSetup's `_filterPanel?.` idiom
-    // into that branch would silently no-op. The panel's own localStorage
-    // restore may still be in flight when this lands, or may already have
-    // run; ResumeApplied suppresses the one and overwrites the other, so the
-    // mount ends on the holder's selection whichever lands first.
-    //
-    // Silent by design: no OnAppliedStateChanged. ForgetCommitted reports
-    // because it creates news; a reconcile derives from the holder, which
-    // already agrees, so there is nothing to tell the host — and a raise here
-    // would break the ruled mount pin (initialize, never choreograph).
-    //
-    // Asked source-relatively, the only way the holder answers: ConfigFor
-    // yields a config exactly when one is applied *and* it belongs to this
-    // Source, so a config applied against some other source reads as nothing
-    // applied and the resume correctly declines.
-    protected override Task OnAfterRenderAsync(bool firstRender)
+    private async Task ReloadContextAndRenderAsync()
     {
-        if (firstRender
-            && _filterPanel is { } panel
-            && Source is { } source
-            && AppliedFilter.ConfigFor(source) is { } applied)
-        {
-            panel.ResumeApplied(applied);
-        }
-
-        return Task.CompletedTask;
-    }
-
-    // The source changed: nothing selected against the previous source may
-    // stay in force. Clear the holder (the applied state drops entirely — no
-    // residue survives a setup's end), re-arm Apply on the still-mounted
-    // panel (which re-reports null through the normal event path, correcting
-    // the host's gate), and drop any refusal notice posed against the
-    // outgoing context.
-    private void EndSetup()
-    {
-        AppliedFilter.Clear();
-        _saveRefusalNotice = null;
-        _filterPanel?.ForgetCommitted();
+        await ReloadContextAsync();
+        StateHasChanged();
     }
 
     private async Task ReloadContextAsync()
     {
-        if (Source is null)
+        if (_setup.Source is null)
             _store.Reset();
         else
             await _store.LoadAsync();
     }
 
-    // ── Applied-state mediation ─────────────────────────────────────────────
-
-    private async Task HandleFilterConfigChanged(FilterConfig cfg)
-    {
-        // Record the deliberate applied state — keyed to the source it was
-        // applied against — before the host hears about it: "a commit applies
-        // the filter" must not depend on the re-affirming report that
-        // follows. With no source there is nothing to apply against, so the
-        // holder stays untouched (the host still gets the event verbatim).
-        if (Source is { } source)
-        {
-            AppliedFilter.Set(cfg, source);
-        }
-
-        await OnFilterConfigChanged.InvokeAsync(cfg);
-    }
-
-    private async Task HandleAppliedStateChanged(FilterConfig? config)
-    {
-        // Any panel gesture moots a stale save refusal — fixing the offending
-        // value is itself one, and so is committing.
-        _saveRefusalNotice = null;
-
-        // Stateless, idempotent mirror of the payload onto the holder — the
-        // producer contract its consumers are held to, honored here too. No
-        // source ⇒ no mediation: the holder's last word belongs to the
-        // source-change rule, never to a report made against no source.
-        if (Source is { } source)
-        {
-            if (config is null)
-            {
-                AppliedFilter.Clear();
-            }
-            else
-            {
-                AppliedFilter.Set(config, source);
-            }
-        }
-
-        await OnAppliedStateChanged.InvokeAsync(config);
-    }
+    /// <summary>Stops observing the owner; anything the owner is doing carries on without this component.</summary>
+    public void Dispose() => _attachment?.Dispose();
 
     // ── Saved-filters mediation ─────────────────────────────────────────────
 
@@ -466,7 +274,8 @@
     // "{name} loaded." confirmation could outrun reality, standing over filters
     // that never moved (halheinrich/backgammon#173). Throwing is what keeps
     // that confirmation honest: the panel states it only once the request has
-    // come back without throwing.
+    // come back without throwing. A load is staged, never committed: an edit
+    // like any other, the owner's.
     private void HandleLoadRequested(string name)
     {
         _saveRefusalNotice = null;
@@ -474,15 +283,17 @@
             throw new InvalidOperationException(
                 $"The saved-filters document has no entry named '{name}'.");
 
-        _filterPanel?.LoadConfig(config);
+        Setup.Stage(config);
     }
 
     // One handler for both save gestures — row Save and save-as differ only
-    // in where the name comes from; the mediation (snapshot the live buffers
-    // or refuse) is identical by design.
+    // in where the name comes from; the mediation (snapshot the live draft or
+    // refuse) is identical by design. The snapshot is the draft's own verdict,
+    // the one Apply reads for the values, so no saved document is minted from
+    // a selection Apply would refuse for them.
     private async Task HandleSaveRequested(string name)
     {
-        if (_filterPanel is not null && _filterPanel.TryGetEditedConfig(out var config))
+        if (Setup.Current.TryGetSavable(out var config))
         {
             _saveRefusalNotice = null;
             await _store.SaveAsync(name, config);

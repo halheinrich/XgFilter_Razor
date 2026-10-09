@@ -4,28 +4,122 @@ using System.Text.RegularExpressions;
 using AngleSharp.Dom;
 using Bunit;
 using Microsoft.AspNetCore.Components;
+using Microsoft.Extensions.DependencyInjection;
 using BgDataTypes_Lib;
+using BgUiPrimitives_Razor;
+using BgUiPrimitives_Razor.TestSupport;
 using XgFilter_Lib.Enums;
 using XgFilter_Lib.Filtering;
 using XgFilter_Lib.Patterns;
 using XgFilter_Razor.Components.Internal;
+using XgFilter_Razor.Testing;
 
 namespace XgFilter_Razor.Tests;
 
 public class FilterPanelTests : BunitContext
 {
+    // The source this suite's host holds. The panel renders the app-scoped
+    // owner's state (FilterSetup), and a commit needs a source, so the fixture
+    // reports one the way a host does before the panel mounts.
+    private static readonly FilterSourceToken Source = FilterSourceToken.FromGeneration(1);
+
+    private readonly RecordingRefusalSink _refusals = new();
+    private readonly List<FilterConfig> _commits = [];
+    private int _published;
+
     public FilterPanelTests()
     {
-        // Loose mode — OnAfterRenderAsync issues localStorage.getItem calls;
-        // the mock returns default (null) for each, which is what the
-        // component expects for "no persisted state."
+        // Loose mode — storage is incidental to most of this suite: every read
+        // answers "nothing stored" and every write lands, through the real
+        // BrowserStorage. A test whose subject IS storage puts a
+        // BrowserStoragePlan on instead (Planned), and from then on every
+        // storage call is the plan's, strictly.
         JSInterop.Mode = JSRuntimeMode.Loose;
+        Services.AddSingleton(_refusals);
+        Services.AddFilterSurface<RecordingRefusalSink>();
+
+        Setup.ReportSource(Source);
+
+        // What the suite reads back: every snapshot the owner publishes after
+        // this one (_published), and each commit — a new baseline — in order.
+        FilterDraft? baseline = null;
+        Setup.Attach(snapshot =>
+        {
+            _published++;
+            if (!Equals(snapshot.Baseline, baseline))
+            {
+                baseline = snapshot.Baseline;
+                if (baseline is not null) _commits.Add(baseline.ToConfig());
+            }
+        });
+        _published = 0;
     }
 
-    // The three localStorage keys the panel persists under: the whole
-    // FilterConfig as one serialized blob, the set of expanded facet rows, and
+    private FilterSetup Setup => Services.GetRequiredService<FilterSetup>();
+
+    // The filter in effect for the suite's source, as a host reads its gate.
+    private FilterConfig? InEffect => Setup.Current.ConfigInEffectFor(Source);
+
+    // The selection the last commit (Apply or Clear filters) made the
+    // baseline, or null when nothing has been committed.
+    private FilterConfig? LastCommit => _commits.LastOrDefault();
+
+    // Put a storage plan on this test's runtime; every storage call is the
+    // plan's from here. The mount it is made for reads the boot's restoration
+    // and the panel's two display preferences, so a planned test declares
+    // those, here or through the helpers below.
+    private BrowserStoragePlan Planned() => BrowserStoragePlan.On(JSInterop);
+
+    // A boot whose restoration reads `restore`, answered, with nothing stored
+    // for the display preferences; then the expansions a test needs, each
+    // write planned as it will be made (the fold, then the open set after
+    // each row). Returns the plan for the test to extend and verify.
+    private (IRenderedComponent<FilterPanel> Cut, BrowserStoragePlan Plan) RenderRestoring(
+        BrowserStorageReadAnswer restore, params FilterFacet[] expand)
+    {
+        var plan = Planned();
+        plan.ExpectRead(BrowserStorageArea.Local, ConfigKey, restore);
+        plan.ExpectFilterPanelMount();
+        ExpectExpansion(plan, expand);
+
+        var cut = Render<FilterPanel>();
+        if (expand.Length > 0) ExpandFacets(cut, expand);
+        return (cut, plan);
+    }
+
+    // A boot with nothing stored for the selection and the panel's two
+    // display preferences answered as given — for the tests whose subject is
+    // how the panel restores them.
+    private (IRenderedComponent<FilterPanel> Cut, BrowserStoragePlan Plan) RenderWithPreferences(
+        BrowserStorageReadAnswer fold, BrowserStorageReadAnswer rows)
+    {
+        var plan = Planned();
+        plan.ExpectFilterRestore(FilterRestoration.NothingStored);
+        plan.ExpectRead(BrowserStorageArea.Local, MoreFiltersKey, fold);
+        plan.ExpectRead(BrowserStorageArea.Local, DisclosureKey, rows);
+        return (Render<FilterPanel>(), plan);
+    }
+
+    // The writes ExpandFacets makes on a folded panel with no row open.
+    private static void ExpectExpansion(BrowserStoragePlan plan, params FilterFacet[] expand)
+    {
+        if (expand.Length == 0) return;
+
+        plan.ExpectFilterFoldToggle(open: true, BrowserStorageWriteAnswer.Succeeded);
+        var open = new List<FilterFacet>();
+        foreach (var facet in expand)
+        {
+            open.Add(facet);
+            plan.ExpectFilterRowsToggle([.. open], BrowserStorageWriteAnswer.Succeeded);
+        }
+    }
+
+    // The three keys the surface keeps in local storage: the committed
+    // selection as one serialized blob, the set of expanded facet rows, and
     // whether the container over those rows is open — the last two user
-    // preference, deliberately outside the config blob.
+    // preference, deliberately outside the selection's blob. Independent
+    // literals, so a renamed key fails here: a rename silently loses every
+    // user's remembered state, which is a migration question, not a refactor.
     private const string ConfigKey = "xg_filter_config";
     private const string DisclosureKey = "xg_expandedFilters";
     private const string MoreFiltersKey = "xg_moreFiltersOpen";
@@ -106,30 +200,6 @@ public class FilterPanelTests : BunitContext
         return cut;
     }
 
-    private IRenderedComponent<FilterPanel> RenderExpanded(
-        Action<ComponentParameterCollectionBuilder<FilterPanel>> parameters,
-        params FilterFacet[] facets)
-    {
-        var cut = Render<FilterPanel>(parameters);
-        ExpandFacets(cut, facets);
-        return cut;
-    }
-
-    // Render with the applied-state channel captured into `reports`. A list,
-    // not a single field: OnAppliedStateChanged is per-gesture by contract, so
-    // how many times it fired is as much a part of the assertion as what it
-    // carried.
-    private IRenderedComponent<FilterPanel> RenderReporting(List<FilterConfig?> reports) =>
-        Render<FilterPanel>(parameters => parameters
-            .Add(p => p.OnAppliedStateChanged, (FilterConfig? c) => { reports.Add(c); }));
-
-    private IRenderedComponent<FilterPanel> RenderExpandedReporting(
-        List<FilterConfig?> reports, params FilterFacet[] facets)
-    {
-        var cut = RenderReporting(reports);
-        ExpandFacets(cut, facets);
-        return cut;
-    }
 
     // The two controls these tests drive to make the panel dirty and clean
     // again — the always-visible Error-range Min box and the Apply button.
@@ -201,36 +271,38 @@ public class FilterPanelTests : BunitContext
         Assert.Contains("Clear filters", cut.Markup);
     }
 
+    // The panel holds no filter state and reports to nobody: everything it
+    // shows comes from the app-scoped owner and every gesture goes to it
+    // (halheinrich/backgammon#374). So it declares no parameter at all — a
+    // callback or a state parameter added here would be a second channel for
+    // one fact, the defect the owner exists to end.
     [Fact]
-    public void EventCallbacks_AreAccepted()
+    public void ThePanel_DeclaresNoParameters()
     {
-        var cut = Render<FilterPanel>(parameters => parameters
-            .Add(p => p.OnFilterConfigChanged, (FilterConfig _) => { })
-            .Add(p => p.OnAppliedStateChanged, (FilterConfig? _) => { }));
-
-        Assert.NotNull(cut);
+        Assert.DoesNotContain(
+            typeof(FilterPanel).GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance),
+            p => p.GetCustomAttribute<ParameterAttribute>() is not null);
     }
 
     [Fact]
-    public async Task ApplyButton_RaisesFilterConfigCallback()
+    public async Task ApplyButton_CommitsTheSelection()
     {
-        FilterConfig? capturedConfig = null;
-        var cut = Render<FilterPanel>(parameters => parameters
-            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
+        var cut = Render<FilterPanel>();
 
-        var applyButton = cut.Find("button.btn-primary");
-        await applyButton.ClickAsync(new Microsoft.AspNetCore.Components.Web.MouseEventArgs());
+        await cut.Find("button.btn-primary").ClickAsync(new());
 
-        Assert.NotNull(capturedConfig);
-        Assert.Equal(DecisionTypeOption.Both, capturedConfig!.DecisionType);
+        Assert.NotNull(LastCommit);
+        Assert.Equal(DecisionTypeOption.Both, LastCommit!.DecisionType);
+        Assert.Equal(LastCommit, InEffect);
     }
 
-    // ── Apply gate & applied-state reporting ─────────────────────────────────
-    // The panel owns the cleanliness truth because it is the only party holding
-    // both the live edit buffers and the config it last committed. The tests
-    // below pin that truth's two surfaces — the Apply button's disabled state
-    // and the OnAppliedStateChanged payload — which are computed once in the
-    // component and must therefore never disagree.
+    // ── Apply gate & what is in effect ───────────────────────────────────────
+    // The owner holds both the draft and the baseline committed for this
+    // setup, so it answers whether the selection on screen is the one in
+    // effect, and the Apply gate is that same answer's other face. The tests
+    // below pin the two surfaces — the Apply button's disabled state and the
+    // host's read of what is in effect — which come from one snapshot and must
+    // therefore never disagree.
 
     // Nothing has been committed on a fresh mount, so Apply is offered from the
     // start and the panel volunteers no disabled-reason.
@@ -243,185 +315,156 @@ public class FilterPanelTests : BunitContext
         Assert.Empty(cut.FindAll("#applyDisabledReason"));
     }
 
-    // Applying commits: the button disables itself, the event reports the very
-    // config just committed (the same instance the config callback carried, not
-    // a fresh equal one), and the panel says why the button is dead.
+    // Applying commits: the draft becomes this setup's baseline, it is in
+    // effect for the host, the button disables itself, and the panel says why
+    // the button is dead.
     [Fact]
-    public async Task Apply_DisablesItself_AndReportsTheCommittedConfig()
+    public async Task Apply_DisablesItself_AndPutsTheSelectionInEffect()
     {
-        FilterConfig? committed = null;
-        var reports = new List<FilterConfig?>();
-        var cut = Render<FilterPanel>(parameters => parameters
-            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { committed = c; })
-            .Add(p => p.OnAppliedStateChanged, (FilterConfig? c) => { reports.Add(c); }));
+        var cut = Render<FilterPanel>();
 
         ErrorMin(cut).Input("0.05");
+        Assert.Null(InEffect);
         await Apply(cut).ClickAsync(new());
 
-        // The edit reported dirty, then the commit reported clean.
-        Assert.Equal(2, reports.Count);
-        Assert.Null(reports[0]);
-        Assert.NotNull(committed);
-        Assert.Same(committed, reports[1]);
-
+        Assert.Equal(0.05, Assert.Single(_commits).ErrorMin);
+        Assert.Equal(LastCommit, InEffect);
         Assert.True(Apply(cut).HasAttribute("disabled"));
         Assert.Contains("already applied", cut.Find("#applyDisabledReason").TextContent);
     }
 
-    // Any edit moves the buffers off the committed config: Apply re-opens, the
-    // event reports null, and the disabled-reason disappears rather than going
-    // stale.
+    // Any edit moves the draft off the baseline: nothing is in effect, Apply
+    // re-opens, and the disabled-reason disappears rather than going stale.
     [Fact]
-    public async Task EditAfterApply_ReEnablesApply_AndReportsNull()
+    public async Task EditAfterApply_ReEnablesApply_AndNothingIsInEffect()
     {
-        var reports = new List<FilterConfig?>();
-        var cut = RenderReporting(reports);
+        var cut = Render<FilterPanel>();
 
         await Apply(cut).ClickAsync(new());
         Assert.True(Apply(cut).HasAttribute("disabled"));
 
         ErrorMin(cut).Input("0.05");
 
-        Assert.Null(reports[^1]);
+        Assert.Null(InEffect);
         Assert.False(Apply(cut).HasAttribute("disabled"));
         Assert.Empty(cut.FindAll("#applyDisabledReason"));
     }
 
-    // The wedge this design exists to kill. Deriving cleanliness from value
-    // equality — rather than latching a one-way dirty flag — means an edit
-    // undone back to the committed values counts as clean again, so the panel
-    // re-reports the committed config and closes the gate. Under a dirty flag
-    // the panel would stay "dirty" with Apply's own equality check disabling
-    // the only control that could clear it: a consumer gating on the flag would
-    // be stranded with no recovery gesture.
+    // The wedge this design exists to kill. What is in effect is derived from
+    // value equality against the baseline — not a one-way dirty flag — so an
+    // edit undone back to the applied values is in effect again and the gate
+    // closes. Under a dirty flag the selection would stay "dirty" with Apply's
+    // own equality check disabling the only control that could clear it: a
+    // host gating on the flag would be stranded with no recovery gesture.
     [Fact]
-    public async Task EditUndoneBackToCommittedValues_GoesCleanAgain()
+    public async Task EditUndoneBackToCommittedValues_IsInEffectAgain()
     {
-        FilterConfig? committed = null;
-        var reports = new List<FilterConfig?>();
-        var cut = Render<FilterPanel>(parameters => parameters
-            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { committed = c; })
-            .Add(p => p.OnAppliedStateChanged, (FilterConfig? c) => { reports.Add(c); }));
+        var cut = Render<FilterPanel>();
 
         ErrorMin(cut).Input("0.05");
         await Apply(cut).ClickAsync(new());
+        var applied = LastCommit;
 
         ErrorMin(cut).Input("0.1");
-        Assert.Null(reports[^1]);
+        Assert.Null(InEffect);
         Assert.False(Apply(cut).HasAttribute("disabled"));
 
         ErrorMin(cut).Input("0.05");
-        Assert.Same(committed, reports[^1]);
+        Assert.Equal(applied, InEffect);
         Assert.True(Apply(cut).HasAttribute("disabled"));
     }
 
-    // Clear filters is a commit like Apply — it persists and raises the defaults
-    // config — so it moves the committed config too: the event reports the
-    // defaults, Apply disables, and the next edit re-opens it.
+    // Clear filters is a commit like Apply — the empty selection becomes the
+    // baseline and is remembered — so the empty config is in effect, Apply
+    // disables, and the next edit re-opens it.
     [Fact]
     public async Task ClearFilters_CommitsTheDefaults_AndDisablesApply()
     {
-        FilterConfig? committed = null;
-        var reports = new List<FilterConfig?>();
-        var cut = Render<FilterPanel>(parameters => parameters
-            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { committed = c; })
-            .Add(p => p.OnAppliedStateChanged, (FilterConfig? c) => { reports.Add(c); }));
+        var cut = Render<FilterPanel>();
 
         ErrorMin(cut).Input("0.05");
         await cut.Find("#clearFilters").ClickAsync(new());
 
-        Assert.NotNull(committed);
-        Assert.Null(committed!.ErrorMin);
-        Assert.Same(committed, reports[^1]);
+        Assert.NotNull(LastCommit);
+        Assert.Null(LastCommit!.ErrorMin);
+        Assert.Equal(LastCommit, InEffect);
         Assert.True(Apply(cut).HasAttribute("disabled"));
 
         ErrorMin(cut).Input("0.05");
-        Assert.Null(reports[^1]);
+        Assert.Null(InEffect);
         Assert.False(Apply(cut).HasAttribute("disabled"));
     }
 
-    // ForgetCommitted is the programmatic stand-in for the remount that makes
-    // "a new folder re-enables Apply" fall out for free: a host (via the
-    // composite) that keeps the panel mounted across a source change drops the
-    // committed config instead. Apply re-arms, the event re-reports through
-    // the normal path — necessarily null, nothing is committed any more — and
-    // the buffers stay exactly as the user left them.
+    // A source change ends the setup: the baseline drops, so nothing is in
+    // effect and Apply re-arms, and the draft — the user's choices — stays
+    // exactly as they left it (§1, "The dir is changed"). The host reports it;
+    // the still-mounted panel follows the owner.
     [Fact]
-    public async Task ForgetCommitted_ReArmsApply_ReportsNull_LeavesBuffersUntouched()
+    public async Task ASourceChange_ReArmsApply_LeavesTheDraftUntouched()
     {
-        var reports = new List<FilterConfig?>();
-        var cut = RenderReporting(reports);
+        var cut = Render<FilterPanel>();
 
         ErrorMin(cut).Input("0.05");
         await Apply(cut).ClickAsync(new());
         Assert.True(Apply(cut).HasAttribute("disabled"));
-        Assert.Equal(2, reports.Count); // the edit's null, the commit's config
 
-        await cut.InvokeAsync(() => cut.Instance.ForgetCommitted());
+        var next = FilterSourceToken.FromGeneration(2);
+        await cut.InvokeAsync(() => Setup.ReportSource(next));
 
-        // One more report, through the normal applied-state path.
-        Assert.Equal(3, reports.Count);
-        Assert.Null(reports[^1]);
+        Assert.Null(Setup.Current.ConfigInEffectFor(next));
         Assert.False(Apply(cut).HasAttribute("disabled"));
         Assert.Empty(cut.FindAll("#applyDisabledReason"));
-        // The buffers are untouched — the user's selection stays staged.
         Assert.Equal("0.05", ErrorMin(cut).GetAttribute("value"));
     }
 
-    // LoadConfig stages, never commits — so staging anything other than the
-    // committed config leaves the buffers matching nothing: null reported,
-    // Apply re-opened.
+    // Staging a saved filter stages, never commits — so staging anything
+    // other than the applied selection leaves nothing in effect, and Apply
+    // re-opens.
     [Fact]
-    public async Task LoadConfig_DifferingFromCommitted_ReportsNull_AndEnablesApply()
+    public async Task Staging_ADifferentSelection_LeavesNothingInEffect_AndEnablesApply()
     {
-        var reports = new List<FilterConfig?>();
-        var cut = RenderReporting(reports);
+        var cut = Render<FilterPanel>();
 
         await Apply(cut).ClickAsync(new());
         Assert.True(Apply(cut).HasAttribute("disabled"));
 
-        await cut.InvokeAsync(() => cut.Instance.LoadConfig(new FilterConfig { Players = ["Magriel"] }));
+        await cut.InvokeAsync(() => Setup.Stage(new FilterConfig { Players = ["Magriel"] }));
 
-        Assert.Null(reports[^1]);
+        Assert.Null(InEffect);
+        Assert.Single(_commits);
         Assert.False(Apply(cut).HasAttribute("disabled"));
     }
 
-    // ...and staging exactly what was committed is a genuinely clean state, so
-    // it is reported as one. The staged instance is a different object built
-    // independently, which is the point: the comparison is FilterConfig's value
-    // equality, not reference identity.
+    // ...and staging exactly what was applied is a genuinely clean state: it is
+    // in effect. The staged instance is built independently, which is the
+    // point: the comparison is FilterConfig's value equality, not identity.
     [Fact]
-    public async Task LoadConfig_OfExactlyTheCommittedConfig_ReportsClean()
+    public async Task Staging_ExactlyTheAppliedSelection_IsInEffect()
     {
-        FilterConfig? committed = null;
-        var reports = new List<FilterConfig?>();
-        var cut = Render<FilterPanel>(parameters => parameters
-            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { committed = c; })
-            .Add(p => p.OnAppliedStateChanged, (FilterConfig? c) => { reports.Add(c); }));
+        var cut = Render<FilterPanel>();
 
         ErrorMin(cut).Input("0.05");
         await Apply(cut).ClickAsync(new());
 
         ErrorMin(cut).Input("0.9");
-        Assert.Null(reports[^1]);
+        Assert.Null(InEffect);
 
-        await cut.InvokeAsync(() => cut.Instance.LoadConfig(new FilterConfig { ErrorMin = 0.05 }));
+        await cut.InvokeAsync(() => Setup.Stage(new FilterConfig { ErrorMin = 0.05 }));
 
-        Assert.Same(committed, reports[^1]);
+        Assert.Equal(new FilterConfig { ErrorMin = 0.05 }, InEffect);
         Assert.True(Apply(cut).HasAttribute("disabled"));
     }
 
-    // Validity and cleanliness compose: both must hold for Apply to be offered.
-    // Here the selection is genuinely dirty — the event says so — yet the
+    // Validity and being in effect compose: a valid draft not in effect is
+    // what Apply needs. Here nothing is in effect — the draft moved — yet the
     // unparseable pattern text keeps Apply disabled. The panel volunteers no
     // disabled-reason line for this case: the pattern field's own
     // invalid-feedback already explains it, and repeating it here would be a
     // second encoding of the same rule.
     [Fact]
-    public async Task InvalidPositionPattern_DisablesApply_EvenWhileDirty()
+    public async Task InvalidPositionPattern_DisablesApply_ThoughNothingIsInEffect()
     {
-        var reports = new List<FilterConfig?>();
-        var cut = RenderExpandedReporting(reports, FilterFacet.PositionPattern);
+        var cut = RenderExpanded(FilterFacet.PositionPattern);
 
         cut.Find("#positionPattern").Input("[6,2,]");
         await Apply(cut).ClickAsync(new());
@@ -429,118 +472,70 @@ public class FilterPanelTests : BunitContext
 
         cut.Find("#positionPattern").Input("[6,2");
 
-        Assert.Null(reports[^1]);
+        Assert.Null(InEffect);
         Assert.True(Apply(cut).HasAttribute("disabled"));
         Assert.Empty(cut.FindAll("#applyDisabledReason"));
     }
 
-    // A fresh mount is silent. The first-render localStorage restore *stages* a
-    // stored selection — it does not commit one — so neither event fires and
-    // Apply starts enabled even though every control is populated. That is the
-    // pre-existing restore contract, and the committed-config state must not
-    // disturb it.
+    // A reload ends the setup. The boot's restoration puts the stored
+    // selection on screen — it does not commit it — so nothing is in effect,
+    // nothing was committed, and Apply is offered over a fully populated
+    // panel (§4: choices outlive the setup, consent does not).
     [Fact]
-    public void FreshMount_RestoringStoredConfig_RaisesNothing_AndLeavesApplyEnabled()
+    public void ARestoredSelection_IsOnScreen_NotInEffect_AndApplyIsOffered()
     {
-        JSInterop.Setup<string?>("localStorage.getItem", ConfigKey)
-            .SetResult(new FilterConfig { ErrorMin = 0.05 }.ToJson());
-
-        FilterConfig? committed = null;
-        var reports = new List<FilterConfig?>();
-        var cut = Render<FilterPanel>(parameters => parameters
-            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { committed = c; })
-            .Add(p => p.OnAppliedStateChanged, (FilterConfig? c) => { reports.Add(c); }));
+        var (cut, plan) = RenderRestoring(FilterSurfaceStorage.RestoreAnswer(new FilterConfig { ErrorMin = 0.05 }));
 
         Assert.Equal("0.05", ErrorMin(cut).GetAttribute("value"));
-        Assert.Null(committed);
-        Assert.Empty(reports);
+        Assert.Equal(FilterRestoration.Restored, Setup.Current.Restoration);
+        Assert.Empty(_commits);
+        Assert.Null(InEffect);
         Assert.False(Apply(cut).HasAttribute("disabled"));
+        plan.Verify();
     }
 
-    // The per-gesture rationale, as a test. This panel has committed nothing,
-    // so the first edit is not a *transition* from any state it knows about —
-    // and yet it must report null, because the consumer on the other side may
-    // have survived a remount still holding a config from the previous mount
-    // and gating on it. A transition-only event would be silent here, which is
-    // precisely the state where the consumer is most wrong. Don't "optimize"
-    // this into firing only on change.
-    [Fact]
-    public void FreshMount_ThenFirstEdit_ReportsNull()
-    {
-        JSInterop.Setup<string?>("localStorage.getItem", ConfigKey)
-            .SetResult(new FilterConfig { ErrorMin = 0.05 }.ToJson());
-
-        var reports = new List<FilterConfig?>();
-        var cut = RenderReporting(reports);
-        Assert.Empty(reports);
-
-        ErrorMin(cut).Input("0.09");
-
-        Assert.Equal([null], reports);
-    }
-
-    // A second Apply on an unchanged selection commits nothing — no repeat
-    // OnFilterConfigChanged, no second config write. ApplyAsync guards on
-    // CanApply as well as rendering `disabled`, matching NamedEntriesPanel's
-    // handler-side gates, so the contract survives an event dispatch that
-    // ignores the disabled attribute.
+    // A second Apply on an unchanged selection commits nothing — no second
+    // baseline, no second write. The owner guards Apply on the gate the button
+    // renders `disabled` from, so the contract survives an event dispatch
+    // that ignores the disabled attribute.
     [Fact]
     public async Task ApplyTwiceWithoutEditing_CommitsOnlyOnce()
     {
-        var commits = 0;
-        var reports = new List<FilterConfig?>();
-        var cut = Render<FilterPanel>(parameters => parameters
-            .Add(p => p.OnFilterConfigChanged, (FilterConfig _) => { commits++; })
-            .Add(p => p.OnAppliedStateChanged, (FilterConfig? c) => { reports.Add(c); }));
+        var plan = Planned();
+        plan.ExpectFilterRestore(FilterRestoration.NothingStored);
+        plan.ExpectFilterPanelMount();
+        plan.ExpectFilterCommit(new FilterConfig { ErrorMin = 0.05 }, BrowserStorageWriteAnswer.Succeeded);
+        var cut = Render<FilterPanel>();
 
         ErrorMin(cut).Input("0.05");
         await Apply(cut).ClickAsync(new());
         await Apply(cut).ClickAsync(new());
 
-        Assert.Equal(1, commits);
-        Assert.Equal(2, reports.Count);
-        Assert.Single(JSInterop.Invocations["localStorage.setItem"],
-            i => (string?)i.Arguments[0] == ConfigKey);
+        Assert.Single(_commits);
+        plan.Verify();
     }
 
     // The stale-binding half of the silent-splat discipline. Razor emits an
     // unrecognized component attribute without complaint at build time, so a
-    // consumer still carrying `OnFilterDirty="…"` after this panel replaced it
-    // compiles green. It must not then run green: this panel deliberately
-    // declares no CaptureUnmatchedValues catch-all, so the renderer rejects the
-    // unmatched attribute outright. Built here through RenderTreeBuilder because
-    // that is precisely what a stale Razor binding compiles down to — a named
-    // AddAttribute the component has no property for. Adding a catch-all to the
-    // panel would silently turn this exception back into a dead handler.
+    // consumer still carrying a binding this panel no longer declares —
+    // `OnAppliedStateChanged`, retired with the owner — compiles green. It
+    // must not then run green: this panel deliberately declares no
+    // CaptureUnmatchedValues catch-all, so the renderer rejects the unmatched
+    // attribute outright. Built here through RenderTreeBuilder because that is
+    // precisely what a stale Razor binding compiles down to — a named
+    // AddAttribute the component has no property for. Adding a catch-all to
+    // the panel would silently turn this exception back into a dead handler.
     [Fact]
     public void StaleParameterBinding_ThrowsAtRender()
     {
         var ex = Assert.Throws<InvalidOperationException>(() => Render(builder =>
         {
             builder.OpenComponent<FilterPanel>(0);
-            builder.AddAttribute(1, nameof(FilterPanel.OnFilterConfigChanged),
-                EventCallback.Factory.Create<FilterConfig>(this, _ => { }));
-            builder.AddAttribute(2, nameof(FilterPanel.OnAppliedStateChanged),
-                EventCallback.Factory.Create<FilterConfig?>(this, _ => { }));
-            builder.AddAttribute(3, "OnFilterDirty", EventCallback.Empty);
+            builder.AddAttribute(1, "OnAppliedStateChanged", EventCallback.Empty);
             builder.CloseComponent();
         }));
 
-        Assert.Contains("OnFilterDirty", ex.Message);
-    }
-
-    // The silent-splat discipline: a consumer that drops this binding must fail
-    // at build time (RZ2012), not silently lose its gate at runtime. Both
-    // in-tree consumers genuinely require it, so the attribute is part of the
-    // contract, not decoration.
-    [Fact]
-    public void OnAppliedStateChanged_IsEditorRequired()
-    {
-        var property = typeof(FilterPanel).GetProperty(nameof(FilterPanel.OnAppliedStateChanged));
-
-        Assert.NotNull(property);
-        Assert.NotNull(property!.GetCustomAttribute<ParameterAttribute>());
-        Assert.NotNull(property.GetCustomAttribute<EditorRequiredAttribute>());
+        Assert.Contains("OnAppliedStateChanged", ex.Message);
     }
 
     // Pins the rendered control labels to the lib's [Description] text from
@@ -611,36 +606,56 @@ public class FilterPanelTests : BunitContext
         Assert.Empty(cut.FindAll("input[id^='plt_']"));
     }
 
-    // Round-trips through the single-key persistence path: set a spread of
-    // controls, Apply (which writes one xg_filter_config blob via
-    // FilterConfig.ToJson), then re-mount with the captured blob fed back through
-    // the getItem mock and assert the restored controls reflect what was applied.
+    // The single-key persistence path, in its two halves. Apply writes the
+    // committed selection as one blob, in the lib's own JSON for it — the plan
+    // holds the write to exactly that value — and a later boot's restoration
+    // of that same blob puts the same selection back on screen.
     [Fact]
-    public async Task PersistedConfig_RoundTripsAcrossRemount()
+    public async Task Apply_WritesTheSelectionAsTheLibsJson()
     {
+        var applied = new FilterConfig
+        {
+            Players = ["Hal", "Magriel"],
+            ErrorMin = 0.05,
+            DecisionType = DecisionTypeOption.CheckerPlaysOnly,
+            ContactTypes = [ContactType.Race],
+        };
+        var plan = Planned();
+        plan.ExpectFilterRestore(FilterRestoration.NothingStored);
+        plan.ExpectFilterPanelMount();
+        ExpectExpansion(plan, FilterFacet.Players, FilterFacet.DecisionType, FilterFacet.ContactTypes);
+        plan.ExpectWrite(BrowserStorageArea.Local, ConfigKey, applied.ToJson(), BrowserStorageWriteAnswer.Succeeded);
         var cut = RenderExpanded(FilterFacet.Players, FilterFacet.DecisionType, FilterFacet.ContactTypes);
 
         cut.Find("input[placeholder='e.g. Hal, Magriel']").Input("Hal, Magriel");
         cut.Find("#errorMin").Input("0.05");
         cut.Find("#dt_CheckerPlaysOnly").Change(true);
         cut.Find("#ct_Race").Change(true);
-
         await cut.Find("button.btn-primary").ClickAsync(new());
 
-        // Pull the exact JSON the panel persisted — one blob under one key.
-        var stored = JSInterop.Invocations["localStorage.setItem"]
-            .Last(i => (string?)i.Arguments[0] == ConfigKey)
-            .Arguments[1] as string;
-        Assert.NotNull(stored);
+        plan.Verify();
+    }
 
-        // Feed it back through the getItem mock and mount a fresh panel.
-        JSInterop.Setup<string?>("localStorage.getItem", ConfigKey).SetResult(stored);
-        var restored = RenderExpanded(FilterFacet.Players, FilterFacet.DecisionType, FilterFacet.ContactTypes);
+    [Fact]
+    public void Restore_PutsTheStoredSelectionOnScreen()
+    {
+        var stored = new FilterConfig
+        {
+            Players = ["Hal", "Magriel"],
+            ErrorMin = 0.05,
+            DecisionType = DecisionTypeOption.CheckerPlaysOnly,
+            ContactTypes = [ContactType.Race],
+        };
+
+        var (restored, plan) = RenderRestoring(
+            BrowserStorageReadAnswer.Stored(stored.ToJson()),
+            FilterFacet.Players, FilterFacet.DecisionType, FilterFacet.ContactTypes);
 
         Assert.Equal("Hal, Magriel", restored.Find("input[placeholder='e.g. Hal, Magriel']").GetAttribute("value"));
         Assert.Equal("0.05", restored.Find("#errorMin").GetAttribute("value"));
         Assert.True(restored.Find("#dt_CheckerPlaysOnly").HasAttribute("checked"));
         Assert.True(restored.Find("#ct_Race").HasAttribute("checked"));
+        plan.Verify();
     }
 
     // Silent-splat guard for the Contact-type section: an unbound Razor checkbox
@@ -650,17 +665,13 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public async Task ContactTypeCheckbox_FlowsIntoEmittedConfig()
     {
-        FilterConfig? capturedConfig = null;
-        var cut = RenderExpanded(
-            parameters => parameters
-                .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }),
-            FilterFacet.ContactTypes);
+        var cut = RenderExpanded(FilterFacet.ContactTypes);
 
         cut.Find("#ct_Contact").Change(true);
         await cut.Find("button.btn-primary").ClickAsync(new());
 
-        Assert.NotNull(capturedConfig);
-        Assert.Contains(ContactType.Contact, capturedConfig!.ContactTypes);
+        Assert.NotNull(LastCommit);
+        Assert.Contains(ContactType.Contact, LastCommit!.ContactTypes);
     }
 
     // The three selectable AnalysisModes, in a fixed helper so every depth test
@@ -838,24 +849,20 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public async Task AnalysisDepth_CanonicalSelection_EmitsAllSixFieldsRaw()
     {
-        FilterConfig? capturedConfig = null;
-        var cut = RenderExpanded(
-            parameters => parameters
-                .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }),
-            FilterFacet.AnalysisDepth);
+        var cut = RenderExpanded(FilterFacet.AnalysisDepth);
 
         cut.Find("#md_Rollout").Change(true);
         CheckModeAndExpandLevels(cut, AnalysisMode.Evaluation);
         cut.Find("#lv_Evaluation_XgRollerPlusPlus").Change(true);
         await cut.Find("button.btn-primary").ClickAsync(new());
 
-        Assert.NotNull(capturedConfig);
-        Assert.True(capturedConfig!.IncludeEvaluations);
-        Assert.Equal(new[] { AnalysisLevel.XgRollerPlusPlus }, capturedConfig.EvaluationLevels);
-        Assert.True(capturedConfig.IncludeRollouts);
-        Assert.Empty(capturedConfig.RolloutLevels);
-        Assert.False(capturedConfig.IncludeBookRollouts);
-        Assert.Empty(capturedConfig.BookRolloutLevels);
+        Assert.NotNull(LastCommit);
+        Assert.True(LastCommit!.IncludeEvaluations);
+        Assert.Equal(new[] { AnalysisLevel.XgRollerPlusPlus }, LastCommit.EvaluationLevels);
+        Assert.True(LastCommit.IncludeRollouts);
+        Assert.Empty(LastCommit.RolloutLevels);
+        Assert.False(LastCommit.IncludeBookRollouts);
+        Assert.Empty(LastCommit.BookRolloutLevels);
     }
 
     // Silent-splat guard for the level axis, sharpened to the per-mode
@@ -865,38 +872,30 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public async Task LevelCheckbox_FlowsIntoItsOwnModesListOnly()
     {
-        FilterConfig? capturedConfig = null;
-        var cut = RenderExpanded(
-            parameters => parameters
-                .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }),
-            FilterFacet.AnalysisDepth);
+        var cut = RenderExpanded(FilterFacet.AnalysisDepth);
 
         CheckModeAndExpandLevels(cut, AnalysisMode.BookRollout);
         cut.Find("#lv_BookRollout_Unknown").Change(true);
         cut.Find("#lv_BookRollout_Ply3").Change(true);
         await cut.Find("button.btn-primary").ClickAsync(new());
 
-        Assert.NotNull(capturedConfig);
-        Assert.Contains(AnalysisLevel.Unknown, capturedConfig!.BookRolloutLevels);
-        Assert.Contains(AnalysisLevel.Ply3, capturedConfig.BookRolloutLevels);
-        Assert.Equal(2, capturedConfig.BookRolloutLevels.Count);
-        Assert.Empty(capturedConfig.EvaluationLevels);
-        Assert.Empty(capturedConfig.RolloutLevels);
+        Assert.NotNull(LastCommit);
+        Assert.Contains(AnalysisLevel.Unknown, LastCommit!.BookRolloutLevels);
+        Assert.Contains(AnalysisLevel.Ply3, LastCommit.BookRolloutLevels);
+        Assert.Equal(2, LastCommit.BookRolloutLevels.Count);
+        Assert.Empty(LastCommit.EvaluationLevels);
+        Assert.Empty(LastCommit.RolloutLevels);
     }
 
     // The deliberate keep-on-untoggle behavior: unchecking a mode hides its
-    // group but keeps the checked levels — in the buffer, so re-toggling
-    // restores the user's selection, and in the emitted config, where the lib
+    // group but keeps the checked levels — in the draft, so re-toggling
+    // restores the user's selection, and in the committed config, where the lib
     // guarantees a level list whose toggle is off is inert (no activation, no
     // constraint). An exploratory untoggle costs nothing.
     [Fact]
     public async Task LevelSelections_SurviveModeUntoggle()
     {
-        FilterConfig? capturedConfig = null;
-        var cut = RenderExpanded(
-            parameters => parameters
-                .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }),
-            FilterFacet.AnalysisDepth);
+        var cut = RenderExpanded(FilterFacet.AnalysisDepth);
 
         CheckModeAndExpandLevels(cut, AnalysisMode.Rollout);
         cut.Find("#lv_Rollout_Ply4").Change(true);
@@ -905,59 +904,55 @@ public class FilterPanelTests : BunitContext
         Assert.Empty(cut.FindAll("input[id^='lv_Rollout_']"));
 
         await cut.Find("button.btn-primary").ClickAsync(new());
-        Assert.NotNull(capturedConfig);
-        Assert.False(capturedConfig!.IncludeRollouts);
-        Assert.Equal(new[] { AnalysisLevel.Ply4 }, capturedConfig.RolloutLevels);
+        Assert.NotNull(LastCommit);
+        Assert.False(LastCommit!.IncludeRollouts);
+        Assert.Equal(new[] { AnalysisLevel.Ply4 }, LastCommit.RolloutLevels);
 
         cut.Find("#md_Rollout").Change(true);
         Assert.True(cut.Find("#lv_Rollout_Ply4").HasAttribute("checked"));
     }
 
-    // Every depth edit control must report applied state so the parent can
-    // disable Run until Apply — and neither disclosure tier may: expanding the
+    // Every depth control is an edit the owner hears — it publishes the
+    // change, so a host's gate follows — and neither disclosure tier is:
     // opening the facet's own row and expanding a level group are both
-    // navigation, not edits.
+    // navigation, and the owner publishes nothing for them.
     [Fact]
-    public void AnalysisDepthControls_ReportAppliedState_DisclosuresDoNot()
+    public void AnalysisDepthControls_AreEdits_DisclosuresAreNot()
     {
-        var reports = new List<FilterConfig?>();
-        var cut = RenderReporting(reports);
+        var cut = Render<FilterPanel>();
+        _published = 0;   // the mount's restoration settling is a change of its own
 
         ExpandFacets(cut, FilterFacet.AnalysisDepth);
-        Assert.Empty(reports);
+        Assert.Equal(0, _published);
 
         cut.Find("#md_Rollout").Change(true);
-        Assert.Single(reports);
+        Assert.Equal(1, _published);
 
         cut.Find("#lvlToggle_Rollout").Click();
-        Assert.Single(reports);
+        Assert.Equal(1, _published);
 
         cut.Find("#lv_Rollout_Ply4").Change(true);
-        Assert.Equal(2, reports.Count);
+        Assert.Equal(2, _published);
 
         cut.Find("#md_BookRollout").Change(true);
-        Assert.Equal(3, reports.Count);
+        Assert.Equal(3, _published);
     }
 
     // The level-group disclosure is deliberately unpersisted — unlike the two
-    // disclosures above it, each with its own localStorage key, toggling a
-    // level group writes nothing: the collapsed badge already carries
-    // everything the closed state hides, so there is no choice worth
-    // remembering. The only permitted writes in this scenario are those two
-    // keys, from the clicks RenderExpanded needs to reach the row.
+    // disclosures above it, each with its own key, toggling a level group
+    // writes nothing: the collapsed badge already carries everything the
+    // closed state hides, so there is no choice worth remembering. The plan
+    // holds the scenario to the writes the expansion itself makes.
     [Fact]
-    public void LevelGroupToggle_WritesNoLocalStorage()
+    public void LevelGroupToggle_WritesNothing()
     {
-        var cut = RenderExpanded(FilterFacet.AnalysisDepth);
+        var (cut, plan) = RenderRestoring(BrowserStorageReadAnswer.Absent, FilterFacet.AnalysisDepth);
         cut.Find("#md_Rollout").Change(true);
 
         cut.Find("#lvlToggle_Rollout").Click();
         cut.Find("#lvlToggle_Rollout").Click();
 
-        Assert.DoesNotContain(JSInterop.Invocations, i =>
-            i.Identifier == "localStorage.setItem"
-            && (string?)i.Arguments[0] != DisclosureKey
-            && (string?)i.Arguments[0] != MoreFiltersKey);
+        plan.Verify();
     }
 
     // Deselecting everything back to nothing must emit the inactive state —
@@ -968,11 +963,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public async Task AnalysisDepth_DeselectedToEmpty_EmitsInactiveState()
     {
-        FilterConfig? capturedConfig = null;
-        var cut = RenderExpanded(
-            parameters => parameters
-                .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }),
-            FilterFacet.AnalysisDepth);
+        var cut = RenderExpanded(FilterFacet.AnalysisDepth);
 
         CheckModeAndExpandLevels(cut, AnalysisMode.Rollout);
         cut.Find("#lv_Rollout_Ply3").Change(true);
@@ -980,13 +971,13 @@ public class FilterPanelTests : BunitContext
         cut.Find("#md_Rollout").Change(false);
         await cut.Find("button.btn-primary").ClickAsync(new());
 
-        Assert.NotNull(capturedConfig);
-        Assert.False(capturedConfig!.IncludeEvaluations);
-        Assert.False(capturedConfig.IncludeRollouts);
-        Assert.False(capturedConfig.IncludeBookRollouts);
-        Assert.Empty(capturedConfig.EvaluationLevels);
-        Assert.Empty(capturedConfig.RolloutLevels);
-        Assert.Empty(capturedConfig.BookRolloutLevels);
+        Assert.NotNull(LastCommit);
+        Assert.False(LastCommit!.IncludeEvaluations);
+        Assert.False(LastCommit.IncludeRollouts);
+        Assert.False(LastCommit.IncludeBookRollouts);
+        Assert.Empty(LastCommit.EvaluationLevels);
+        Assert.Empty(LastCommit.RolloutLevels);
+        Assert.Empty(LastCommit.BookRolloutLevels);
     }
 
     // Clear filters must reset all six depth fields — every toggle off (which
@@ -996,11 +987,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public async Task ClearFilters_ResetsAllSixDepthFields()
     {
-        FilterConfig? capturedConfig = null;
-        var cut = RenderExpanded(
-            parameters => parameters
-                .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }),
-            FilterFacet.AnalysisDepth);
+        var cut = RenderExpanded(FilterFacet.AnalysisDepth);
 
         CheckModeAndExpandLevels(cut, AnalysisMode.Rollout);
         cut.Find("#lv_Rollout_Ply4").Change(true);
@@ -1014,25 +1001,35 @@ public class FilterPanelTests : BunitContext
             Assert.False(cut.Find($"#md_{mode}").HasAttribute("checked"));
         Assert.Empty(cut.FindAll("button[id^='lvlToggle_']"));
 
-        Assert.NotNull(capturedConfig);
-        Assert.False(capturedConfig!.IncludeEvaluations);
-        Assert.False(capturedConfig.IncludeRollouts);
-        Assert.False(capturedConfig.IncludeBookRollouts);
-        Assert.Empty(capturedConfig.EvaluationLevels);
-        Assert.Empty(capturedConfig.RolloutLevels);
-        Assert.Empty(capturedConfig.BookRolloutLevels);
+        Assert.NotNull(LastCommit);
+        Assert.False(LastCommit!.IncludeEvaluations);
+        Assert.False(LastCommit.IncludeRollouts);
+        Assert.False(LastCommit.IncludeBookRollouts);
+        Assert.Empty(LastCommit.EvaluationLevels);
+        Assert.Empty(LastCommit.RolloutLevels);
+        Assert.Empty(LastCommit.BookRolloutLevels);
     }
 
-    // Round-trips the depth facet through the single-key persistence path:
-    // select across two mode pairs (levels under Book rollouts, Rollouts bare),
-    // Apply (writes the FilterConfig blob — level lists as member-name strings,
-    // toggles as booleans), then re-mount with the captured blob and assert
-    // exactly that selection restores. The restored group mounts collapsed —
-    // the disclosure is session state, never persisted — with its badge
-    // honestly reporting the restored count before any expansion.
+    // The depth facet through both halves of the persistence path: the six
+    // raw-intent members written as the lib writes them (level lists as
+    // member-name strings, toggles as booleans), and restored exactly. The
+    // restored group mounts collapsed — the disclosure is session state, never
+    // persisted — with its badge honestly reporting the restored count before
+    // any expansion.
     [Fact]
-    public async Task AnalysisDepth_RoundTripsAcrossRemount()
+    public async Task AnalysisDepth_IsWrittenAsTheLibWritesIt()
     {
+        var applied = new FilterConfig
+        {
+            IncludeBookRollouts = true,
+            BookRolloutLevels = [AnalysisLevel.Ply3, AnalysisLevel.Ply7],
+            IncludeRollouts = true,
+        };
+        var plan = Planned();
+        plan.ExpectFilterRestore(FilterRestoration.NothingStored);
+        plan.ExpectFilterPanelMount();
+        ExpectExpansion(plan, FilterFacet.AnalysisDepth);
+        plan.ExpectWrite(BrowserStorageArea.Local, ConfigKey, applied.ToJson(), BrowserStorageWriteAnswer.Succeeded);
         var cut = RenderExpanded(FilterFacet.AnalysisDepth);
 
         CheckModeAndExpandLevels(cut, AnalysisMode.BookRollout);
@@ -1041,13 +1038,21 @@ public class FilterPanelTests : BunitContext
         cut.Find("#md_Rollout").Change(true);
         await cut.Find("button.btn-primary").ClickAsync(new());
 
-        var stored = JSInterop.Invocations["localStorage.setItem"]
-            .Last(i => (string?)i.Arguments[0] == ConfigKey)
-            .Arguments[1] as string;
-        Assert.NotNull(stored);
+        plan.Verify();
+    }
 
-        JSInterop.Setup<string?>("localStorage.getItem", ConfigKey).SetResult(stored);
-        var restored = RenderExpanded(FilterFacet.AnalysisDepth);
+    [Fact]
+    public void AnalysisDepth_IsRestoredExactly_WithItsGroupsCollapsed()
+    {
+        var stored = new FilterConfig
+        {
+            IncludeBookRollouts = true,
+            BookRolloutLevels = [AnalysisLevel.Ply3, AnalysisLevel.Ply7],
+            IncludeRollouts = true,
+        };
+
+        var (restored, plan) = RenderRestoring(
+            BrowserStorageReadAnswer.Stored(stored.ToJson()), FilterFacet.AnalysisDepth);
 
         Assert.True(restored.Find("#md_BookRollout").HasAttribute("checked"));
         Assert.True(restored.Find("#md_Rollout").HasAttribute("checked"));
@@ -1061,16 +1066,17 @@ public class FilterPanelTests : BunitContext
         Assert.True(restored.Find("#lv_BookRollout_Ply3").HasAttribute("checked"));
         Assert.True(restored.Find("#lv_BookRollout_Ply7").HasAttribute("checked"));
         Assert.DoesNotContain("checked", restored.Find("#lv_BookRollout_XgRoller").OuterHtml);
+        plan.Verify();
     }
 
-    // Ply3Red through the same persistence path, both directions, against a
-    // literal wire token. It is the newest member of the level vocabulary
+    // Ply3Red through both halves of the persistence path, against a literal
+    // wire token. It is the newest member of the level vocabulary
     // (halheinrich/backgammon#159) and the one a serializer or producer change
-    // is likeliest to drop or fold away, so pin it by name: check it, Apply,
-    // and assert the blob literally carries the string "Ply3Red" — the member
-    // name FilterConfig's canonical options write, re-typed here on purpose
-    // rather than read back off the enum — then remount from that blob and assert
-    // the checkbox returns checked under its own "3-ply Red" label.
+    // is likeliest to drop or fold away, so pin it by name: the blob the
+    // panel writes for it — the plan holds the write to exactly this value —
+    // carries the string "Ply3Red", re-typed here on purpose rather than read
+    // back off the enum; and a restore of that blob checks it under its own
+    // "3-ply Red" label.
     //
     // The closing assertion is the one that matters most: Ply3 must come back
     // unchecked. XG's "3-ply Red" was a label variant of Ply3 before the
@@ -1078,28 +1084,37 @@ public class FilterPanelTests : BunitContext
     // two back together would round-trip perfectly while quietly widening the
     // user's filter.
     [Fact]
-    public async Task AnalysisDepth_Ply3Red_RoundTripsUnderItsOwnWireToken()
+    public async Task AnalysisDepth_Ply3Red_IsWrittenUnderItsOwnWireToken()
     {
+        var blob = new FilterConfig { IncludeEvaluations = true, EvaluationLevels = [AnalysisLevel.Ply3Red] }.ToJson();
+        Assert.Contains("\"Ply3Red\"", blob);
+        var plan = Planned();
+        plan.ExpectFilterRestore(FilterRestoration.NothingStored);
+        plan.ExpectFilterPanelMount();
+        ExpectExpansion(plan, FilterFacet.AnalysisDepth);
+        plan.ExpectWrite(BrowserStorageArea.Local, ConfigKey, blob, BrowserStorageWriteAnswer.Succeeded);
         var cut = RenderExpanded(FilterFacet.AnalysisDepth);
 
         CheckModeAndExpandLevels(cut, AnalysisMode.Evaluation);
         cut.Find("#lv_Evaluation_Ply3Red").Change(true);
         await Apply(cut).ClickAsync(new());
 
-        var stored = JSInterop.Invocations["localStorage.setItem"]
-            .Last(i => (string?)i.Arguments[0] == ConfigKey)
-            .Arguments[1] as string;
-        Assert.NotNull(stored);
-        Assert.Contains("\"Ply3Red\"", stored!);
+        plan.Verify();
+    }
 
-        JSInterop.Setup<string?>("localStorage.getItem", ConfigKey).SetResult(stored);
-        var restored = RenderExpanded(FilterFacet.AnalysisDepth);
+    [Fact]
+    public void AnalysisDepth_Ply3Red_IsRestoredUnderItsOwnLabel_AndNotAsPly3()
+    {
+        var blob = new FilterConfig { IncludeEvaluations = true, EvaluationLevels = [AnalysisLevel.Ply3Red] }.ToJson();
+
+        var (restored, plan) = RenderRestoring(BrowserStorageReadAnswer.Stored(blob), FilterFacet.AnalysisDepth);
 
         restored.Find("#lvlToggle_Evaluation").Click();
         Assert.True(restored.Find("#lv_Evaluation_Ply3Red").HasAttribute("checked"));
         Assert.Equal("3-ply Red",
             restored.Find("label[for='lv_Evaluation_Ply3Red']").TextContent.Trim());
         Assert.DoesNotContain("checked", restored.Find("#lv_Evaluation_Ply3").OuterHtml);
+        plan.Verify();
     }
 
     // Persistence back-compat: a blob saved before the depth pairs existed
@@ -1110,14 +1125,13 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void LegacyConfigWithoutDepthFields_RestoresToInactive()
     {
-        JSInterop.Setup<string?>("localStorage.getItem", ConfigKey)
-            .SetResult("{\"DecisionType\":\"Both\"}");
-
-        var cut = RenderExpanded(FilterFacet.AnalysisDepth);
+        var (cut, plan) = RenderRestoring(
+            BrowserStorageReadAnswer.Stored("{\"DecisionType\":\"Both\"}"), FilterFacet.AnalysisDepth);
 
         foreach (var mode in SelectableModes)
             Assert.False(cut.Find($"#md_{mode}").HasAttribute("checked"));
         Assert.Empty(cut.FindAll("button[id^='lvlToggle_']"));
+        plan.Verify();
     }
 
     // The consumer half of halheinrich/backgammon#164, wire-tested here rather
@@ -1134,11 +1148,9 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void ConfigWithOrdinalLevel_IsRejected_RestoresToInactive()
     {
-        JSInterop.Setup<string?>("localStorage.getItem", ConfigKey)
-            .SetResult("{\"DecisionType\":\"Both\",\"IncludeEvaluations\":true," +
-                "\"EvaluationLevels\":[5]}");
-
-        var cut = RenderExpanded(FilterFacet.AnalysisDepth);
+        var (cut, plan) = RenderRestoring(
+            BrowserStorageReadAnswer.Stored("{\"DecisionType\":\"Both\",\"IncludeEvaluations\":true," +
+                "\"EvaluationLevels\":[5]}"), FilterFacet.AnalysisDepth);
 
         // Byte-identical to ConfigWithNamedLevel_Restores below except for the
         // one token, so this pair discriminates: that blob renders the toggle,
@@ -1147,6 +1159,7 @@ public class FilterPanelTests : BunitContext
         foreach (var mode in SelectableModes)
             Assert.False(cut.Find($"#md_{mode}").HasAttribute("checked"));
         Assert.Empty(cut.FindAll("button[id^='lvlToggle_']"));
+        plan.Verify();
     }
 
     // The same blob with the level spelled as its member name DOES restore, so
@@ -1154,14 +1167,13 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void ConfigWithNamedLevel_Restores()
     {
-        JSInterop.Setup<string?>("localStorage.getItem", ConfigKey)
-            .SetResult("{\"DecisionType\":\"Both\",\"IncludeEvaluations\":true," +
-                "\"EvaluationLevels\":[\"XgRoller\"]}");
-
-        var cut = RenderExpanded(FilterFacet.AnalysisDepth);
+        var (cut, plan) = RenderRestoring(
+            BrowserStorageReadAnswer.Stored("{\"DecisionType\":\"Both\",\"IncludeEvaluations\":true," +
+                "\"EvaluationLevels\":[\"XgRoller\"]}"), FilterFacet.AnalysisDepth);
 
         cut.Find("#lvlToggle_Evaluation").Click();
         Assert.True(cut.Find("#lv_Evaluation_XgRoller").HasAttribute("checked"));
+        plan.Verify();
     }
 
     // Migration guard: blobs saved under the two retired depth shapes — the
@@ -1172,16 +1184,15 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void ConfigWithRetiredDepthFields_IsIgnored_RestoresToInactive()
     {
-        JSInterop.Setup<string?>("localStorage.getItem", ConfigKey)
-            .SetResult("{\"DecisionType\":\"Both\"," +
+        var (cut, plan) = RenderRestoring(
+            BrowserStorageReadAnswer.Stored("{\"DecisionType\":\"Both\"," +
                 "\"AnalysisDepthClasses\":[\"Ply3\",\"RolloutPly7\"]," +
-                "\"AnalysisLevels\":[\"Ply3\",\"XgRollerPlus\"]}");
-
-        var cut = RenderExpanded(FilterFacet.AnalysisDepth);
+                "\"AnalysisLevels\":[\"Ply3\",\"XgRollerPlus\"]}"), FilterFacet.AnalysisDepth);
 
         foreach (var mode in SelectableModes)
             Assert.False(cut.Find($"#md_{mode}").HasAttribute("checked"));
         Assert.Empty(cut.FindAll("button[id^='lvlToggle_']"));
+        plan.Verify();
     }
 
     // Canonical-order render pin for the dice facet: every roll must surface as
@@ -1220,47 +1231,52 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public async Task DiceRollCheckbox_FlowsIntoEmittedConfig()
     {
-        FilterConfig? capturedConfig = null;
-        var cut = RenderExpanded(
-            parameters => parameters
-                .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }),
-            FilterFacet.DiceRolls);
+        var cut = RenderExpanded(FilterFacet.DiceRolls);
 
         cut.Find("#dr_31").Change(true);
         cut.Find("#dr_55").Change(true);
         await cut.Find("button.btn-primary").ClickAsync(new());
 
-        Assert.NotNull(capturedConfig);
-        Assert.Contains(new DiceRoll(3, 1), capturedConfig!.DiceRolls);
-        Assert.Contains(new DiceRoll(5, 5), capturedConfig.DiceRolls);
-        Assert.Equal(2, capturedConfig.DiceRolls.Count);
+        Assert.NotNull(LastCommit);
+        Assert.Contains(new DiceRoll(3, 1), LastCommit!.DiceRolls);
+        Assert.Contains(new DiceRoll(5, 5), LastCommit.DiceRolls);
+        Assert.Equal(2, LastCommit.DiceRolls.Count);
     }
 
-    // Round-trips the dice facet through the single-key persistence path: check a
-    // couple of rolls, Apply (writes the FilterConfig blob — DiceRolls as
-    // two-digit token strings via DiceRoll's own converter), then re-mount with
-    // the captured blob and assert exactly those checkboxes restore checked. Also
-    // the "pre-populated config renders checked" coverage.
+    // The dice facet through both halves of the persistence path: rolls
+    // written as the lib writes them (two-digit tokens via DiceRoll's own
+    // converter), and restored checked — the "pre-populated config renders
+    // checked" coverage.
     [Fact]
-    public async Task DiceRolls_RoundTripsAcrossRemount()
+    public async Task DiceRolls_AreWrittenAsTheLibWritesThem()
     {
+        var applied = new FilterConfig { DiceRolls = [new DiceRoll(3, 1), new DiceRoll(6, 6)] };
+        var plan = Planned();
+        plan.ExpectFilterRestore(FilterRestoration.NothingStored);
+        plan.ExpectFilterPanelMount();
+        ExpectExpansion(plan, FilterFacet.DiceRolls);
+        plan.ExpectWrite(BrowserStorageArea.Local, ConfigKey, applied.ToJson(), BrowserStorageWriteAnswer.Succeeded);
         var cut = RenderExpanded(FilterFacet.DiceRolls);
 
-        cut.Find("#dr_31").Change(true);
         cut.Find("#dr_66").Change(true);
+        cut.Find("#dr_31").Change(true);
         await cut.Find("button.btn-primary").ClickAsync(new());
 
-        var stored = JSInterop.Invocations["localStorage.setItem"]
-            .Last(i => (string?)i.Arguments[0] == ConfigKey)
-            .Arguments[1] as string;
-        Assert.NotNull(stored);
+        plan.Verify();
+    }
 
-        JSInterop.Setup<string?>("localStorage.getItem", ConfigKey).SetResult(stored);
-        var restored = RenderExpanded(FilterFacet.DiceRolls);
+    [Fact]
+    public void DiceRolls_AreRestoredChecked()
+    {
+        var stored = new FilterConfig { DiceRolls = [new DiceRoll(3, 1), new DiceRoll(6, 6)] };
+
+        var (restored, plan) = RenderRestoring(
+            BrowserStorageReadAnswer.Stored(stored.ToJson()), FilterFacet.DiceRolls);
 
         Assert.True(restored.Find("#dr_31").HasAttribute("checked"));
         Assert.True(restored.Find("#dr_66").HasAttribute("checked"));
         Assert.DoesNotContain("checked", restored.Find("#dr_21").OuterHtml);
+        plan.Verify();
     }
 
     // Deselecting every checked roll back to none must emit the inactive state —
@@ -1270,18 +1286,14 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public async Task DiceRolls_DeselectedToEmpty_EmitsInactiveState()
     {
-        FilterConfig? capturedConfig = null;
-        var cut = RenderExpanded(
-            parameters => parameters
-                .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }),
-            FilterFacet.DiceRolls);
+        var cut = RenderExpanded(FilterFacet.DiceRolls);
 
         cut.Find("#dr_31").Change(true);
         cut.Find("#dr_31").Change(false);
         await cut.Find("button.btn-primary").ClickAsync(new());
 
-        Assert.NotNull(capturedConfig);
-        Assert.Empty(capturedConfig!.DiceRolls);
+        Assert.NotNull(LastCommit);
+        Assert.Empty(LastCommit!.DiceRolls);
     }
 
     // Silent-splat guard for the Position-pattern field: an unbound text input
@@ -1296,20 +1308,16 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public async Task PositionPattern_FlowsIntoEmittedConfig()
     {
-        FilterConfig? capturedConfig = null;
-        var cut = RenderExpanded(
-            parameters => parameters
-                .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }),
-            FilterFacet.PositionPattern);
+        var cut = RenderExpanded(FilterFacet.PositionPattern);
 
         cut.Find("#positionPattern").Input("[6,2,] [5,,-2]");
         await cut.Find("button.btn-primary").ClickAsync(new());
 
-        Assert.NotNull(capturedConfig);
-        Assert.Equal("[6,2,] [5,,-2]", capturedConfig!.PositionPattern);
+        Assert.NotNull(LastCommit);
+        Assert.Equal("[6,2,] [5,,-2]", LastCommit!.PositionPattern);
         Assert.Equal(
             new BoardPattern([new CheckerRange(6, 2, null), new CheckerRange(5, null, -2)]),
-            BoardPattern.Parse(capturedConfig.PositionPattern!));
+            BoardPattern.Parse(LastCommit.PositionPattern!));
     }
 
     // The range token reaches the wire the same way (halheinrich/backgammon#268):
@@ -1319,17 +1327,13 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public async Task PositionPatternRange_FlowsIntoEmittedConfig()
     {
-        FilterConfig? capturedConfig = null;
-        var cut = RenderExpanded(
-            parameters => parameters
-                .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }),
-            FilterFacet.PositionPattern);
+        var cut = RenderExpanded(FilterFacet.PositionPattern);
 
         cut.Find("#positionPattern").Input("[7-12,3,] [13-18,,-2]");
         await Apply(cut).ClickAsync(new());
 
-        Assert.NotNull(capturedConfig);
-        Assert.Equal("[7-12,3,] [13-18,,-2]", capturedConfig!.PositionPattern);
+        Assert.NotNull(LastCommit);
+        Assert.Equal("[7-12,3,] [13-18,,-2]", LastCommit!.PositionPattern);
     }
 
     // The range forms the grammar refuses land in the field's invalid state
@@ -1412,19 +1416,15 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public async Task PositionPatternWithOffTokens_FlowsIntoEmittedConfigAsTyped()
     {
-        FilterConfig? capturedConfig = null;
-        var cut = RenderExpanded(
-            parameters => parameters
-                .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }),
-            FilterFacet.PositionPattern);
+        var cut = RenderExpanded(FilterFacet.PositionPattern);
 
         cut.Find("#positionPattern").Input("[OFF,10,] [Opp-Off,,-2]");
         await cut.Find("button.btn-primary").ClickAsync(new());
 
-        Assert.NotNull(capturedConfig);
-        Assert.Equal("[OFF,10,] [Opp-Off,,-2]", capturedConfig!.PositionPattern);
+        Assert.NotNull(LastCommit);
+        Assert.Equal("[OFF,10,] [Opp-Off,,-2]", LastCommit!.PositionPattern);
         Assert.Equal(
-            new FilterConfig { PositionPattern = "[off,10,] [opp-off,,-2]" }, capturedConfig);
+            new FilterConfig { PositionPattern = "[off,10,] [opp-off,,-2]" }, LastCommit);
     }
 
     // A wrong-signed borne-off bound is a grammar error, not a typo the panel
@@ -1444,27 +1444,34 @@ public class FilterPanelTests : BunitContext
         Assert.True(cut.Find("button.btn-primary").HasAttribute("disabled"));
     }
 
-    // Round-trips the Position-pattern field through the single-key persistence
-    // path: set a pattern, Apply (writes the FilterConfig blob, the pattern
-    // riding as the text it is), then re-mount with the captured blob and
-    // assert the field shows the stored text.
+    // The pattern through both halves of the persistence path: written as the
+    // text it is, and restored as that text.
     [Fact]
-    public async Task PositionPattern_RoundTripsAcrossRemount()
+    public async Task PositionPattern_IsWrittenAsTypedText()
     {
+        var applied = new FilterConfig { PositionPattern = "[6,2,] [5,,-2]" };
+        var plan = Planned();
+        plan.ExpectFilterRestore(FilterRestoration.NothingStored);
+        plan.ExpectFilterPanelMount();
+        ExpectExpansion(plan, FilterFacet.PositionPattern);
+        plan.ExpectWrite(BrowserStorageArea.Local, ConfigKey, applied.ToJson(), BrowserStorageWriteAnswer.Succeeded);
         var cut = RenderExpanded(FilterFacet.PositionPattern);
 
         cut.Find("#positionPattern").Input("[6,2,] [5,,-2]");
         await cut.Find("button.btn-primary").ClickAsync(new());
 
-        var stored = JSInterop.Invocations["localStorage.setItem"]
-            .Last(i => (string?)i.Arguments[0] == ConfigKey)
-            .Arguments[1] as string;
-        Assert.NotNull(stored);
+        plan.Verify();
+    }
 
-        JSInterop.Setup<string?>("localStorage.getItem", ConfigKey).SetResult(stored);
-        var restored = RenderExpanded(FilterFacet.PositionPattern);
+    [Fact]
+    public void PositionPattern_IsRestoredAsTheStoredText()
+    {
+        var (restored, plan) = RenderRestoring(
+            BrowserStorageReadAnswer.Stored(new FilterConfig { PositionPattern = "[6,2,] [5,,-2]" }.ToJson()),
+            FilterFacet.PositionPattern);
 
         Assert.Equal("[6,2,] [5,,-2]", restored.Find("#positionPattern").GetAttribute("value"));
+        plan.Verify();
     }
 
     // A blank Position-pattern field means "no pattern filter," and the panel
@@ -1475,14 +1482,12 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public async Task EmptyPositionPattern_EmitsNullPattern()
     {
-        FilterConfig? capturedConfig = null;
-        var cut = Render<FilterPanel>(parameters => parameters
-            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }));
+        var cut = Render<FilterPanel>();
 
         await cut.Find("button.btn-primary").ClickAsync(new());
 
-        Assert.NotNull(capturedConfig);
-        Assert.Null(capturedConfig!.PositionPattern);
+        Assert.NotNull(LastCommit);
+        Assert.Null(LastCommit!.PositionPattern);
     }
 
     // Invalid bracket-list text must not silently drop the filter: the chosen
@@ -1504,18 +1509,21 @@ public class FilterPanelTests : BunitContext
         Assert.False(cut.Find("button.btn-primary").HasAttribute("disabled"));
     }
 
-    // Proves the FilterConfig.TryFromJson tolerant path is wired: a corrupt blob
-    // in storage must restore to defaults rather than throw.
+    // Proves the FilterConfig.TryFromJson tolerant path is wired: a stored
+    // value that is not a selection restores the defaults rather than throwing,
+    // and the restoration says what it found.
     [Fact]
     public void CorruptStoredConfig_MountsWithDefaults()
     {
-        JSInterop.Setup<string?>("localStorage.getItem", ConfigKey).SetResult("}{ not valid json");
-
-        var cut = RenderExpanded(FilterFacet.Players, FilterFacet.DecisionType, FilterFacet.ContactTypes);
+        var (cut, plan) = RenderRestoring(
+            BrowserStorageReadAnswer.Stored("}{ not valid json"),
+            FilterFacet.Players, FilterFacet.DecisionType, FilterFacet.ContactTypes);
 
         Assert.Equal(string.Empty, cut.Find("input[placeholder='e.g. Hal, Magriel']").GetAttribute("value"));
         Assert.True(cut.Find("#dt_Both").HasAttribute("checked"));
         Assert.DoesNotContain("checked", cut.Find("#ct_Race").OuterHtml);
+        Assert.Equal(FilterRestoration.Unreadable, Setup.Current.Restoration);
+        plan.Verify();
     }
 
     // The match-score field must state the MaNa convention in a sibling hint line
@@ -1699,7 +1707,7 @@ public class FilterPanelTests : BunitContext
     }
 
     // Two voices, not one line with a swapped noun — the remedies genuinely
-    // differ (retype it versus use these instead), so a buffer holding both
+    // differ (retype it versus use these instead), so a box holding both
     // kinds gets both, in the order the panel renders them.
     [Fact]
     public void MatchScoreVerdicts_AreOneVoicePerFaultKind()
@@ -1805,42 +1813,38 @@ public class FilterPanelTests : BunitContext
         Assert.Contains(MatchScoreToken.MoneyWithoutJacoby, hint);
     }
 
-    // The lib's documented posture, pinned at the panel for the case
-    // halheinrich/backgammon#121 actually creates: a filter saved before the
-    // money token split still loads, still shows the token it holds, marks the
-    // field, and is refused a commit — never silently rewritten to one of the
-    // replacements (which would change the user's filter behind their back),
-    // never silently dropped.
+    // The lib's documented posture for the retired spelling, end to end: a
+    // stored selection written before the money token split still loads,
+    // still shows the token it holds, marks the field, and is refused a
+    // commit — never silently rewritten to one of the replacements (which
+    // would change the user's filter behind their back), never silently
+    // dropped.
     [Fact]
     public void StoredConfigWithRetiredMoneyToken_LoadsAndShowsInvalid_WithApplyGated()
     {
-        JSInterop.Setup<string?>("localStorage.getItem", ConfigKey)
-            .SetResult(new FilterConfig { MatchScores = [MatchScoreToken.RetiredMoney] }.ToJson());
-
-        var cut = Render<FilterPanel>();
-        ExpandFacets(cut, FilterFacet.MatchScores);
+        var (cut, plan) = RenderRestoring(
+            BrowserStorageReadAnswer.Stored(new FilterConfig { MatchScores = [MatchScoreToken.RetiredMoney] }.ToJson()),
+            FilterFacet.MatchScores);
 
         Assert.Equal(MatchScoreToken.RetiredMoney, MatchScores(cut).GetAttribute("value"));
         Assert.Contains("is-invalid", MatchScores(cut).GetAttribute("class"));
         Assert.Single(MatchScoreVerdicts(cut));
         Assert.True(Apply(cut).HasAttribute("disabled"));
+        plan.Verify();
     }
 
-    // LoadConfig is staging-only: it projects the config into the edit buffers
-    // like a bulk edit gesture. Edit-side signaling fires (OnAppliedStateChanged,
-    // once — the staged state equals no committed config), but no Apply-side
-    // effect may occur: no OnFilterConfigChanged, no config write. The expansion after
-    // the load writes the disclosure's own key, which is exactly why the
-    // no-write assertion is keyed to ConfigKey — the config blob is what
-    // staging must never touch.
+    // Staging a saved filter is an edit: the draft becomes the staged
+    // selection, the owner publishes it, and nothing is committed — no
+    // baseline, no write of the selection. The plan holds the scenario to
+    // the expansion's own writes.
     [Fact]
-    public async Task LoadConfig_HydratesBuffers_WithoutApplySideEffects()
+    public async Task Staging_HydratesTheDraft_WithoutCommitting()
     {
-        FilterConfig? capturedConfig = null;
-        var reports = new List<FilterConfig?>();
-        var cut = Render<FilterPanel>(parameters => parameters
-            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; })
-            .Add(p => p.OnAppliedStateChanged, (FilterConfig? c) => { reports.Add(c); }));
+        var plan = Planned();
+        plan.ExpectFilterRestore(FilterRestoration.NothingStored);
+        plan.ExpectFilterPanelMount();
+        ExpectExpansion(plan, FilterFacet.Players, FilterFacet.DecisionType, FilterFacet.ContactTypes);
+        var cut = Render<FilterPanel>();
 
         var loaded = new FilterConfig
         {
@@ -1848,73 +1852,71 @@ public class FilterPanelTests : BunitContext
             DecisionType = DecisionTypeOption.CubeOnly,
             ContactTypes = [ContactType.Race],
         };
-        await cut.InvokeAsync(() => cut.Instance.LoadConfig(loaded));
+        await cut.InvokeAsync(() => Setup.Stage(loaded));
         ExpandFacets(cut, FilterFacet.Players, FilterFacet.DecisionType, FilterFacet.ContactTypes);
 
         Assert.Equal("Magriel", cut.Find("input[placeholder='e.g. Hal, Magriel']").GetAttribute("value"));
         Assert.True(cut.Find("#dt_CubeOnly").HasAttribute("checked"));
         Assert.True(cut.Find("#ct_Race").HasAttribute("checked"));
 
-        Assert.Null(capturedConfig);
-        Assert.Equal([null], reports);
-        Assert.DoesNotContain(JSInterop.Invocations, i =>
-            i.Identifier == "localStorage.setItem" && (string?)i.Arguments[0] == ConfigKey);
+        Assert.Empty(_commits);
+        Assert.Null(InEffect);
+        plan.Verify();
     }
 
-    // Reproduces, deterministically, the interleaving the post-await guard in
-    // the config restore exists for: the first-render restore is suspended at
-    // its getItem await when the host's LoadConfig runs. A Setup with no
-    // SetResult holds the interop task open — the restore parks on it — then
-    // LoadConfig stages Y, then SetResult releases the restore with X. The
-    // resumed continuation must yield, not clobber: Y's values survive.
+    // The interleaving the owner's draft revision exists for: the boot's
+    // restoration is held at its read when a saved filter is staged. Released
+    // afterwards with a different stored selection, the restoration must
+    // record its outcome and yield the draft — the staged values survive.
+    // Bounded on the restoration's own completion, which is the continuation
+    // this is about.
     [Fact]
-    public async Task LoadConfig_DuringPendingStoredRestore_TakesPrecedence()
+    public async Task Staging_DuringAPendingRestore_TakesPrecedence()
     {
-        var pendingGet = JSInterop.Setup<string?>("localStorage.getItem", ConfigKey);
-
+        var plan = Planned();
+        var restore = plan.ExpectHeldFilterRestore();
+        plan.ExpectFilterPanelMount();
+        ExpectExpansion(plan, FilterFacet.Players);
         var cut = Render<FilterPanel>();
+        Assert.True(restore.IsReached);
 
-        var loaded = new FilterConfig { Players = ["Hal"] };
-        await cut.InvokeAsync(() => cut.Instance.LoadConfig(loaded));
+        await cut.InvokeAsync(() => Setup.Stage(new FilterConfig { Players = ["Hal"] }));
 
-        var storedConfig = new FilterConfig { Players = ["Magriel"] };
-        pendingGet.SetResult(storedConfig.ToJson());
+        restore.Release(FilterSurfaceStorage.RestoreAnswer(new FilterConfig { Players = ["Magriel"] }));
+        await Setup.RestoreAsync().WaitAsync(DefaultWaitTimeout);
 
-        // WaitForAssertion: the released continuation resumes asynchronously
-        // relative to SetResult; only after it has run is "didn't clobber"
-        // actually proven.
         ExpandFacets(cut, FilterFacet.Players);
-        cut.WaitForAssertion(() => Assert.Equal(
-            "Hal",
-            cut.Find("input[placeholder='e.g. Hal, Magriel']").GetAttribute("value")));
+        Assert.Equal("Hal", cut.Find("input[placeholder='e.g. Hal, Magriel']").GetAttribute("value"));
+        Assert.Equal(FilterRestoration.Restored, Setup.Current.Restoration);
+        plan.Verify();
     }
 
-    // Save-as must capture the live buffers, not the last-applied config —
-    // the whole point is saving while dirty, before (or instead of) Apply.
+    // Save-as must capture the live draft, not the last-applied config — the
+    // whole point is saving while dirty, before (or instead of) Apply.
     [Fact]
-    public void TryGetEditedConfig_UnappliedEdits_ReturnsLiveBuffers()
+    public void Savable_UnappliedEdits_IsTheLiveDraft()
     {
         var cut = RenderExpanded(FilterFacet.Players, FilterFacet.ContactTypes);
 
         cut.Find("input[placeholder='e.g. Hal, Magriel']").Input("Hal");
         cut.Find("#ct_Race").Change(true);
 
-        Assert.True(cut.Instance.TryGetEditedConfig(out var cfg));
+        Assert.True(Setup.Current.TryGetSavable(out var cfg));
         Assert.Equal(["Hal"], cfg!.Players);
         Assert.Contains(ContactType.Race, cfg.ContactTypes);
     }
 
     // Pattern text the grammar refuses is a state Apply refuses, and exactly
-    // the state TryGetEditedConfig refuses — the lib's field verdict, read
+    // the state the save snapshot refuses — the lib's field verdict, read
     // through the same gate and the same build path.
     [Fact]
-    public void TryGetEditedConfig_InvalidPositionPattern_ReturnsFalseNull()
+    public void Savable_InvalidPositionPattern_IsRefused()
     {
         var cut = RenderExpanded(FilterFacet.PositionPattern);
 
         cut.Find("#positionPattern").Input("[6,2");
 
-        Assert.False(cut.Instance.TryGetEditedConfig(out var cfg));
+        Assert.False(Setup.Current.TryGetSavable(out var cfg));
         Assert.Null(cfg);
     }
 
@@ -1922,20 +1924,20 @@ public class FilterPanelTests : BunitContext
     // Match-score text used to ride raw through both paths, validated only
     // downstream in FilterConfig.Build(); the grammar has since joined the
     // lib's field table, so GetInvalidFields names the list and the one
-    // IsCommittable member both gates read tightened in the same edit. Save
+    // validity verdict both gates read tightened in the same edit. Save
     // still mirrors Apply exactly — which is why this pin moved rather than
     // being deleted: a saved document minted from a faulted token would be a
     // permanent trap, since loading it reproduces the state with Apply shut.
     [Theory]
     [InlineData("not-a-score")]
     [InlineData(MatchScoreToken.RetiredMoney)]
-    public void TryGetEditedConfig_FaultedMatchScoreToken_ReturnsFalseNull(string token)
+    public void Savable_FaultedMatchScoreToken_IsRefused(string token)
     {
         var cut = RenderExpanded(FilterFacet.MatchScores);
 
         MatchScores(cut).Input(token);
 
-        Assert.False(cut.Instance.TryGetEditedConfig(out var cfg));
+        Assert.False(Setup.Current.TryGetSavable(out var cfg));
         Assert.Null(cfg);
     }
 
@@ -2068,38 +2070,32 @@ public class FilterPanelTests : BunitContext
         Assert.False(Apply(cut).HasAttribute("disabled"));
     }
 
-    // The lib's documented posture, pinned end to end at the panel: a stored
-    // selection whose bound a rule outlaws still loads, still shows the values
-    // it holds, marks the offending one, and is refused a commit. Never
-    // silently repaired (which would change the user's filter behind their
-    // back) and never silently dropped.
     [Fact]
     public void StoredConfigWithInvalidBound_LoadsAndShowsInvalid_WithApplyGated()
     {
-        JSInterop.Setup<string?>("localStorage.getItem", ConfigKey)
-            .SetResult(new FilterConfig { ErrorMin = -1, ErrorMax = 2 }.ToJson());
-
-        var cut = Render<FilterPanel>();
+        var (cut, plan) = RenderRestoring(
+            BrowserStorageReadAnswer.Stored(new FilterConfig { ErrorMin = -1, ErrorMax = 2 }.ToJson()));
 
         Assert.Equal("-1", ErrorMin(cut).GetAttribute("value"));
         Assert.Equal("2", ErrorMax(cut).GetAttribute("value"));
         Assert.Contains("is-invalid", ErrorMin(cut).GetAttribute("class"));
         Assert.DoesNotContain("is-invalid", ErrorMax(cut).GetAttribute("class"));
         Assert.True(Apply(cut).HasAttribute("disabled"));
+        plan.Verify();
     }
 
     // The save gate is Apply's validity gate, whole: an invalid bound refuses
     // the snapshot exactly as an unparseable pattern does, so a saved document
     // can never be minted from a selection Apply would itself have refused.
     [Fact]
-    public void TryGetEditedConfig_InvalidErrorBound_ReturnsFalseNull()
+    public void Savable_InvalidErrorBound_IsRefused()
     {
         var cut = Render<FilterPanel>();
 
         ErrorMin(cut).Input("5");
         ErrorMax(cut).Input("2");
 
-        Assert.False(cut.Instance.TryGetEditedConfig(out var cfg));
+        Assert.False(Setup.Current.TryGetSavable(out var cfg));
         Assert.Null(cfg);
     }
 
@@ -2242,14 +2238,14 @@ public class FilterPanelTests : BunitContext
     // saved document can never be minted from a selection Apply would itself
     // have refused.
     [Fact]
-    public void TryGetEditedConfig_InvalidMoveNumberBound_ReturnsFalseNull()
+    public void Savable_InvalidMoveNumberBound_IsRefused()
     {
         var cut = RenderExpanded(FilterFacet.MoveNumberRange);
 
         MoveNumberMin(cut).Input("5");
         MoveNumberMax(cut).Input("2");
 
-        Assert.False(cut.Instance.TryGetEditedConfig(out var cfg));
+        Assert.False(Setup.Current.TryGetSavable(out var cfg));
         Assert.Null(cfg);
     }
 
@@ -2263,10 +2259,9 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void StoredConfigWithInvalidMoveNumberBound_LoadsAndShowsInvalid_WithApplyGated()
     {
-        JSInterop.Setup<string?>("localStorage.getItem", ConfigKey)
-            .SetResult(new FilterConfig { MoveNumberMin = 0, MoveNumberMax = 30 }.ToJson());
-
-        var cut = RenderExpanded(FilterFacet.MoveNumberRange);
+        var (cut, plan) = RenderRestoring(
+            BrowserStorageReadAnswer.Stored(new FilterConfig { MoveNumberMin = 0, MoveNumberMax = 30 }.ToJson()),
+            FilterFacet.MoveNumberRange);
 
         Assert.Equal("0", MoveNumberMin(cut).GetAttribute("value"));
         Assert.Equal("30", MoveNumberMax(cut).GetAttribute("value"));
@@ -2274,6 +2269,7 @@ public class FilterPanelTests : BunitContext
         Assert.DoesNotContain("is-invalid", MoveNumberMax(cut).GetAttribute("class"));
         Assert.NotNull(cut.Find("#moveNumberFeedback"));
         Assert.True(Apply(cut).HasAttribute("disabled"));
+        plan.Verify();
     }
 
     // Gate composition across the two range facets: independent rules, so good
@@ -2318,7 +2314,7 @@ public class FilterPanelTests : BunitContext
         Assert.Contains("is-invalid", MoveNumberMin(cut).GetAttribute("class"));
         Assert.NotNull(cut.Find("#moveNumberFeedback"));
         Assert.True(Apply(cut).HasAttribute("disabled"));
-        Assert.False(cut.Instance.TryGetEditedConfig(out _));
+        Assert.False(Setup.Current.TryGetSavable(out _));
     }
 
     [Fact]
@@ -2336,19 +2332,18 @@ public class FilterPanelTests : BunitContext
 
     // The defect's sharpest form: over an applied selection with no move
     // bound, "1.5" parses to exactly that selection. It must not read as it —
-    // not reported clean, and Apply off for the invalid value rather than for
-    // "nothing changed".
+    // not in effect for the host, and Apply off for the invalid value rather
+    // than for "nothing changed".
     [Fact]
     public async Task UnrepresentableBound_OverTheAppliedSelection_IsNotThatSelection()
     {
-        var reports = new List<FilterConfig?>();
-        var cut = RenderExpandedReporting(reports, FilterFacet.MoveNumberRange);
+        var cut = RenderExpanded(FilterFacet.MoveNumberRange);
         await Apply(cut).ClickAsync(new());
-        Assert.NotNull(reports[^1]);
+        Assert.NotNull(InEffect);
 
         MoveNumberMin(cut).Input("1.5");
 
-        Assert.Null(reports[^1]);
+        Assert.Null(InEffect);
         Assert.True(Apply(cut).HasAttribute("disabled"));
         Assert.Empty(cut.FindAll("#applyDisabledReason"));
     }
@@ -2374,16 +2369,13 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public async Task WholeMoveNumberSpelledWithAFraction_AppliesAsThatNumber()
     {
-        FilterConfig? committed = null;
-        var cut = RenderExpanded(
-            parameters => parameters.Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { committed = c; }),
-            FilterFacet.MoveNumberRange);
+        var cut = RenderExpanded(FilterFacet.MoveNumberRange);
 
         MoveNumberMin(cut).Input("3.0");
 
         Assert.DoesNotContain("is-invalid", MoveNumberMin(cut).GetAttribute("class"));
         await Apply(cut).ClickAsync(new());
-        Assert.Equal(3, committed!.MoveNumberMin);
+        Assert.Equal(3, LastCommit!.MoveNumberMin);
     }
 
     [Fact]
@@ -2411,11 +2403,6 @@ public class FilterPanelTests : BunitContext
         cut.WaitForAssertion(() => Assert.Equal(
             "false", cut.Find("#moreFiltersToggle").GetAttribute("aria-expanded")));
     }
-
-    // The last value written under a given key.
-    private string? LastWrite(string key) =>
-        JSInterop.Invocations["localStorage.setItem"]
-                 .Last(i => (string?)i.Arguments[0] == key).Arguments[1] as string;
 
     // The at-rest panel is what the container exists to make it
     // (halheinrich/backgammon#231): the error range, the container, and the
@@ -2595,7 +2582,7 @@ public class FilterPanelTests : BunitContext
     }
 
     // The badge counts the rows whose facet is set — the lib's ruling
-    // (GetActiveFacets on the live buffers) that the rows' own badges read,
+    // (GetActiveFacets on the live draft) that the rows' own badges read,
     // never a second count of this panel's own — and it speaks only while the
     // container is folded: open, each row's own badge says it in more detail.
     [Fact]
@@ -2634,8 +2621,8 @@ public class FilterPanelTests : BunitContext
         Assert.Empty(cut.FindAll("#moreFiltersBadge"));
     }
 
-    // PRESENCE follows the lib's activation predicate, not the buffer behind
-    // the control: whitespace-only pattern text is a non-empty buffer and no
+    // PRESENCE follows the lib's activation predicate, not the text behind
+    // the control: whitespace-only pattern text is a non-empty box and no
     // pattern at all, so the row is not set and the count does not move for
     // it. The rows' own badge pin, one tier up.
     [Fact]
@@ -2653,11 +2640,11 @@ public class FilterPanelTests : BunitContext
     // A host-staged selection lands in collapsed rows behind a folded
     // container; the badge reports it at rest, without anything opening.
     [Fact]
-    public async Task LoadConfig_StagedFacets_CountOnTheFoldedContainer()
+    public async Task Staging_StagedFacets_CountOnTheFoldedContainer()
     {
         var cut = Render<FilterPanel>();
 
-        await cut.InvokeAsync(() => cut.Instance.LoadConfig(new FilterConfig
+        await cut.InvokeAsync(() => Setup.Stage(new FilterConfig
         {
             ContactTypes = [ContactType.Race],
             DiceRolls = [new DiceRoll(3, 1)],
@@ -2667,38 +2654,37 @@ public class FilterPanelTests : BunitContext
         Assert.Equal("2 set", cut.Find("#moreFiltersBadge").TextContent.Trim());
     }
 
-    // Folding or unfolding is navigation, not an edit — no applied-state
-    // report, in either direction, exactly as for a row.
+    // Folding or unfolding is navigation, not an edit — the owner publishes
+    // nothing, in either direction, exactly as for a row.
     [Fact]
-    public void MoreFiltersToggle_DoesNotReportAppliedState()
+    public void MoreFiltersToggle_IsNotAnEdit()
     {
-        var reports = new List<FilterConfig?>();
-        var cut = RenderReporting(reports);
+        var cut = Render<FilterPanel>();
+        _published = 0;   // the mount's restoration settling is a change of its own
 
         OpenMoreFilters(cut);
         FoldMoreFilters(cut);
 
-        Assert.Empty(reports);
+        Assert.Equal(0, _published);
     }
 
     // Each click persists the one bit immediately under the container's own
-    // key — never the rows' key, never the config blob: the two preferences
+    // key — never the rows' key, never the selection's: the two preferences
     // are separate because the rows' key speaks a vocabulary of FilterFacet
-    // names and this container is not a facet.
+    // names and this container is not a facet. The plan holds the clicks to
+    // exactly these writes, in this order, with these literals.
     [Fact]
     public void MoreFiltersToggle_PersistsUnderItsOwnKeyAlone()
     {
-        var cut = Render<FilterPanel>();
+        var (cut, plan) = RenderWithPreferences(BrowserStorageReadAnswer.Absent, BrowserStorageReadAnswer.Absent);
+        var opened = plan.ExpectWrite(BrowserStorageArea.Local, MoreFiltersKey, "true", BrowserStorageWriteAnswer.Succeeded);
+        var folded = plan.ExpectWrite(BrowserStorageArea.Local, MoreFiltersKey, "false", BrowserStorageWriteAnswer.Succeeded);
+        plan.RequireOrder(opened, folded);
 
         OpenMoreFilters(cut);
-        Assert.Equal("true", LastWrite(MoreFiltersKey));
-
         FoldMoreFilters(cut);
-        Assert.Equal("false", LastWrite(MoreFiltersKey));
 
-        Assert.DoesNotContain(JSInterop.Invocations["localStorage.setItem"],
-            i => (string?)i.Arguments[0] == ConfigKey
-              || (string?)i.Arguments[0] == DisclosureKey);
+        plan.Verify();
     }
 
     // The remembered state restores across sessions: stored open mounts open,
@@ -2706,12 +2692,11 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void StoredOpenContainer_MountsOpen()
     {
-        JSInterop.Setup<string?>("localStorage.getItem", MoreFiltersKey).SetResult("true");
-
-        var cut = Render<FilterPanel>();
+        var (cut, plan) = RenderWithPreferences(BrowserStorageReadAnswer.Stored("true"), BrowserStorageReadAnswer.Absent);
 
         Assert.Equal("true", cut.Find("#moreFiltersToggle").GetAttribute("aria-expanded"));
         Assert.NotEmpty(cut.FindAll("button[id^='facetToggle_']"));
+        plan.Verify();
     }
 
     // And the value survives a round trip byte for byte: restored, then
@@ -2722,13 +2707,15 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public void StoredContainerState_RoundTripsByteIdentical()
     {
-        JSInterop.Setup<string?>("localStorage.getItem", MoreFiltersKey).SetResult("true");
+        var (cut, plan) = RenderWithPreferences(BrowserStorageReadAnswer.Stored("true"), BrowserStorageReadAnswer.Absent);
+        var folded = plan.ExpectWrite(BrowserStorageArea.Local, MoreFiltersKey, "false", BrowserStorageWriteAnswer.Succeeded);
+        var reopened = plan.ExpectWrite(BrowserStorageArea.Local, MoreFiltersKey, "true", BrowserStorageWriteAnswer.Succeeded);
+        plan.RequireOrder(folded, reopened);
 
-        var cut = Render<FilterPanel>();
         FoldMoreFilters(cut);   // close…
         OpenMoreFilters(cut);   // …and reopen
 
-        Assert.Equal("true", LastWrite(MoreFiltersKey));
+        plan.Verify();
     }
 
     // Restore is tolerant and one-way: the panel writes only these two
@@ -2743,42 +2730,78 @@ public class FilterPanelTests : BunitContext
     [InlineData("[\"Players\"]")]
     public void StoredContainerStateThatIsNotTrue_MountsFolded(string stored)
     {
-        JSInterop.Setup<string?>("localStorage.getItem", MoreFiltersKey).SetResult(stored);
-
-        var cut = Render<FilterPanel>();
+        var (cut, plan) = RenderWithPreferences(BrowserStorageReadAnswer.Stored(stored), BrowserStorageReadAnswer.Absent);
 
         Assert.Equal("false", cut.Find("#moreFiltersToggle").GetAttribute("aria-expanded"));
         Assert.Empty(cut.FindAll("button[id^='facetToggle_']"));
+        plan.Verify();
     }
 
     // The rows' pending-restore pin, one tier up: a click landing while the
-    // getItem interop is in flight is a fresh user choice, and the late
-    // restore must yield to it rather than clobber it.
+    // container's read is in flight is a fresh user choice, and the late
+    // restore must yield to it rather than clobber it. Bounded on the mount's
+    // own completion — the restore's continuation — which a held read keeps
+    // pending until released.
     [Fact]
-    public void MoreFiltersToggle_DuringPendingStoredRestore_UserChoiceWins()
+    public async Task MoreFiltersToggle_DuringPendingStoredRestore_UserChoiceWins()
     {
-        var pendingGet = JSInterop.Setup<string?>("localStorage.getItem", MoreFiltersKey);
+        var plan = Planned();
+        plan.ExpectFilterRestore(FilterRestoration.NothingStored);
+        var fold = plan.ExpectHeldRead(BrowserStorageArea.Local, MoreFiltersKey);
+        plan.ExpectRead(BrowserStorageArea.Local, DisclosureKey, BrowserStorageReadAnswer.Absent);
+        plan.ExpectWrite(BrowserStorageArea.Local, MoreFiltersKey, "true", BrowserStorageWriteAnswer.Succeeded);
+        var cut = Render<FilterPanel>();
+        Assert.True(fold.IsReached);
 
+        await cut.Find("#moreFiltersToggle").ClickAsync(new());
+
+        fold.Release(BrowserStorageReadAnswer.Stored("false"));
+        await RenderedAfterMount(cut);
+
+        Assert.Equal("true", cut.Find("#moreFiltersToggle").GetAttribute("aria-expanded"));
+        plan.Verify();
+    }
+
+    // The completion the pending-restore pins wait on is honest: it stays
+    // pending while any of the mount's restores is, and completes once they
+    // have all settled. Without this, a completion signalled early would let
+    // those pins assert before the late restore they are about had run.
+    [Fact]
+    public async Task MountRestored_CompletesOnlyOnceTheMountsRestoresHaveSettled()
+    {
+        var plan = Planned();
+        var restore = plan.ExpectHeldFilterRestore();
+        var fold = plan.ExpectHeldRead(BrowserStorageArea.Local, MoreFiltersKey);
+        plan.ExpectRead(BrowserStorageArea.Local, DisclosureKey, BrowserStorageReadAnswer.Absent);
         var cut = Render<FilterPanel>();
 
-        OpenMoreFilters(cut);
+        fold.Release(BrowserStorageReadAnswer.Absent);
+        await cut.InvokeAsync(() => { });
+        Assert.False(cut.Instance.MountRestored.IsCompleted);
 
-        pendingGet.SetResult("false");
-
-        cut.WaitForAssertion(() => Assert.Equal(
-            "true", cut.Find("#moreFiltersToggle").GetAttribute("aria-expanded")));
+        restore.Release(BrowserStorageReadAnswer.Absent);
+        await cut.Instance.MountRestored.WaitAsync(DefaultWaitTimeout);
+        plan.Verify();
     }
+
+    // The mount's preference restores and the boot's restoration, settled —
+    // awaited on the panel's own completion of them (MountRestored), the one
+    // observation only that continuation produces: a late restore that
+    // rightly yields renders nothing, so no render can prove it ran. Bounded
+    // by the test's normal timeout.
+    private static Task RenderedAfterMount(IRenderedComponent<FilterPanel> cut) =>
+        cut.Instance.MountRestored.WaitAsync(DefaultWaitTimeout);
 
     // Neither gesture that moves filter values moves the container: staging a
     // saved filter is the host's, clearing is the user's, and which
     // disclosures are open is neither's — the rows' own rule, one tier up.
     [Fact]
-    public async Task LoadConfigAndClearFilters_LeaveTheContainerWhereItWas()
+    public async Task StagingAndClearFilters_LeaveTheContainerWhereItWas()
     {
         var cut = Render<FilterPanel>();
         OpenMoreFilters(cut);
 
-        await cut.InvokeAsync(() => cut.Instance.LoadConfig(
+        await cut.InvokeAsync(() => Setup.Stage(
             new FilterConfig { ContactTypes = [ContactType.Race] }));
         Assert.Equal("true", cut.Find("#moreFiltersToggle").GetAttribute("aria-expanded"));
 
@@ -3086,42 +3109,41 @@ public class FilterPanelTests : BunitContext
         Assert.Empty(cut.FindAll("input[id^='dr_']"));
     }
 
-    // Opening or closing a row is navigation, not an edit: OnAppliedStateChanged
-    // must not fire, in either direction.
+    // Opening or closing a row is navigation, not an edit: the owner
+    // publishes nothing, in either direction.
     [Fact]
-    public void RowToggle_DoesNotReportAppliedState()
+    public void RowToggle_IsNotAnEdit()
     {
-        var reports = new List<FilterConfig?>();
-        var cut = RenderReporting(reports);
+        var cut = Render<FilterPanel>();
+        _published = 0;   // the mount's restoration settling is a change of its own
 
         ExpandFacets(cut, FilterFacet.ContactTypes);
         ExpandFacets(cut, FilterFacet.ContactTypes);
 
-        Assert.Empty(reports);
+        Assert.Equal(0, _published);
     }
 
     // Each click persists the whole open set immediately under the rows' own
     // key — a JSON array of facet member names, written in row order however
-    // the user got there — and never writes the config blob's key: which rows
+    // the user got there — and never writes the selection's key: which rows
     // are open is user preference, not filter state. The out-of-order clicks
     // are the point of the ordering rule: one arrangement of open rows has one
-    // spelling on disk.
+    // spelling on disk. The plan holds each write to its literal.
     [Fact]
     public void RowToggles_PersistTheOpenSetUnderTheirOwnKey()
     {
-        var cut = Render<FilterPanel>();
+        var (cut, plan) = RenderWithPreferences(BrowserStorageReadAnswer.Absent, BrowserStorageReadAnswer.Absent);
+        plan.ExpectWrite(BrowserStorageArea.Local, MoreFiltersKey, "true", BrowserStorageWriteAnswer.Succeeded);
+        var first = plan.ExpectWrite(BrowserStorageArea.Local, DisclosureKey, "[\"DiceRolls\"]", BrowserStorageWriteAnswer.Succeeded);
+        var second = plan.ExpectWrite(BrowserStorageArea.Local, DisclosureKey, "[\"Players\",\"DiceRolls\"]", BrowserStorageWriteAnswer.Succeeded);
+        var third = plan.ExpectWrite(BrowserStorageArea.Local, DisclosureKey, "[\"Players\"]", BrowserStorageWriteAnswer.Succeeded);
+        plan.RequireOrder(first, second, third);
 
         ExpandFacets(cut, FilterFacet.DiceRolls);
-        Assert.Equal("[\"DiceRolls\"]", LastDisclosureWrite());
-
         ExpandFacets(cut, FilterFacet.Players);
-        Assert.Equal("[\"Players\",\"DiceRolls\"]", LastDisclosureWrite());
-
         ExpandFacets(cut, FilterFacet.DiceRolls);   // close it again
-        Assert.Equal("[\"Players\"]", LastDisclosureWrite());
 
-        Assert.DoesNotContain(JSInterop.Invocations["localStorage.setItem"],
-            i => (string?)i.Arguments[0] == ConfigKey);
+        plan.Verify();
     }
 
     // The stored value survives a full round trip byte for byte: read back
@@ -3137,41 +3159,40 @@ public class FilterPanelTests : BunitContext
     public void StoredOpenSet_RoundTripsByteIdentical()
     {
         const string stored = "[\"Players\",\"MoveNumberRange\",\"DiceRolls\"]";
-        JSInterop.Setup<string?>("localStorage.getItem", DisclosureKey).SetResult(stored);
+        var (cut, plan) = RenderWithPreferences(BrowserStorageReadAnswer.Absent, BrowserStorageReadAnswer.Stored(stored));
+        plan.ExpectWrite(BrowserStorageArea.Local, MoreFiltersKey, "true", BrowserStorageWriteAnswer.Succeeded);
+        var closed = plan.ExpectWrite(BrowserStorageArea.Local, DisclosureKey, "[\"Players\",\"DiceRolls\"]", BrowserStorageWriteAnswer.Succeeded);
+        var reopened = plan.ExpectWrite(BrowserStorageArea.Local, DisclosureKey, stored, BrowserStorageWriteAnswer.Succeeded);
+        plan.RequireOrder(closed, reopened);
 
-        var cut = Render<FilterPanel>();
         OpenMoreFilters(cut);
         Assert.Equal("true", cut.Find("#facetToggle_MoveNumberRange").GetAttribute("aria-expanded"));
 
         ExpandFacets(cut, FilterFacet.MoveNumberRange);   // close…
         ExpandFacets(cut, FilterFacet.MoveNumberRange);   // …and reopen
 
-        Assert.Equal(stored, LastDisclosureWrite());
+        plan.Verify();
     }
-
-    // The last value written under the rows' key.
-    private string? LastDisclosureWrite() =>
-        JSInterop.Invocations["localStorage.setItem"]
-                 .Last(i => (string?)i.Arguments[0] == DisclosureKey).Arguments[1] as string;
 
     // The remembered set restores across sessions: the named rows mount open,
     // no click needed, and the rows it does not name stay shut. Opening the
     // container to look is not what opened them — it carries its own key and
-    // this scenario seeds only the rows' — which is the independence the two
+    // this scenario stores only the rows' — which is the independence the two
     // keys buy.
     [Fact]
     public void StoredOpenSet_MountsExactlyThoseRowsExpanded()
     {
-        JSInterop.Setup<string?>("localStorage.getItem", DisclosureKey)
-            .SetResult("[\"Players\",\"PositionPattern\"]");
+        var (cut, plan) = RenderWithPreferences(
+            BrowserStorageReadAnswer.Absent, BrowserStorageReadAnswer.Stored("[\"Players\",\"PositionPattern\"]"));
+        plan.ExpectWrite(BrowserStorageArea.Local, MoreFiltersKey, "true", BrowserStorageWriteAnswer.Succeeded);
 
-        var cut = Render<FilterPanel>();
         OpenMoreFilters(cut);
 
         Assert.Equal("true", cut.Find("#facetToggle_Players").GetAttribute("aria-expanded"));
         Assert.NotNull(cut.Find("#positionPattern"));
         Assert.Equal("false", cut.Find("#facetToggle_DiceRolls").GetAttribute("aria-expanded"));
         Assert.Empty(cut.FindAll("input[id^='dr_']"));
+        plan.Verify();
     }
 
     // Restore is all-or-nothing, and these are the ways a stored value can
@@ -3197,36 +3218,40 @@ public class FilterPanelTests : BunitContext
     [InlineData("[\"Players\",\"NotAFacet\"]")]
     public void StoredOpenSetThatIsUnreadable_MountsEveryRowCollapsed(string stored)
     {
-        JSInterop.Setup<string?>("localStorage.getItem", DisclosureKey).SetResult(stored);
+        var (cut, plan) = RenderWithPreferences(BrowserStorageReadAnswer.Absent, BrowserStorageReadAnswer.Stored(stored));
+        plan.ExpectWrite(BrowserStorageArea.Local, MoreFiltersKey, "true", BrowserStorageWriteAnswer.Succeeded);
 
-        var cut = Render<FilterPanel>();
         OpenMoreFilters(cut);
 
         foreach (var facet in RowFacets)
             Assert.Equal("false", cut.Find($"#facetToggle_{facet}").GetAttribute("aria-expanded"));
+        plan.Verify();
     }
 
-    // The rows' twin of LoadConfig_DuringPendingStoredRestore: a click landing
-    // while the getItem interop is in flight is a fresh user choice the late
-    // restore must not clobber. Open a row while a stored set naming a
-    // different one is pending; the released restore must yield whole — the
-    // user's row stays open and the stored one stays shut.
+    // The rows' twin of the staging-during-restore pin: a click landing while
+    // the rows' read is in flight is a fresh user choice the late restore must
+    // not clobber. Open a row while a stored set naming a different one is
+    // pending; the released restore must yield whole — the user's row stays
+    // open and the stored one stays shut.
     [Fact]
-    public void RowToggle_DuringPendingStoredRestore_UserChoiceWins()
+    public async Task RowToggle_DuringPendingStoredRestore_UserChoiceWins()
     {
-        var pendingGet = JSInterop.Setup<string?>("localStorage.getItem", DisclosureKey);
-
+        var plan = Planned();
+        plan.ExpectFilterRestore(FilterRestoration.NothingStored);
+        plan.ExpectRead(BrowserStorageArea.Local, MoreFiltersKey, BrowserStorageReadAnswer.Absent);
+        var rows = plan.ExpectHeldRead(BrowserStorageArea.Local, DisclosureKey);
+        ExpectExpansion(plan, FilterFacet.DiceRolls);
         var cut = Render<FilterPanel>();
+        Assert.True(rows.IsReached);
 
         ExpandFacets(cut, FilterFacet.DiceRolls);
 
-        pendingGet.SetResult("[\"Players\"]");
+        rows.Release(BrowserStorageReadAnswer.Stored("[\"Players\"]"));
+        await RenderedAfterMount(cut);
 
-        cut.WaitForAssertion(() =>
-        {
-            Assert.Equal("true", cut.Find("#facetToggle_DiceRolls").GetAttribute("aria-expanded"));
-            Assert.Equal("false", cut.Find("#facetToggle_Players").GetAttribute("aria-expanded"));
-        });
+        Assert.Equal("true", cut.Find("#facetToggle_DiceRolls").GetAttribute("aria-expanded"));
+        Assert.Equal("false", cut.Find("#facetToggle_Players").GetAttribute("aria-expanded"));
+        plan.Verify();
     }
 
     // The facets whose section carries a bracketed hint — every row but
@@ -3364,7 +3389,7 @@ public class FilterPanelTests : BunitContext
     }
 
     // A badge lights on the value being staged, not on Apply: it reads the live
-    // edit buffers through the same build path Apply commits through, which is
+    // draft through the same parsed config Apply commits, which is
     // what makes it honest mid-edit. Only this row badges — the badge is per
     // facet, never a panel-wide signal wearing eight ids.
     [Fact]
@@ -3380,12 +3405,12 @@ public class FilterPanelTests : BunitContext
     }
 
     // The pin the badge's SSOT rests on: PRESENCE is the lib's ruling
-    // (GetActiveFacets on the live buffers), never a re-reading of the buffer
+    // (GetActiveFacets on the live draft), never a re-reading of the text
     // behind the controls. These are the three states where the two answers
-    // genuinely differ, so a badge that consulted its buffer directly would
+    // genuinely differ, so a badge that consulted its box directly would
     // light in each of them and fail here:
     //
-    //   · whitespace-only position-pattern text is a non-empty buffer and
+    //   · whitespace-only position-pattern text is a non-empty box and
     //     no pattern at all — the facet is off;
     //   · a depth level list whose mode toggle is off is inert by the lib's
     //     guarantee — checked levels, facet still off;
@@ -3435,9 +3460,9 @@ public class FilterPanelTests : BunitContext
 
     // A loaded saved filter can stage values into collapsed rows. Their badges
     // must report it at rest — and staging must not open anything: opening a
-    // row is the user's gesture, never LoadConfig's.
+    // row is the user's gesture, never staging's.
     [Fact]
-    public async Task LoadConfig_StagedFacets_LightBadges_WithoutOpeningRows()
+    public async Task Staging_StagedFacets_LightBadges_WithoutOpeningRows()
     {
         var cut = Render<FilterPanel>();
 
@@ -3446,7 +3471,7 @@ public class FilterPanelTests : BunitContext
             ContactTypes = [ContactType.Race],
             DiceRolls = [new DiceRoll(3, 1)],
         };
-        await cut.InvokeAsync(() => cut.Instance.LoadConfig(loaded));
+        await cut.InvokeAsync(() => Setup.Stage(loaded));
         OpenMoreFilters(cut);
 
         foreach (var facet in RowFacets)
@@ -3457,22 +3482,25 @@ public class FilterPanelTests : BunitContext
         Assert.Equal(2, cut.FindAll("span[id^='facetBadge_']").Count);
     }
 
-    // A restored session with active facets badges them at rest — the
-    // first-render restore hydrates the buffers the badges read.
+    // A restored session with active facets badges them at rest — the boot's
+    // restoration hydrates the draft the badges read.
     [Fact]
     public void StoredConfigWithActiveFacets_LightsBadgesAtRest()
     {
-        var stored = new FilterConfig { ContactTypes = [ContactType.Race] };
-        JSInterop.Setup<string?>("localStorage.getItem", ConfigKey).SetResult(stored.ToJson());
-
+        var plan = Planned();
+        plan.ExpectFilterRestore(new FilterConfig { ContactTypes = [ContactType.Race] });
+        plan.ExpectFilterPanelMount();
+        plan.ExpectFilterFoldToggle(open: true, BrowserStorageWriteAnswer.Succeeded);
         var cut = Render<FilterPanel>();
+
         OpenMoreFilters(cut);
 
         var badge = Assert.Single(cut.FindAll("span[id^='facetBadge_']"));
         Assert.Equal("facetBadge_ContactTypes", badge.Id);
+        plan.Verify();
     }
 
-    // Clear filters empties every buffer, so every badge goes out with them.
+    // Clear filters empties the draft, so every badge goes out with it.
     [Fact]
     public async Task ClearFilters_ExtinguishesEveryBadge()
     {
@@ -3494,18 +3522,14 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public async Task Apply_IsUnaffectedByWhichRowsAreOpen()
     {
-        FilterConfig? capturedConfig = null;
-        var cut = RenderExpanded(
-            parameters => parameters
-                .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }),
-            FilterFacet.ContactTypes);
+        var cut = RenderExpanded(FilterFacet.ContactTypes);
 
         cut.Find("#ct_Race").Change(true);
         ExpandFacets(cut, FilterFacet.ContactTypes);   // collapse before applying
         await Apply(cut).ClickAsync(new());
 
-        Assert.NotNull(capturedConfig);
-        Assert.Equal([ContactType.Race], capturedConfig!.ContactTypes);
+        Assert.NotNull(LastCommit);
+        Assert.Equal([ContactType.Race], LastCommit!.ContactTypes);
         Assert.True(Apply(cut).HasAttribute("disabled"));
 
         // Opening the row afterwards is navigation: nothing to re-apply.
@@ -3552,11 +3576,7 @@ public class FilterPanelTests : BunitContext
     [Fact]
     public async Task ClearFilters_RaisesEmptyConfig()
     {
-        FilterConfig? capturedConfig = null;
-        var cut = RenderExpanded(
-            parameters => parameters
-                .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => { capturedConfig = c; }),
-            FilterFacet.Players, FilterFacet.ContactTypes);
+        var cut = RenderExpanded(FilterFacet.Players, FilterFacet.ContactTypes);
 
         cut.Find("input[placeholder='e.g. Hal, Magriel']").Input("Hal");
         cut.Find("#ct_Race").Change(true);
@@ -3564,8 +3584,8 @@ public class FilterPanelTests : BunitContext
 
         await cut.Find("#clearFilters").ClickAsync(new());
 
-        Assert.NotNull(capturedConfig);
-        Assert.Empty(capturedConfig!.GetActiveFacets());
+        Assert.NotNull(LastCommit);
+        Assert.Empty(LastCommit!.GetActiveFacets());
     }
 
     // Clearing touches filter values only: every row stays exactly where the
@@ -3583,14 +3603,14 @@ public class FilterPanelTests : BunitContext
     }
 
     // …and a closed one stays closed, even when the cleared values lived
-    // inside it (staged via LoadConfig, so no row was ever opened). Its badge
+    // inside it (staged from a saved filter, so no row was ever opened). Its badge
     // goes out, which is the row moving no further than the filter did.
     [Fact]
     public async Task ClearFilters_LeavesClosedRowsClosed()
     {
         var cut = Render<FilterPanel>();
 
-        await cut.InvokeAsync(() => cut.Instance.LoadConfig(
+        await cut.InvokeAsync(() => Setup.Stage(
             new FilterConfig { ContactTypes = [ContactType.Race] }));
 
         await cut.Find("#clearFilters").ClickAsync(new());
@@ -3601,23 +3621,23 @@ public class FilterPanelTests : BunitContext
     }
 
     // The gesture's whole persisted side-effect surface is one write: the
-    // empty config blob under ConfigKey. No open-rows write — and host
-    // state (e.g. BgQuiz's picked folder) is structurally out of reach: the
-    // panel has no parameter or interop path to any; the raised config is its
-    // only channel to the host.
+    // empty selection under the selection's key. No open-rows write — and
+    // host state (e.g. BgQuiz's picked folder) is structurally out of reach:
+    // the panel has no parameter or interop path to any.
     [Fact]
-    public async Task ClearFilters_WritesOnlyTheConfigKey()
+    public async Task ClearFilters_WritesOnlyTheEmptySelection()
     {
+        var plan = Planned();
+        plan.ExpectFilterRestore(FilterRestoration.NothingStored);
+        plan.ExpectFilterPanelMount();
+        plan.ExpectWrite(BrowserStorageArea.Local, ConfigKey, new FilterConfig().ToJson(), BrowserStorageWriteAnswer.Succeeded);
         var cut = Render<FilterPanel>();
 
-        await cut.InvokeAsync(() => cut.Instance.LoadConfig(
-            new FilterConfig { ContactTypes = [ContactType.Race] }));
+        await cut.InvokeAsync(() => Setup.Stage(new FilterConfig { ContactTypes = [ContactType.Race] }));
 
         await cut.Find("#clearFilters").ClickAsync(new());
 
-        var setKey = Assert.Single(JSInterop.Invocations["localStorage.setItem"]
-            .Select(i => (string?)i.Arguments[0]).Distinct());
-        Assert.Equal(ConfigKey, setKey);
+        plan.Verify();
     }
 
     // ── The ruled labels have one owner ────────────────────────────────────

@@ -1,55 +1,74 @@
 using System.Reflection;
 using AngleSharp.Dom;
 using Bunit;
+using BgUiPrimitives_Razor;
+using BgUiPrimitives_Razor.TestSupport;
 using Microsoft.AspNetCore.Components;
+using Microsoft.Extensions.DependencyInjection;
+using XgFilter_Lib.Enums;
 using XgFilter_Lib.Filtering;
 using XgFilter_Razor.Components;
-using XgFilter_Razor.Components.Internal;
+using XgFilter_Razor.Testing;
 
 namespace XgFilter_Razor.Tests;
 
+/// <summary>
+/// The composite's own wiring: the saved-filters mount and its mediation, the
+/// setup-change rule for the saved-filters context, the boxes it and the
+/// panel render, and what a host sees of the owner through it. The §4
+/// acceptance cases are <see cref="FilterSetupAcceptanceTests"/>.
+/// </summary>
 public class FilterSurfaceTests : BunitContext
 {
-    public FilterSurfaceTests()
-    {
-        // Loose mode — the inner FilterPanel's OnAfterRenderAsync issues
-        // localStorage.getItem calls; default (null) means "no persisted state".
-        JSInterop.Mode = JSRuntimeMode.Loose;
-    }
-
     private static readonly FilterSourceToken TokenA = FilterSourceToken.FromGeneration(1);
     private static readonly FilterSourceToken TokenB = FilterSourceToken.FromGeneration(2);
 
-    // Host-side captures: the holder and restore notice the composite
-    // mediates (both app-scoped in a real host — one instance across every
-    // render in a test, like one instance across every mount in an app), and
-    // the two re-raised event channels (lists — per-gesture counts are part
-    // of the contract).
-    private readonly AppliedFilter _holder = new();
-    private readonly FilterRestoreNotice _notice = new();
-    private readonly List<FilterConfig> _committed = [];
-    private readonly List<FilterConfig?> _reports = [];
+    private readonly RecordingRefusalSink _refusals = new();
+
+    public FilterSurfaceTests()
+    {
+        // Loose mode — storage is incidental to most of these: every read
+        // answers "nothing stored" and every write lands, through the real
+        // BrowserStorage. A test about what was restored plans storage
+        // strictly instead (Booting).
+        JSInterop.Mode = JSRuntimeMode.Loose;
+        Services.AddSingleton(_refusals);
+        Services.AddFilterSurface<RecordingRefusalSink>();
+
+        // The host's source, latched before the page mounts.
+        Setup.ReportSource(TokenA);
+    }
+
+    private FilterSetup Setup => Services.GetRequiredService<FilterSetup>();
 
     private IRenderedComponent<FilterSurface> RenderSurface(
-        FilterSourceToken? source,
         IDocumentStorage? storage,
         bool canPersist = true,
         string? persistDisabledReason = null)
         => Render<FilterSurface>(parameters => parameters
-            .Add(p => p.AppliedFilter, _holder)
-            .Add(p => p.RestoreNotice, _notice)
-            .Add(p => p.Source, source)
             .Add(p => p.Storage, storage)
             .Add(p => p.CanPersist, canPersist)
-            .Add(p => p.PersistDisabledReason, persistDisabledReason)
-            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => _committed.Add(c))
-            .Add(p => p.OnAppliedStateChanged, (FilterConfig? c) => _reports.Add(c)));
+            .Add(p => p.PersistDisabledReason, persistDisabledReason));
+
+    // A boot whose restoration reads `restore`, and `mounts` mounts of the
+    // panel finding no display preference stored — planned strictly, for the
+    // tests whose subject is what was restored.
+    private BrowserStoragePlan Booting(BrowserStorageReadAnswer restore, int mounts = 1)
+    {
+        var plan = BrowserStoragePlan.On(JSInterop);
+        plan.ExpectRead(BrowserStorageArea.Local, FilterStorage.ConfigKey, restore);
+        plan.ExpectFilterPanelMount(mounts);
+        return plan;
+    }
+
+    private BrowserStoragePlan BootingWith(FilterConfig stored, int mounts = 1) =>
+        Booting(FilterSurfaceStorage.RestoreAnswer(stored), mounts);
 
     // The panel's facet rows are folded behind its More filters container
     // (halheinrich/backgammon#231), so a surface test that reaches a row opens
     // the container first — through its real toggle, and waiting on
-    // aria-expanded, because the handler persists the choice through interop
-    // before the render that puts the rows in the DOM lands.
+    // aria-expanded, because the handler persists the choice before the
+    // render that puts the rows in the DOM lands.
     private static void OpenMoreFilters(IRenderedComponent<FilterSurface> cut)
     {
         cut.Find("#moreFiltersToggle").Click();
@@ -64,14 +83,6 @@ public class FilterSurfaceTests : BunitContext
             filters = filters.With(name, config);
         return filters.ToJson();
     }
-
-    // Stand the inner panel's persisted selection up, so a mount restores it —
-    // the navigate-back starting state, where localStorage still holds what
-    // the previous mount applied. Through FilterPanel.ConfigKey rather than a
-    // repeated literal: the key is incidental plumbing here, not the subject.
-    private void StoredConfig(FilterConfig config) =>
-        JSInterop.Setup<string?>("localStorage.getItem", FilterPanel.ConfigKey)
-                 .SetResult(config.ToJson());
 
     private static FakeDocumentStorage StorageWith(params (string Name, FilterConfig Config)[] entries)
     {
@@ -112,7 +123,7 @@ public class FilterSurfaceTests : BunitContext
     {
         var storage = StorageWith(("Race", new FilterConfig()));
 
-        var cut = RenderSurface(TokenA, storage);
+        var cut = RenderSurface(storage);
 
         Assert.NotNull(FindRowButton(cut, "Race", "Load"));
         Assert.Contains(SavedFiltersDocument.FileName, storage.Reads);
@@ -121,131 +132,93 @@ public class FilterSurfaceTests : BunitContext
     [Fact]
     public void Mount_NullStorage_NoSavedSection_FilterPanelStillRenders()
     {
-        var cut = RenderSurface(TokenA, storage: null);
+        var cut = RenderSurface(storage: null);
 
         Assert.Empty(cut.FindAll("li.list-group-item"));
         Assert.Empty(cut.FindAll("#saveFilterName"));
         Assert.Contains("Apply Filter", cut.Markup);
     }
 
-    // The first-mount pin: mounting over an unchanged source initializes the
-    // comparison token and loads the context — nothing else. A holder already
-    // applied (navigate-back: the holder outlived the previous mount) stays
-    // applied, and mount alone re-raises no applied-state report that could
-    // move a host gate.
+    // A mount is not a change. A remount over the same source — a
+    // navigate-back — learns the setup as it stands, so what was applied is
+    // still in effect, the panel shows it with Apply disabled for the reason
+    // it is, and the mount publishes nothing that could move a host's gate.
     [Fact]
-    public void Mount_OverSameSource_LeavesAppliedHolderUntouched_RaisesNothing()
+    public async Task Remount_OverTheSameSource_KeepsWhatIsInEffect_AndPublishesNothing()
     {
-        var appliedConfig = new FilterConfig { ErrorMin = 0.1 };
-        _holder.Set(appliedConfig, TokenA);
+        var first = RenderSurface(new FakeDocumentStorage());
+        ErrorMin(first).Input("0.1");
+        await Apply(first).ClickAsync(new());
+        await DisposeComponentsAsync();
+        var published = 0;
+        Setup.Attach(_ => published++);
+        published = 0;
 
-        RenderSurface(TokenA, StorageWith(("Race", new FilterConfig())));
+        var second = RenderSurface(new FakeDocumentStorage());
 
-        Assert.Same(appliedConfig, _holder.ConfigFor(TokenA));
-        Assert.Empty(_reports);
-        Assert.Empty(_committed);
+        Assert.Equal("0.1", ErrorMin(second).GetAttribute("value"));
+        Assert.True(Apply(second).HasAttribute("disabled"));
+        Assert.Contains("already applied", second.Find("#applyDisabledReason").TextContent);
+        Assert.True(Setup.Current.IsInEffectFor(TokenA));
+        Assert.Equal(0, published);
     }
 
-    // ── The first-mount reconcile (halheinrich/backgammon#82) ─────────────────────────────────────
-
-    // The navigate-back case the reconcile exists for: the holder outlived the
-    // previous mount still carrying the config applied for this source, and
-    // the panel restores exactly that selection from storage. The
-    // fresh panel has committed nothing of its own, so without the reconcile
-    // Apply re-arms with nothing to do. Seeding is silent — a reconcile
-    // derives from the holder, which already agrees, so there is no news; the
-    // mount pin above still holds.
+    // The surface binds only what is the host's to say here — the
+    // saved-filters adapter and the host's capability ruling with its wording.
+    // Everything about the selection is the owner's, so no parameter can hand
+    // the surface a second copy of it.
     [Fact]
-    public void Mount_HolderAppliedForThisSource_SeedsCommitted_ApplyDisabled_RaisesNothing()
+    public void TheSurface_BindsOnlyTheHostsSavedFiltersFacts()
     {
-        // Navigate-back after Apply: the holder still carries the applied
-        // config, and the Apply that set it also spent the restore notice —
-        // an applied holder and a pending notice cannot coexist in a real
-        // boot, so the simulated history says so.
-        var applied = new FilterConfig { ErrorMin = 0.1 };
-        _holder.Set(applied, TokenA);
-        _notice.Dismiss();
-        StoredConfig(applied);
+        var parameters = typeof(FilterSurface)
+            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Where(p => p.GetCustomAttribute<ParameterAttribute>() is not null)
+            .Select(p => p.Name)
+            .Order(StringComparer.Ordinal);
 
-        var cut = RenderSurface(TokenA, new FakeDocumentStorage());
-
-        cut.WaitForAssertion(() => Assert.True(Apply(cut).HasAttribute("disabled")));
-        Assert.Contains("already applied", cut.Find("#applyDisabledReason").TextContent);
-        Assert.Empty(_reports);
-        Assert.Empty(_committed);
-        Assert.Same(applied, _holder.ConfigFor(TokenA));
-    }
-
-    // The fresh-mount posture the reconcile must not eat, and the test that
-    // fails if anyone ever seeds from localStorage instead of the holder: a
-    // full browser reload keeps the stored selection but resets the holder, so
-    // there IS something to do — applying re-opens the host's gate. Disabling
-    // Apply here would be a lock-out.
-    [Fact]
-    public void Mount_EmptyHolder_WithRestorableStorage_LeavesApplyEnabled()
-    {
-        StoredConfig(new FilterConfig { ErrorMin = 0.1 });
-
-        var cut = RenderSurface(TokenA, new FakeDocumentStorage());
-
-        Assert.Null(_holder.ConfigFor(TokenA));
-        cut.WaitForAssertion(() => Assert.Equal("0.1", ErrorMin(cut).GetAttribute("value")));
-        Assert.False(Apply(cut).HasAttribute("disabled"));
-    }
-
-    // The keyed lookup answers source-relatively: a holder carrying a config
-    // applied against another source has said nothing about this one, so the
-    // reconcile leaves Apply armed.
-    [Fact]
-    public void Mount_HolderKeyedToAnotherSource_DoesNotSeed_ApplyStaysEnabled()
-    {
-        var applied = new FilterConfig { ErrorMin = 0.1 };
-        _holder.Set(applied, TokenB);
-        StoredConfig(applied);
-
-        var cut = RenderSurface(TokenA, new FakeDocumentStorage());
-
-        cut.WaitForAssertion(() => Assert.Equal("0.1", ErrorMin(cut).GetAttribute("value")));
-        Assert.False(Apply(cut).HasAttribute("disabled"));
+        Assert.Equal(
+            [nameof(FilterSurface.CanPersist), nameof(FilterSurface.PersistDisabledReason), nameof(FilterSurface.Storage)],
+            parameters);
     }
 
     // ── The restored-selection notice (§4) ──────────────────────────────────
     //
     // A reload ends the setup: selections restored, applied-ness dropped,
     // Apply re-armed — correct by rule, indistinguishable from a bug unless
-    // the screen says so. The notice's app-scoped state (one _notice per
-    // test class, like one per app boot) is what distinguishes a fresh boot
-    // from a remount within a setup; these pins drive both sides of that
-    // line and the notice's death at the first owning gesture.
+    // the screen says so. The owner is the app boot (one per test context,
+    // like one per reload), which is what distinguishes a fresh boot from a
+    // remount within a setup; these pins drive both sides of that line and
+    // the notice's end at the first owning gesture.
 
     [Fact]
     public void FreshBoot_RestoredSelection_ShowsTheNotice_ApplyStaysArmed()
     {
-        StoredConfig(new FilterConfig { ErrorMin = 0.1 });
+        var plan = BootingWith(new FilterConfig { ErrorMin = 0.1 });
 
-        var cut = RenderSurface(TokenA, new FakeDocumentStorage());
+        var cut = RenderSurface(new FakeDocumentStorage());
 
-        cut.WaitForAssertion(() => Assert.Contains(
-            "previous session", cut.Find("#filterRestoredNotice").TextContent));
+        Assert.Contains("previous session", cut.Find("#filterRestoredNotice").TextContent);
         Assert.False(Apply(cut).HasAttribute("disabled"));
+        plan.Verify();
     }
 
     [Fact]
     public void Mount_NothingStored_NoNotice()
     {
-        // Nothing in storage (the loose JS default): nothing was restored,
-        // so the notice must not claim otherwise over a defaults screen.
-        var cut = RenderSurface(TokenA, new FakeDocumentStorage());
+        var plan = Booting(BrowserStorageReadAnswer.Absent);
 
-        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("#filterRestoredNotice")));
+        var cut = RenderSurface(new FakeDocumentStorage());
+
+        Assert.Equal(FilterRestoration.NothingStored, Setup.Current.Restoration);
+        Assert.Empty(cut.FindAll("#filterRestoredNotice"));
+        plan.Verify();
     }
 
     [Fact]
-    public void Notice_DiesAtTheFirstEdit()
+    public void Notice_EndsAtTheFirstEdit()
     {
-        StoredConfig(new FilterConfig { ErrorMin = 0.1 });
-        var cut = RenderSurface(TokenA, new FakeDocumentStorage());
-        cut.WaitForAssertion(() => cut.Find("#filterRestoredNotice"));
+        BootingWith(new FilterConfig { ErrorMin = 0.1 });
+        var cut = RenderSurface(new FakeDocumentStorage());
 
         ErrorMin(cut).Input("0.2");
 
@@ -253,172 +226,165 @@ public class FilterSurfaceTests : BunitContext
     }
 
     [Fact]
-    public async Task Notice_DiesAtApply()
+    public async Task Notice_EndsAtApply()
     {
-        StoredConfig(new FilterConfig { ErrorMin = 0.1 });
-        var cut = RenderSurface(TokenA, new FakeDocumentStorage());
-        cut.WaitForAssertion(() => cut.Find("#filterRestoredNotice"));
+        var plan = BootingWith(new FilterConfig { ErrorMin = 0.1 });
+        plan.ExpectFilterCommit(new FilterConfig { ErrorMin = 0.1 }, BrowserStorageWriteAnswer.Succeeded);
+        var cut = RenderSurface(new FakeDocumentStorage());
 
         await Apply(cut).ClickAsync(new());
 
         Assert.Empty(cut.FindAll("#filterRestoredNotice"));
+        plan.Verify();
     }
 
     [Fact]
     public void Notice_SurvivesAFacetRowToggle()
     {
         // Opening a filter row is navigation, not an edit — the restored
-        // selection is still not the user's own, so the notice holds.
-        StoredConfig(new FilterConfig { ErrorMin = 0.1 });
-        var cut = RenderSurface(TokenA, new FakeDocumentStorage());
-        cut.WaitForAssertion(() => cut.Find("#filterRestoredNotice"));
+        // selection is still not the user's own, so the notice holds. The rows
+        // are folded behind the More filters container
+        // (halheinrich/backgammon#231) — opening it is navigation too.
+        var plan = BootingWith(new FilterConfig { ErrorMin = 0.1 });
+        plan.ExpectFilterFoldToggle(open: true, BrowserStorageWriteAnswer.Succeeded);
+        plan.ExpectFilterRowsToggle([FilterFacet.DiceRolls], BrowserStorageWriteAnswer.Succeeded);
+        var cut = RenderSurface(new FakeDocumentStorage());
 
-        // The rows are folded behind the More filters container
-        // (halheinrich/backgammon#231) — opening it is navigation too, so the
-        // notice must survive both gestures.
         OpenMoreFilters(cut);
         cut.Find("#facetToggle_DiceRolls").Click();
 
         Assert.NotNull(cut.Find("#filterRestoredNotice"));
+        plan.Verify();
     }
 
-    // The trap the app-scoped state exists for: navigate-back with unapplied
-    // edits looks exactly like a fresh boot at mount time — same restore,
-    // same empty holder — and §1 rules that navigation changes nothing,
-    // including no new notice. The edit spent this boot's notice, so the
-    // remount's restore must not resurrect it.
+    // The trap the owner's lifetime exists for: navigate-back with unapplied
+    // edits looks exactly like a fresh boot at mount time — the same selection
+    // on screen, nothing in effect — and §1 rules that navigation changes
+    // nothing, including no new notice. The edit ended this boot's notice, and
+    // the remount reads nothing, so nothing can bring it back.
     [Fact]
-    public void Remount_WithinSetup_AfterAnEdit_DoesNotResurrectTheNotice()
+    public async Task Remount_WithinSetup_AfterAnEdit_DoesNotResurrectTheNotice()
     {
-        StoredConfig(new FilterConfig { ErrorMin = 0.1 });
-        var first = RenderSurface(TokenA, new FakeDocumentStorage());
-        first.WaitForAssertion(() => first.Find("#filterRestoredNotice"));
+        var plan = BootingWith(new FilterConfig { ErrorMin = 0.1 }, mounts: 2);
+        var first = RenderSurface(new FakeDocumentStorage());
         ErrorMin(first).Input("0.2");
 
-        var second = RenderSurface(TokenA, new FakeDocumentStorage());
+        await DisposeComponentsAsync();
+        var second = RenderSurface(new FakeDocumentStorage());
 
-        second.WaitForAssertion(() =>
-            Assert.Equal("0.1", ErrorMin(second).GetAttribute("value")));
+        Assert.Equal("0.2", ErrorMin(second).GetAttribute("value"));
         Assert.Empty(second.FindAll("#filterRestoredNotice"));
+        plan.Verify();
     }
 
     // The other side of that line: navigation changes nothing, so a remount
-    // over a still-untouched restored selection re-shows the same notice.
+    // over a still-untouched restored selection shows the same notice.
     [Fact]
-    public void Remount_WithinSetup_Untouched_KeepsTheNotice()
+    public async Task Remount_WithinSetup_Untouched_KeepsTheNotice()
     {
-        StoredConfig(new FilterConfig { ErrorMin = 0.1 });
-        var first = RenderSurface(TokenA, new FakeDocumentStorage());
-        first.WaitForAssertion(() => first.Find("#filterRestoredNotice"));
+        var plan = BootingWith(new FilterConfig { ErrorMin = 0.1 }, mounts: 2);
+        RenderSurface(new FakeDocumentStorage());
 
-        var second = RenderSurface(TokenA, new FakeDocumentStorage());
+        await DisposeComponentsAsync();
+        var second = RenderSurface(new FakeDocumentStorage());
 
-        second.WaitForAssertion(() => second.Find("#filterRestoredNotice"));
+        Assert.NotNull(second.Find("#filterRestoredNotice"));
+        plan.Verify();
     }
 
-    // A source change is choreography, not a user gesture: ForgetCommitted
-    // re-arms Apply without dismissing the notice, whose statement — these
-    // selections came from a previous session and are not in effect — is
-    // still true against the new source. (A gated host's source change
-    // crosses an unmount and runs no panel code at all; the in-place rule
-    // must not treat the notice differently.)
+    // A source change is not a user gesture: the setup ends and Apply re-arms
+    // without ending the notice, whose statement — these selections came from
+    // a previous session and are not in effect — is still true against the
+    // new source.
     [Fact]
-    public void Notice_SurvivesAnInPlaceSourceChange()
+    public async Task Notice_SurvivesASourceChange()
     {
-        StoredConfig(new FilterConfig { ErrorMin = 0.1 });
-        var cut = RenderSurface(TokenA, new FakeDocumentStorage());
-        cut.WaitForAssertion(() => cut.Find("#filterRestoredNotice"));
+        BootingWith(new FilterConfig { ErrorMin = 0.1 });
+        var cut = RenderSurface(new FakeDocumentStorage());
 
-        cut.Render(parameters => parameters.Add(p => p.Source, TokenB));
+        await cut.InvokeAsync(() => Setup.ReportSource(TokenB));
 
         Assert.NotNull(cut.Find("#filterRestoredNotice"));
-        Assert.Null(_reports[^1]);
+        Assert.False(Setup.Current.IsInEffectFor(TokenB));
     }
 
-    // ── Applied-state mediation ─────────────────────────────────────────────
+    // ── What a host reads ───────────────────────────────────────────────────
 
     [Fact]
-    public async Task Apply_KeysHolderToSource_AndRaisesBothEvents()
+    public async Task Apply_PutsTheSelectionInEffect_ForThisSourceOnly()
     {
-        var cut = RenderSurface(TokenA, new FakeDocumentStorage());
+        var cut = RenderSurface(new FakeDocumentStorage());
 
         ErrorMin(cut).Input("0.05");
         await Apply(cut).ClickAsync(new());
 
-        var committed = Assert.Single(_committed);
-        Assert.Same(committed, _holder.ConfigFor(TokenA));
-        Assert.Null(_holder.ConfigFor(TokenB));
-        // The edit's null report, then the commit's clean re-affirm.
-        Assert.Equal(2, _reports.Count);
-        Assert.Null(_reports[0]);
-        Assert.Same(committed, _reports[1]);
+        Assert.Equal(new FilterConfig { ErrorMin = 0.05 }, Setup.Current.ConfigInEffectFor(TokenA));
+        Assert.Null(Setup.Current.ConfigInEffectFor(TokenB));
     }
 
-    // An edit drops the applied state entirely — nothing survives it for any
-    // source (halheinrich/backgammon#92, spec §3: only present ownership
-    // exists; no behaviour may answer from filter history).
+    // An edit takes the selection out of effect — nothing stays in force for
+    // any source (spec §3: only present ownership exists).
     [Fact]
-    public async Task EditAfterApply_DropsTheAppliedState_ReportsNull()
+    public async Task EditAfterApply_TakesTheSelectionOutOfEffect()
     {
-        var cut = RenderSurface(TokenA, new FakeDocumentStorage());
+        var cut = RenderSurface(new FakeDocumentStorage());
         await Apply(cut).ClickAsync(new());
-        Assert.NotNull(_holder.ConfigFor(TokenA));
+        Assert.True(Setup.Current.IsInEffectFor(TokenA));
 
         ErrorMin(cut).Input("0.05");
 
-        Assert.Null(_holder.ConfigFor(TokenA));
-        Assert.Null(_reports[^1]);
+        Assert.False(Setup.Current.IsInEffectFor(TokenA));
     }
 
+    // With no source there is nothing to filter (§1, "Before a dir is
+    // selected"): Apply is off, and nothing is in effect.
     [Fact]
-    public async Task Apply_WithNoSource_LeavesHolderUntouched_StillRaisesEvents()
+    public async Task WithNoSource_ApplyIsOff()
     {
-        var cut = RenderSurface(source: null, storage: null);
+        Setup.ReportSource(null);
+        var cut = RenderSurface(storage: null);
 
         await Apply(cut).ClickAsync(new());
 
-        Assert.Null(_holder.ConfigFor(TokenA));
-        Assert.Single(_committed);
-        Assert.Single(_reports);
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+        Assert.Null(Setup.Current.Baseline);
     }
 
-    // ── The source-change rule ──────────────────────────────────────────────
+    // ── The setup-change rule for the saved-filters context ────────────────
 
     [Fact]
-    public async Task SourceChange_EndsSetup_ReArmsApply_ReloadsContext()
+    public async Task SourceChange_EndsTheSetup_ReArmsApply_ReloadsTheContext()
     {
         var storage = StorageWith(("Race", new FilterConfig()));
-        var cut = RenderSurface(TokenA, storage);
+        var cut = RenderSurface(storage);
         ErrorMin(cut).Input("0.05");
         await Apply(cut).ClickAsync(new());
         Assert.True(Apply(cut).HasAttribute("disabled"));
         var readsBefore = storage.Reads.Count;
 
-        cut.Render(parameters => parameters.Add(p => p.Source, TokenB));
+        await cut.InvokeAsync(() => Setup.ReportSource(TokenB));
 
-        // The setup ended: the applied state dropped entirely — nothing stays
-        // in force for the old source or the new one.
-        Assert.Null(_holder.ConfigFor(TokenA));
-        Assert.Null(_holder.ConfigFor(TokenB));
-        // Apply re-armed on the still-mounted panel, and the host was told
-        // through the normal path.
-        Assert.False(Apply(cut).HasAttribute("disabled"));
-        Assert.Null(_reports[^1]);
+        // The setup ended: nothing stays in force for the old source or the new.
+        Assert.False(Setup.Current.IsInEffectFor(TokenA));
+        Assert.False(Setup.Current.IsInEffectFor(TokenB));
+        // Apply re-armed on the still-mounted panel; the draft stayed.
+        cut.WaitForAssertion(() => Assert.False(Apply(cut).HasAttribute("disabled")));
+        Assert.Equal("0.05", ErrorMin(cut).GetAttribute("value"));
         // The saved-filters context reloaded through the seam.
-        Assert.True(storage.Reads.Count > readsBefore);
+        cut.WaitForAssertion(() => Assert.True(storage.Reads.Count > readsBefore));
         Assert.NotNull(FindRowButton(cut, "Race", "Load"));
     }
 
     [Fact]
-    public void SourceChangeToNull_ResetsContext_HidesSavedSection()
+    public async Task SourceChangeToNone_ResetsTheContext_HidesTheSavedSection()
     {
         var storage = StorageWith(("Race", new FilterConfig()));
-        var cut = RenderSurface(TokenA, storage);
+        var cut = RenderSurface(storage);
         Assert.NotNull(FindRowButton(cut, "Race", "Load"));
 
-        cut.Render(parameters => parameters.Add(p => p.Source, (FilterSourceToken?)null));
+        await cut.InvokeAsync(() => Setup.ReportSource(null));
 
-        Assert.Empty(cut.FindAll("li.list-group-item"));
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("li.list-group-item")));
         Assert.Empty(cut.FindAll("#saveFilterName"));
     }
 
@@ -427,15 +393,13 @@ public class FilterSurfaceTests : BunitContext
     [Fact]
     public async Task Load_StagesTheSavedConfig_WithoutCommitting()
     {
-        var cut = RenderSurface(
-            TokenA, StorageWith(("Race", new FilterConfig { ErrorMin = 0.25 })));
+        var cut = RenderSurface(StorageWith(("Race", new FilterConfig { ErrorMin = 0.25 })));
 
         await ClickRowButtonAsync(cut, "Race", "Load");
 
         Assert.Equal("0.25", ErrorMin(cut).GetAttribute("value"));
-        Assert.Empty(_committed);                 // staged, not committed
-        Assert.Null(_holder.ConfigFor(TokenA));   // the holder only moves on commit
-        Assert.Null(_reports[^1]);                // staging reported as uncommitted
+        Assert.Null(Setup.Current.Baseline);          // staged, not committed
+        Assert.False(Setup.Current.IsInEffectFor(TokenA));
     }
 
     // A load request naming an entry the document does not hold cannot come
@@ -447,7 +411,7 @@ public class FilterSurfaceTests : BunitContext
     [Fact]
     public async Task LoadRequest_NamingAnAbsentEntry_Throws()
     {
-        var cut = RenderSurface(TokenA, StorageWith(("Race", new FilterConfig())));
+        var cut = RenderSurface(StorageWith(("Race", new FilterConfig())));
         var panel =
             cut.FindComponent<NamedEntriesPanel<FilterConfig, NamedFilterCollection>>();
 
@@ -460,10 +424,10 @@ public class FilterSurfaceTests : BunitContext
     }
 
     [Fact]
-    public async Task RowSave_SnapshotsLiveBuffers_WritesCanonicalThroughSeam()
+    public async Task RowSave_SnapshotsTheLiveDraft_WritesCanonicalThroughSeam()
     {
         var storage = StorageWith(("Race", new FilterConfig()));
-        var cut = RenderSurface(TokenA, storage);
+        var cut = RenderSurface(storage);
 
         ErrorMin(cut).Input("0.5");
         await ClickRowButtonAsync(cut, "Race", "Save");
@@ -480,7 +444,7 @@ public class FilterSurfaceTests : BunitContext
     public async Task SaveAs_NewName_WritesThroughSeam()
     {
         var storage = new FakeDocumentStorage();
-        var cut = RenderSurface(TokenA, storage);
+        var cut = RenderSurface(storage);
 
         cut.Find("#saveFilterName").Input("Blitz");
         await cut.Find("#saveFilterButton").ClickAsync(new());
@@ -495,10 +459,10 @@ public class FilterSurfaceTests : BunitContext
     public async Task Save_UnparseablePattern_RefusalNotice_NoWrite_ClearedByNextGesture()
     {
         var storage = StorageWith(("Race", new FilterConfig()));
-        var cut = RenderSurface(TokenA, storage);
+        var cut = RenderSurface(storage);
 
         // Stage an unparseable position pattern (inside its own filter row),
-        // then attempt a row Save: TryGetEditedConfig refuses, so the composite
+        // then attempt a row Save: the snapshot is refused, so the composite
         // must say why instead of no-opping silently.
         OpenMoreFilters(cut);   // the rows are behind it
         cut.Find("#facetToggle_PositionPattern").Click();
@@ -509,43 +473,45 @@ public class FilterSurfaceTests : BunitContext
         Assert.Contains("can't be saved", cut.Find("#filterSaveError").TextContent);
         Assert.Empty(storage.Writes);
 
-        // Any panel gesture moots the refusal — fixing the pattern is one.
+        // Any change to the selection moots the refusal — fixing the pattern is one.
         cut.Find("#positionPattern").Input(string.Empty);
 
-        Assert.Empty(cut.FindAll("#filterSaveError"));
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("#filterSaveError")));
     }
 
-    // The refusal is the panel's validity gate, not one particular rule of it:
-    // an error bound the lib rules invalid refuses the snapshot exactly as an
-    // unparseable pattern does, and the composite says so with the same
-    // field-agnostic copy — the offending value is already marked, with its own
-    // explanation, in the panel below.
-    [Fact]
-    public async Task Save_InvalidErrorBound_RefusalNotice_NoWrite()
+    // The refusal is the draft's validity verdict, not one particular rule of
+    // it: an error bound the lib rules invalid refuses the snapshot exactly as
+    // an unparseable pattern does, and so does a box its field cannot be —
+    // each with the same field-agnostic copy, the offending value already
+    // marked, with its own explanation, in the panel below.
+    [Theory]
+    [InlineData("5", "2")]
+    [InlineData("abc", "")]
+    public async Task Save_InvalidErrorBound_RefusalNotice_NoWrite(string min, string max)
     {
         var storage = StorageWith(("Race", new FilterConfig()));
-        var cut = RenderSurface(TokenA, storage);
+        var cut = RenderSurface(storage);
 
-        // Min above Max — always-visible facet, so no disclosure gesture needed.
-        cut.Find("#errorMin").Input("5");
-        cut.Find("#errorMax").Input("2");
+        cut.Find("#errorMin").Input(min);
+        cut.Find("#errorMax").Input(max);
         await ClickRowButtonAsync(cut, "Race", "Save");
         await ClickRowButtonAsync(cut, "Race", "Overwrite");
 
         Assert.Contains("can't be saved", cut.Find("#filterSaveError").TextContent);
         Assert.Empty(storage.Writes);
 
-        // Fixing the bound is a panel gesture, so it moots the refusal.
+        // Fixing the bound is a change to the selection, so it moots the refusal.
+        cut.Find("#errorMin").Input("1");
         cut.Find("#errorMax").Input("9");
 
-        Assert.Empty(cut.FindAll("#filterSaveError"));
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("#filterSaveError")));
     }
 
     [Fact]
     public async Task Delete_PersistsTheRemoval()
     {
         var storage = StorageWith(("Race", new FilterConfig()), ("Blitz", new FilterConfig()));
-        var cut = RenderSurface(TokenA, storage);
+        var cut = RenderSurface(storage);
 
         await ClickRowButtonAsync(cut, "Race", "Delete");
         await ClickRowButtonAsync(cut, "Race", "Confirm delete");
@@ -564,7 +530,7 @@ public class FilterSurfaceTests : BunitContext
         // Canonical corrupt → the notice names the canonical file.
         var storage = new FakeDocumentStorage();
         storage.Documents[SavedFiltersDocument.FileName] = "not a filters document";
-        var cut = RenderSurface(TokenA, storage);
+        var cut = RenderSurface(storage);
 
         var notice = cut.Find("#savedFiltersLoadFailed");
         Assert.Contains(SavedFiltersDocument.FileName, notice.TextContent);
@@ -578,7 +544,7 @@ public class FilterSurfaceTests : BunitContext
     {
         var storage = new FakeDocumentStorage();
         storage.Documents[SavedFiltersDocument.LegacyFileName] = "not a filters document";
-        var cut = RenderSurface(TokenA, storage);
+        var cut = RenderSurface(storage);
 
         Assert.Contains(
             SavedFiltersDocument.LegacyFileName,
@@ -594,7 +560,7 @@ public class FilterSurfaceTests : BunitContext
     {
         var storage = StorageWith(("Race", new FilterConfig()));
         storage.ThrowOnWrite = true;
-        var cut = RenderSurface(TokenA, storage);
+        var cut = RenderSurface(storage);
 
         await ClickRowButtonAsync(cut, "Race", "Save");
         await ClickRowButtonAsync(cut, "Race", "Overwrite");
@@ -613,7 +579,7 @@ public class FilterSurfaceTests : BunitContext
     {
         // No document at all → Ready over Empty; with the host's CanPersist
         // false there is nothing to load and nothing to save — clutter rule.
-        var cut = RenderSurface(TokenA, new FakeDocumentStorage(), canPersist: false);
+        var cut = RenderSurface(new FakeDocumentStorage(), canPersist: false);
 
         Assert.Empty(cut.FindAll("li.list-group-item"));
         Assert.Empty(cut.FindAll("#saveFilterName"));
@@ -625,7 +591,7 @@ public class FilterSurfaceTests : BunitContext
     {
         const string reason = "Write access wasn't granted — saved filters can be loaded only.";
         var cut = RenderSurface(
-            TokenA, StorageWith(("Race", new FilterConfig())),
+            StorageWith(("Race", new FilterConfig())),
             canPersist: false, persistDisabledReason: reason);
 
         Assert.NotNull(FindRowButton(cut, "Race", "Load"));
@@ -684,11 +650,11 @@ public class FilterSurfaceTests : BunitContext
             $"Unexpected attribute on the box: {a.Name}"));
     }
 
-    private IRenderedComponent<FilterSurface> RenderWithRestoredSelection()
+    private IRenderedComponent<FilterSurface> RenderWithRestoredSelection(int mounts = 1)
     {
-        StoredConfig(new FilterConfig { ErrorMin = 0.1 });
-        var cut = RenderSurface(TokenA, new FakeDocumentStorage());
-        cut.WaitForAssertion(() => cut.Find("#filterRestoredNotice"));
+        BootingWith(new FilterConfig { ErrorMin = 0.1 }, mounts);
+        var cut = RenderSurface(new FakeDocumentStorage());
+        Assert.NotNull(cut.Find("#filterRestoredNotice"));
         return cut;
     }
 
@@ -708,7 +674,7 @@ public class FilterSurfaceTests : BunitContext
         await ClickRowButtonAsync(cut, "Race", "Overwrite");
     }
 
-    // · #filterRestoredNotice — event notice; holder: the app-scoped FilterRestoreNotice
+    // · #filterRestoredNotice — event notice; holder: the app-scoped FilterSetup
 
     [Fact]
     public void RestoreNotice_LandsOnTheComponent_WithItsIdentityIntact()
@@ -721,41 +687,34 @@ public class FilterSurfaceTests : BunitContext
 
     [Theory]
     [MemberData(nameof(DismissGestures))]
-    public void RestoreNotice_Dismisses_AndTheHolderIsWhatMoved(string gesture)
+    public void RestoreNotice_Dismisses_AndTheOwnerIsWhatMoved(string gesture)
     {
         var cut = RenderWithRestoredSelection();
+        var draft = Setup.Current.Draft;
 
         cut.Find("#filterRestoredNotice" + gesture).Click();
 
         Assert.Empty(cut.FindAll("#filterRestoredNotice"));
-        Assert.False(_notice.IsVisible);
-        // Closing a notice is not an edit: nothing was reported, Apply is
-        // still armed over the still-restored selection.
-        Assert.Empty(_reports);
+        Assert.False(Setup.Current.IsRestoredNoticeShowing);
+        // Closing a notice is not an edit: the draft is as it was, and Apply
+        // is still armed over the still-restored selection.
+        Assert.Same(draft, Setup.Current.Draft);
         Assert.False(Apply(cut).HasAttribute("disabled"));
     }
 
-    // The reason the dismissal is the holder's and not the panel's: the
+    // The reason the dismissal is the owner's and not the panel's: the
     // occurrence — this boot's restore — outlives the mount. A navigate-back
-    // remounts the panel, which restores again and Arms again; the closed
-    // notice must not come back, and no later Arm can bring it.
+    // remounts the panel; the closed notice must not come back.
     [Fact]
-    public void RestoreNotice_ClosedByTheUser_StaysClosedAcrossARemount_AndArmCannotResurrectIt()
+    public async Task RestoreNotice_ClosedByTheUser_StaysClosedAcrossARemount()
     {
-        var first = RenderWithRestoredSelection();
+        var first = RenderWithRestoredSelection(mounts: 2);
         first.Find("#filterRestoredNotice button.btn-close").Click();
 
-        var second = RenderSurface(TokenA, new FakeDocumentStorage());
+        await DisposeComponentsAsync();
+        var second = RenderSurface(new FakeDocumentStorage());
 
-        // The remount's restore has landed (and with it, its Arm).
-        second.WaitForAssertion(() =>
-            Assert.Equal("0.1", ErrorMin(second).GetAttribute("value")));
-        Assert.Empty(second.FindAll("#filterRestoredNotice"));
-
-        _notice.Arm();
-        second.Render();
-
-        Assert.False(_notice.IsVisible);
+        Assert.Equal("0.1", ErrorMin(second).GetAttribute("value"));
         Assert.Empty(second.FindAll("#filterRestoredNotice"));
     }
 
@@ -764,7 +723,7 @@ public class FilterSurfaceTests : BunitContext
     [Fact]
     public async Task SaveError_LandsOnTheComponent_WithItsIdentityIntact()
     {
-        var cut = RenderSurface(TokenA, StorageWith(("Race", new FilterConfig())));
+        var cut = RenderSurface(StorageWith(("Race", new FilterConfig())));
 
         Assert.Empty(cut.FindAll("#filterSaveError"));
         await RefuseASaveAsync(cut);
@@ -774,13 +733,14 @@ public class FilterSurfaceTests : BunitContext
     }
 
     // The text is not the occurrence: both refusals carry the same copy, and
-    // the second must show although the first was closed. No panel gesture
-    // sits between them, so nothing but the refusal itself can have re-shown it.
+    // the second must show although the first was closed. No change to the
+    // selection sits between them, so nothing but the refusal itself can have
+    // re-shown it.
     [Theory]
     [MemberData(nameof(DismissGestures))]
     public async Task SaveError_Dismisses_AndASecondIdenticalRefusalShowsFresh(string gesture)
     {
-        var cut = RenderSurface(TokenA, StorageWith(("Race", new FilterConfig())));
+        var cut = RenderSurface(StorageWith(("Race", new FilterConfig())));
         await RefuseASaveAsync(cut);
         var firstText = cut.Find("#filterSaveError").TextContent;
 
@@ -800,7 +760,7 @@ public class FilterSurfaceTests : BunitContext
     {
         var storage = new FakeDocumentStorage();
         storage.Documents[SavedFiltersDocument.FileName] = "not a filters document";
-        var cut = RenderSurface(TokenA, storage);
+        var cut = RenderSurface(storage);
 
         var box = cut.Find("#savedFiltersLoadFailed");
         AssertBox(box, "alert alert-warning mb-4", "status", "max-width:800px", dismissible: false);
@@ -819,7 +779,7 @@ public class FilterSurfaceTests : BunitContext
     {
         var storage = StorageWith(("Race", new FilterConfig()));
         storage.ThrowOnWrite = true;
-        var cut = RenderSurface(TokenA, storage);
+        var cut = RenderSurface(storage);
         await ConfirmRowSaveAsync(cut);
         return cut;
     }
@@ -850,7 +810,7 @@ public class FilterSurfaceTests : BunitContext
         // saving stays off and the in-memory list stays on screen.
         Assert.True(FindRowButton(cut, "Race", "Save")!.HasAttribute("disabled"));
 
-        cut.Render(parameters => parameters.Add(p => p.Source, TokenB));
+        await cut.InvokeAsync(() => Setup.ReportSource(TokenB));
         cut.WaitForAssertion(() =>
             Assert.False(FindRowButton(cut, "Race", "Save")!.HasAttribute("disabled")));
         await ConfirmRowSaveAsync(cut);
@@ -858,102 +818,97 @@ public class FilterSurfaceTests : BunitContext
         Assert.NotNull(cut.Find("#savedFiltersWriteFailed"));
     }
 
-    // ── The restore's three outcomes (halheinrich/backgammon#367) ───────────
+    // ── The restore's outcomes (halheinrich/backgammon#367, #346) ───────────
     //
-    // The remembered selection reaches the panel in one of three states, and
+    // The remembered selection reaches the owner in one of four states, and
     // each has its own answer. Readable: restored and staged, under the
     // restored-selection notice above. Present but unreadable: defaults, and
     // the failed-restore notice — a failed restore is never silent (Hal's
-    // ruling). Absent: defaults and no word — a first visit is not a failure,
-    // and TryFromJson alone cannot tell the two apart. The first pin is the
-    // producer's ruling carried through (XgFilter_Lib,
-    // halheinrich/backgammon#269): a stored pattern the grammar refuses is no
-    // longer an unreadable document. It restores whole, every other value
-    // intact, the pattern shown as stored, the field marked, and Apply
+    // ruling). Absent: defaults and no word — a first visit is not a failure.
+    // Refused: defaults, no notice of the panel's, the refusal at the host's
+    // sink. The first pin is the producer's ruling carried through
+    // (XgFilter_Lib, halheinrich/backgammon#269): a stored pattern the grammar
+    // refuses is not an unreadable document. It restores whole, every other
+    // value intact, the pattern shown as stored, the field marked, and Apply
     // withheld with the field's own reason — never silently repaired, never
     // dropped, never silently applied.
 
     private const string RestoreFailedNotice = "#filterRestoreFailedNotice";
 
-    // The pattern box sits in its row behind the More filters container, so
-    // reaching it is two real disclosure gestures — the same route a user
-    // takes to see what was restored.
-    private static IElement OpenPositionPattern(IRenderedComponent<FilterSurface> cut)
-    {
-        OpenMoreFilters(cut);
-        cut.Find("#facetToggle_PositionPattern").Click();
-        return cut.Find("#positionPattern");
-    }
-
-    // A document is unreadable when TryFromJson refuses it; this is what the
-    // panel finds under its key then. Not a refused pattern — that document
-    // reads fine now, which is the point of the first pin.
-    private void StoredUnreadableConfig() =>
-        JSInterop.Setup<string?>("localStorage.getItem", FilterPanel.ConfigKey)
-                 .SetResult("}{ not a config");
-
-    // The panel's restore has landed once its read of the config key has been
-    // issued and answered — the fact to wait on before asserting that a
-    // notice is absent, since "absent" is also what an unfinished restore
-    // looks like.
-    private void WaitForConfigRestore(IRenderedComponent<FilterSurface> cut, int reads = 1) =>
-        cut.WaitForAssertion(() => Assert.True(
-            JSInterop.Invocations.Count(i => i.Identifier == "localStorage.getItem"
-                                          && (string?)i.Arguments[0] == FilterPanel.ConfigKey) >= reads));
-
     [Fact]
     public void Restore_RefusedPattern_RestoresWhole_MarksTheField_WithholdsApply()
     {
-        StoredConfig(new FilterConfig { ErrorMin = 0.1, PositionPattern = "[6,2" });
+        var plan = BootingWith(new FilterConfig { ErrorMin = 0.1, PositionPattern = "[6,2" });
+        plan.ExpectFilterFoldToggle(open: true, BrowserStorageWriteAnswer.Succeeded);
+        plan.ExpectFilterRowsToggle([FilterFacet.PositionPattern], BrowserStorageWriteAnswer.Succeeded);
 
-        var cut = RenderSurface(TokenA, new FakeDocumentStorage());
+        var cut = RenderSurface(new FakeDocumentStorage());
 
         // Every other value intact, and the document counted as restored: the
         // restored-selection notice, not the failure notice.
-        cut.WaitForAssertion(() => Assert.Equal("0.1", ErrorMin(cut).GetAttribute("value")));
+        Assert.Equal("0.1", ErrorMin(cut).GetAttribute("value"));
+        Assert.Equal(FilterRestoration.Restored, Setup.Current.Restoration);
         Assert.NotNull(cut.Find("#filterRestoredNotice"));
         Assert.Empty(cut.FindAll(RestoreFailedNotice));
 
         // The text the user stored, shown back, marked, with its reason.
-        var pattern = OpenPositionPattern(cut);
+        OpenMoreFilters(cut);
+        cut.Find("#facetToggle_PositionPattern").Click();
+        var pattern = cut.Find("#positionPattern");
         Assert.Equal("[6,2", pattern.GetAttribute("value"));
         Assert.Contains("is-invalid", pattern.GetAttribute("class"));
         Assert.NotNull(cut.Find("#positionPattern ~ .invalid-feedback"));
 
         // And no way to make it an executable filter without fixing it.
         Assert.True(Apply(cut).HasAttribute("disabled"));
-        Assert.Null(_holder.ConfigFor(TokenA));
+        Assert.False(Setup.Current.IsInEffectFor(TokenA));
+        plan.Verify();
     }
 
     [Fact]
     public void Restore_UnreadableDocument_RestoresDefaults_AndSaysSo()
     {
-        StoredUnreadableConfig();
+        var plan = Booting(FilterSurfaceStorage.RestoreAnswer(FilterRestoration.Unreadable));
 
-        var cut = RenderSurface(TokenA, new FakeDocumentStorage());
+        var cut = RenderSurface(new FakeDocumentStorage());
 
-        cut.WaitForAssertion(() => cut.Find(RestoreFailedNotice));
+        Assert.Equal(FilterRestoration.Unreadable, Setup.Current.Restoration);
+        Assert.NotNull(cut.Find(RestoreFailedNotice));
         Assert.Equal(string.Empty, ErrorMin(cut).GetAttribute("value"));
         // Nothing was restored, so the restored-selection notice has no claim
-        // to make; and nothing is committed, so Apply is armed over defaults.
+        // to make. The unreadable document is left as it is — the plan holds
+        // the boot to its reads alone, no write.
         Assert.Empty(cut.FindAll("#filterRestoredNotice"));
-        Assert.False(Apply(cut).HasAttribute("disabled"));
-        // The unreadable document is left as it is — no write touched the key.
-        Assert.DoesNotContain(JSInterop.Invocations, i =>
-            i.Identifier != "localStorage.getItem" && (string?)i.Arguments[0] == FilterPanel.ConfigKey);
+        plan.Verify();
     }
 
     [Fact]
     public void Restore_NothingStored_RestoresDefaults_AndSaysNothing()
     {
-        // Nothing in storage (the loose JS default): an ordinary first visit.
-        var cut = RenderSurface(TokenA, new FakeDocumentStorage());
+        var plan = Booting(BrowserStorageReadAnswer.Absent);
 
-        WaitForConfigRestore(cut);
+        var cut = RenderSurface(new FakeDocumentStorage());
 
+        Assert.Equal(FilterRestoration.NothingStored, Setup.Current.Restoration);
         Assert.Equal(string.Empty, ErrorMin(cut).GetAttribute("value"));
         Assert.Empty(cut.FindAll(RestoreFailedNotice));
         Assert.Empty(cut.FindAll("#filterRestoredNotice"));
+        plan.Verify();
+    }
+
+    [Fact]
+    public void Restore_Refused_RestoresDefaults_TellsTheSink_AndShowsNoNoticeOfItsOwn()
+    {
+        var plan = Booting(BrowserStorageReadAnswer.Refused);
+
+        var cut = RenderSurface(new FakeDocumentStorage());
+
+        Assert.Equal(FilterRestoration.Refused, Setup.Current.Restoration);
+        Assert.Equal(string.Empty, ErrorMin(cut).GetAttribute("value"));
+        Assert.Single(_refusals.Refusals);
+        Assert.Empty(cut.FindAll(RestoreFailedNotice));
+        Assert.Empty(cut.FindAll("#filterRestoredNotice"));
+        plan.Verify();
     }
 
     // The saved-filters document holds the same posture one tier up
@@ -969,7 +924,7 @@ public class FilterSurfaceTests : BunitContext
             ("Stale", new FilterConfig { PositionPattern = "[6,2" }),
             ("Race", new FilterConfig { ErrorMin = 0.1 }));
 
-        var cut = RenderSurface(TokenA, storage);
+        var cut = RenderSurface(storage);
 
         Assert.NotNull(FindRowButton(cut, "Stale", "Load"));
         Assert.NotNull(FindRowButton(cut, "Race", "Load"));
@@ -977,22 +932,24 @@ public class FilterSurfaceTests : BunitContext
 
         await ClickRowButtonAsync(cut, "Stale", "Load");
 
-        var pattern = OpenPositionPattern(cut);
+        OpenMoreFilters(cut);
+        cut.Find("#facetToggle_PositionPattern").Click();
+        var pattern = cut.Find("#positionPattern");
         Assert.Equal("[6,2", pattern.GetAttribute("value"));
         Assert.Contains("is-invalid", pattern.GetAttribute("class"));
         Assert.True(Apply(cut).HasAttribute("disabled"));
-        Assert.Null(_reports[^1]);
+        Assert.False(Setup.Current.IsInEffectFor(TokenA));
     }
 
     // · #filterRestoreFailedNotice — event notice; holder: the app-scoped
-    //   FilterRestoreNotice's second fact, the same owner for the same
-    //   occurrence (this boot's restore) and the same reason.
+    //   FilterSetup, the same owner for the same occurrence (this boot's
+    //   restore) and the same reason.
 
-    private IRenderedComponent<FilterSurface> RenderWithFailedRestore()
+    private IRenderedComponent<FilterSurface> RenderWithFailedRestore(int mounts = 1)
     {
-        StoredUnreadableConfig();
-        var cut = RenderSurface(TokenA, new FakeDocumentStorage());
-        cut.WaitForAssertion(() => cut.Find(RestoreFailedNotice));
+        Booting(FilterSurfaceStorage.RestoreAnswer(FilterRestoration.Unreadable), mounts);
+        var cut = RenderSurface(new FakeDocumentStorage());
+        Assert.NotNull(cut.Find(RestoreFailedNotice));
         return cut;
     }
 
@@ -1007,84 +964,63 @@ public class FilterSurfaceTests : BunitContext
 
     [Theory]
     [MemberData(nameof(DismissGestures))]
-    public void RestoreFailedNotice_Dismisses_AndTheHolderIsWhatMoved(string gesture)
+    public void RestoreFailedNotice_Dismisses_AndTheOwnerIsWhatMoved(string gesture)
     {
         var cut = RenderWithFailedRestore();
+        var draft = Setup.Current.Draft;
 
         cut.Find(RestoreFailedNotice + gesture).Click();
 
         Assert.Empty(cut.FindAll(RestoreFailedNotice));
-        Assert.False(_notice.IsFailureVisible);
-        // Closing a notice is not an edit: nothing was reported, Apply is
-        // still armed over the defaults.
-        Assert.Empty(_reports);
-        Assert.False(Apply(cut).HasAttribute("disabled"));
+        Assert.False(Setup.Current.IsFailureNoticeShowing);
+        // Closing a notice is not an edit: the draft is as it was.
+        Assert.Same(draft, Setup.Current.Draft);
     }
 
-    // Why the dismissal is the app-scoped holder's and not the panel's: the
-    // unreadable document outlives the mount. A navigate-back remounts the
-    // panel, which reads it again and arms again; the closed notice must not
-    // come back, and no later arm can bring it.
+    // Why the dismissal is the owner's and not the panel's: the unreadable
+    // document outlives the mount. A navigate-back remounts the panel; the
+    // closed notice must not come back.
     [Fact]
-    public void RestoreFailedNotice_ClosedByTheUser_StaysClosedAcrossARemount_AndArmCannotResurrectIt()
+    public async Task RestoreFailedNotice_ClosedByTheUser_StaysClosedAcrossARemount()
     {
-        var first = RenderWithFailedRestore();
+        var first = RenderWithFailedRestore(mounts: 2);
         first.Find(RestoreFailedNotice + " button.btn-close").Click();
 
-        var second = RenderSurface(TokenA, new FakeDocumentStorage());
+        await DisposeComponentsAsync();
+        var second = RenderSurface(new FakeDocumentStorage());
 
-        // The remount's restore has landed (and with it, its arm).
-        WaitForConfigRestore(second, reads: 2);
-        Assert.Empty(second.FindAll(RestoreFailedNotice));
-
-        _notice.ArmFailure();
-        second.Render();
-
-        Assert.False(_notice.IsFailureVisible);
         Assert.Empty(second.FindAll(RestoreFailedNotice));
     }
 
-    // The other side: untouched, a remount over the same unreadable document
-    // re-shows the same notice (navigation changes nothing).
+    // The other side: untouched, a remount shows the same notice (navigation
+    // changes nothing).
     [Fact]
-    public void RestoreFailedNotice_NotDismissed_IsStillShownAfterARemount()
+    public async Task RestoreFailedNotice_NotDismissed_IsStillShownAfterARemount()
     {
-        RenderWithFailedRestore();
+        RenderWithFailedRestore(mounts: 2);
 
-        var second = RenderSurface(TokenA, new FakeDocumentStorage());
+        await DisposeComponentsAsync();
+        var second = RenderSurface(new FakeDocumentStorage());
 
-        second.WaitForAssertion(() => second.Find(RestoreFailedNotice));
+        Assert.NotNull(second.Find(RestoreFailedNotice));
     }
 
     // An edit changes nothing about what is stored, so the notice stands; a
     // commit writes a fresh document over the unreadable one, so it ends.
     [Fact]
-    public async Task RestoreFailedNotice_SurvivesAnEdit_AndEndsAtACommit()
+    public async Task RestoreFailedNotice_SurvivesAnEdit_AndEndsAtACommitWhoseWriteLands()
     {
-        var cut = RenderWithFailedRestore();
+        var plan = Booting(FilterSurfaceStorage.RestoreAnswer(FilterRestoration.Unreadable));
+        plan.ExpectFilterCommit(new FilterConfig { ErrorMin = 0.2 }, BrowserStorageWriteAnswer.Succeeded);
+        var cut = RenderSurface(new FakeDocumentStorage());
 
         ErrorMin(cut).Input("0.2");
         Assert.NotNull(cut.Find(RestoreFailedNotice));
 
         await Apply(cut).ClickAsync(new());
 
-        Assert.Empty(cut.FindAll(RestoreFailedNotice));
-        Assert.False(_notice.IsFailureVisible);
-        Assert.Contains(JSInterop.Invocations, i =>
-            i.Identifier == "localStorage.setItem" && (string?)i.Arguments[0] == FilterPanel.ConfigKey);
-    }
-
-    // ── Required-parameter pins ─────────────────────────────────────────────
-
-    [Theory]
-    [InlineData(nameof(FilterSurface.AppliedFilter))]
-    [InlineData(nameof(FilterSurface.OnFilterConfigChanged))]
-    [InlineData(nameof(FilterSurface.OnAppliedStateChanged))]
-    public void LoadBearingParameters_AreEditorRequired(string parameterName)
-    {
-        var property = typeof(FilterSurface).GetProperty(parameterName);
-
-        Assert.NotNull(property);
-        Assert.NotNull(property.GetCustomAttribute<EditorRequiredAttribute>());
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(RestoreFailedNotice)));
+        Assert.False(Setup.Current.IsFailureNoticeShowing);
+        plan.Verify();
     }
 }

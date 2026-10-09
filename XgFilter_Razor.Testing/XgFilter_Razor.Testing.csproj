@@ -8,18 +8,18 @@
        Only per-project decisions live here. -->
   <PropertyGroup>
     <!-- Test support, never product. This assembly exists so host test suites
-         can state a producer fact ("a stored selection exists") without
-         repeating a producer literal; it is not packed and never ships beside
-         the component library. Nothing in the app graph may reference it —
-         only test projects. -->
+         can state the filter surface's storage in its own terms ("a previous
+         visit committed this selection", "the panel mounts") without
+         repeating a producer key or an interop call; it is not packed and
+         never ships beside the component library. Nothing in the app graph
+         may reference it — only test projects. -->
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>
     <!-- bUnit is a first-class dependency here, not an accident of the test
-         stack: the thing being seeded IS a bUnit JSInterop fake. A seam that
-         avoided the reference would have to hand the storage key back to the
-         caller, which is precisely the coupling this assembly removes. -->
+         stack: the plans this assembly declares are answered on a bUnit
+         JSInterop, through BgUiPrimitives_Razor.TestSupport's planner below. -->
     <PackageReference Include="bunit" />
   </ItemGroup>
 
@@ -30,6 +30,12 @@
          component library — same rule the test project follows for AngleSharp
          (rationale in Directory.Packages.props). -->
     <ProjectReference Include="..\..\XgFilter_Lib\XgFilter_Lib\XgFilter_Lib.csproj" />
+    <!-- The storage planner (halheinrich/backgammon#377): this assembly states
+         the surface's calls as BrowserStoragePlan expectations, so neither it
+         nor a host spells an interop identifier. Its bunit and AngleSharp
+         versions are the floor for this repo's (both repositories pin the
+         same ones in their Directory.Packages.props). -->
+    <ProjectReference Include="..\..\BgUiPrimitives_Razor\BgUiPrimitives_Razor.TestSupport\BgUiPrimitives_Razor.TestSupport.csproj" />
   </ItemGroup>
 
 </Project>

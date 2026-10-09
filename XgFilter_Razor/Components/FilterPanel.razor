@@ -6,7 +6,7 @@
 @using XgFilter_Lib.Enums
 @using XgFilter_Lib.Patterns
 @using BgDataTypes_Lib
-@inject IJSRuntime JS
+@implements IDisposable
 
 @* ── FilterPanel.razor ───────────────────────────────────────────────────────
    NOT consumer surface. Hosts embed FilterSurface, which owns this panel and
@@ -15,14 +15,14 @@
    component draws CS0262 — the generator hardcodes `public partial`; spike
    result recorded in INSTRUCTIONS Pitfalls). Consuming it from a host is
    banned outright — including host tests (no FindComponent<FilterPanel>).
-   Owns all filter state. Raises OnFilterConfigChanged only when "Apply Filter"
-   is clicked (or "Clear filters"). Raises OnAppliedStateChanged after every
-   buffer-affecting gesture, carrying the committed config the buffers now
-   equal (null when they equal none), so the parent can gate downstream actions
-   on whether the panel's selection is still the one it acted on. That same
-   truth gates Apply itself: re-applying an unchanged selection is not offered.
-   Consumers that need a DecisionFilterSet call FilterConfig.Build() on the
-   received config.
+   Holds no filter state of its own: the selection, what is applied, and
+   what this boot's restoration found all live in the app-scoped FilterSetup
+   (halheinrich/backgammon#374, SPEC-filtering.md §4), which outlives this
+   panel. The panel renders the owner's current snapshot, turns each gesture
+   into one of the owner's operations, and re-renders on each snapshot the
+   owner publishes — so a remount shows exactly what was on screen before,
+   unapplied edits and invalid input included. Apply and Clear filters are
+   the owner's commits; every gate the buttons wear is the snapshot's.
    Information hierarchy: the error-range section is first and always visible;
    each of the other eight facets is its own collapsible row, one tier, in the
    lib's FilterFacet declaration order, and all eight rows sit behind one
@@ -34,15 +34,14 @@
    facet holds an active filter, carries a badge; the folded container carries
    the count of those — see the facet-row and container comments for how
    presence and wording divide.
-   State persists to localStorage under three keys: the whole filter selection
-   as one serialized FilterConfig blob (lib-owned shape via FilterConfig.ToJson
-   / TryFromJson), the set of expanded rows under its own key (DisclosureKey),
-   and whether the container is open under its own (MoreFiltersKey) — the last
-   two user preference, never part of the config blob. Every storage call is
-   guarded (halheinrich/backgammon#102): a browser that refuses storage leaves
-   the panel working from its defaults and the host told once through
-   OnStorageUnavailable — see the storage seam below the restores. A stored
-   selection the panel cannot read restores to defaults and says so
+   What persists, and where, is FilterStorage's: the committed selection
+   (the owner writes it, and reads it back once per boot), the set of
+   expanded rows and whether the container is open (this panel's display
+   preferences, read at each mount and written at each toggle). Every storage
+   call goes through that one seam, which makes every requested call and
+   tells the host's refusal sink of each refusal; a refused read is nothing
+   stored, a refused write leaves the in-memory state standing. A stored
+   selection the owner cannot read restores to defaults and says so
    (#filterRestoreFailedNotice): a failed restore is never silent.
    Location: XgFilter_Razor/Components/FilterPanel.razor
 ──────────────────────────────────────────────────────────────────────────── *@
@@ -56,45 +55,41 @@
         @* ── Restored-selection notice (§4 legibility) ───────────────────────
            A reload ends the setup: selections are restored, applied-ness is
            not, Apply re-arms — correct by rule, but indistinguishable from a
-           bug unless the screen says what happened. Shown while the
-           app-scoped RestoreNotice is armed (this boot's restore staged a
-           stored selection and no gesture has superseded it); it survives
-           navigation with the state it describes and dies at the first
-           buffer-affecting gesture or commit — or when the user closes it,
-           which is the same death (see FilterRestoreNotice.Dismiss). A polite
+           bug unless the screen says what happened. Shown while the owner says
+           so: this boot's restoration put a stored selection on screen and no
+           gesture has made it the user's own since; it survives navigation
+           with the state it describes and ends at the first edit, load or
+           commit — or when the user closes it, which is the same end. A polite
            outcome, not an error.
 
            An event notice, so dismissible (the umbrella's SPEC-notices.md), and
-           its occurrence outlives this component, so the dismissal is
-           caller-held: bound to the app-scoped holder, which is why a
-           navigate-back cannot bring a closed notice back. No @if around it and
-           no bit here — the holder's IsVisible is the one fact, read once; the
-           component renders nothing while it is false, whether the notice was
-           never armed or is over. *@
+           its occurrence — this boot's restore — outlives this component, so
+           the dismissal is the app-scoped owner's: bound to FilterSetup, which
+           is why a navigate-back cannot bring a closed notice back. No @if
+           around it and no bit here — the snapshot's flag is the one fact,
+           read once; the component renders nothing while it is false, whether
+           the notice was never shown or is over. *@
         <Notice id="filterRestoredNotice" class="mb-3"
                 Kind="NoticeKind.Information" Announcement="NoticeAnnouncement.Polite"
                 Dismissible="true"
-                @bind-Dismissed:get="!RestoreNotice.IsVisible"
-                @bind-Dismissed:set="_ => RestoreNotice.Dismiss()">
+                @bind-Dismissed:get="!_snapshot.IsRestoredNoticeShowing"
+                @bind-Dismissed:set="_ => Setup.DismissRestoredNotice()">
             This filter was restored from a previous session — it isn't in
             effect until you press <strong>Apply Filter</strong>.
         </Notice>
 
         @* ── Failed-restore notice ────────────────────────────────────────────
            The restore's other outcome (halheinrich/backgammon#367): a stored
-           selection this panel cannot read restores to defaults, and defaults
+           selection the owner cannot read restores to defaults, and defaults
            with no word are indistinguishable from a first visit — the user's
            filter gone for no stated reason. So the panel says so. Only for a
            document that is present and unreadable: nothing stored is nothing
-           failed, and a storage call that threw is the storage-unavailable
-           condition, reported to the host instead (OnStorageUnavailable).
+           failed, and a read the browser refused is the storage condition,
+           reported to the host's refusal sink instead.
 
            An event notice — this boot's restore failed once — so dismissible
-           (the umbrella's SPEC-notices.md), and its occurrence outlives this
-           component exactly as the restored-selection notice's does: the
-           unreadable document survives navigation and a remount reads it
-           again. So the dismissal is the same app-scoped holder's, its second
-           fact, and the binding is the box above's shape — no @if, no bit
+           (the umbrella's SPEC-notices.md), held by the same owner for the same
+           reason as the box above, and bound the same way — no @if, no bit
            here. It ends when the user closes it or a commit's write lands,
            replacing the unreadable document; an edit leaves it standing, and
            so does a commit whose write the browser refused, since neither
@@ -103,8 +98,8 @@
         <Notice id="filterRestoreFailedNotice" class="mb-3"
                 Kind="NoticeKind.Warning" Announcement="NoticeAnnouncement.Polite"
                 Dismissible="true"
-                @bind-Dismissed:get="!RestoreNotice.IsFailureVisible"
-                @bind-Dismissed:set="_ => RestoreNotice.DismissFailure()">
+                @bind-Dismissed:get="!_snapshot.IsFailureNoticeShowing"
+                @bind-Dismissed:set="_ => Setup.DismissFailureNotice()">
             Your remembered filter couldn't be read, so the filters start from
             their defaults.
         </Notice>
@@ -121,7 +116,7 @@
            into a local like the active-facet set below: every marked input
            and every feedback line on the panel — this facet's, the score
            tokens', the move numbers', the pattern's — reads that one
-           evaluation, and the Apply gate reads the same rule through CanApply.
+           evaluation, and the Apply gate reads the same verdict, the owner's.
            The panel writes no rule of its own here — only the words for it.
 
            How an input wears the verdict is rendered from one place too
@@ -162,16 +157,16 @@
                        style="max-width:140px"
                        aria-labelledby="errorRangeLabel"
                        type="number" step="0.001" placeholder="Min"
-                       value="@_draft.ErrorMinText"
-                       @oninput="e => Edit(_draft with { ErrorMinText = e.Value?.ToString() ?? string.Empty })" />
+                       value="@Draft.ErrorMinText"
+                       @oninput="e => Edit(d => d with { ErrorMinText = e.Value?.ToString() ?? string.Empty })" />
                 <span>–</span>
                 <input id="errorMax"
                        @attributes="@(FieldAttributes(invalidFields, FilterField.ErrorMax, "errorRangeHint", "errorRangeFeedback"))"
                        style="max-width:140px"
                        aria-labelledby="errorRangeLabel"
                        type="number" step="0.001" placeholder="Max"
-                       value="@_draft.ErrorMaxText"
-                       @oninput="e => Edit(_draft with { ErrorMaxText = e.Value?.ToString() ?? string.Empty })" />
+                       value="@Draft.ErrorMaxText"
+                       @oninput="e => Edit(d => d with { ErrorMaxText = e.Value?.ToString() ?? string.Empty })" />
             </div>
             @* Rendered only while it applies, the #applyDisabledReason idiom,
                rather than left in the DOM for Bootstrap's sibling selector to
@@ -220,21 +215,20 @@
 
            The badge divides in two, deliberately. Its PRESENCE is the lib's
            ruling: a row badges exactly when GetActiveFacets() names its facet,
-           asked of the live edit buffers through the same build path Apply
-           commits through (BuildConfig), never by re-inspecting a buffer or a
-           config field here — the activation predicates are the lib's SSOT,
-           and reading a buffer directly would be a second encoding of one of
-           them. Reading the live buffers is also what keeps it honest at rest
-           (after restore, Apply, Clear filters and LoadConfig staging) and
-           live mid-edit. Its WORDS are the panel's display concern and nothing
+           asked of the draft's parsed config — the config Apply commits —
+           never by re-inspecting a box or a config field here: the activation
+           predicates are the lib's SSOT, and reading a box directly would be a
+           second encoding of one of them. Reading the live draft is also what
+           keeps it honest at rest (after restore, Apply, Clear filters and a
+           saved filter's staging) and live mid-edit. Its WORDS are the panel's display concern and nothing
            else's — see FacetBadgeText. It renders only while the row is
            collapsed: expanded, the controls themselves say everything the
            badge could, which is the level groups' ruling one tier down.
 
            Which rows are open is the user's choice, not the config's: the set
-           persists under DisclosureKey, and LoadConfig / Clear filters never
-           move it. Opening or closing a row is navigation, not an edit — no
-           ReportAppliedState. The container below keeps its own open state the
+           persists under FilterStorage.DisclosureKey, and staging a saved
+           filter or Clear filters never moves it. Opening or closing a row is
+           navigation, not an edit — the owner hears nothing. The container below keeps its own open state the
            same way, under its own key; a row the user left open is still open
            when the container is next opened, whether or not the container was
            folded over it in between.
@@ -306,8 +300,9 @@
            this container exists: a panel that folded only after a click would
            not fold. What folding hides, the badge says — the number of rows
            whose facet is set, counted off the same ActiveFacets ruling the
-           rows' own badges read (the lib's GetActiveFacets on the live
-           buffers), never a second count of this panel's own. ErrorRange can
+           rows' own badges read (the draft's ActiveFacets, the lib's
+           GetActiveFacets on its parsed config), never a second count of this
+           panel's own. ErrorRange can
            be active and is never counted here: it is not behind this fold.
            Like a row's, the badge speaks only while folded — open, the rows'
            own badges say it in more detail.
@@ -317,9 +312,9 @@
            DisclosureKey set: that set's vocabulary is FilterFacet member names
            and this container is not a facet, so a sentinel name in it would be
            exactly the corruption its all-or-nothing restore exists to refuse.
-           LoadConfig and Clear filters never move it, as with the rows —
-           opening or closing it is navigation, not an edit, so no
-           ReportAppliedState.
+           Staging a saved filter and Clear filters never move it, as with the
+           rows — opening or closing it is navigation, not an edit, so the
+           owner hears nothing.
 
            Its hierarchy is drawn, not merely meant (halheinrich/backgammon#239).
            Drawn flat in the candidate the user rejected — nothing shipped that
@@ -351,7 +346,7 @@
            MoreFiltersExpandedLabel while open — so the control says what the
            next click does rather than describing a state the user is already
            looking at. The two words and the rule that picks between them live
-           together beside MoreFiltersKey and nowhere else: the markup renders
+           together on this panel and nowhere else: the markup renders
            MoreFiltersLabel, FilterHelp renders the pair, and neither retypes
            either — the same one-owner rule the row headers keep by rendering
            ToLabel(). The accessible name follows the visible label because it
@@ -383,8 +378,8 @@
                                aria-labelledby="facetToggle_Players"
                                aria-describedby="facetHint_Players"
                                placeholder="e.g. Hal, Magriel"
-                               value="@_draft.PlayersText"
-                               @oninput="e => Edit(_draft with { PlayersText = e.Value?.ToString() ?? string.Empty })" />
+                               value="@Draft.PlayersText"
+                               @oninput="e => Edit(d => d with { PlayersText = e.Value?.ToString() ?? string.Empty })" />
                     </div>)
 
                     @* ── Decision type ───────────────────────────────────────
@@ -398,8 +393,8 @@
                                 <input class="form-check-input" type="radio"
                                        name="decisionType"
                                        id="dt_@opt"
-                                       checked="@(_draft.DecisionType == opt)"
-                                       @onchange="() => Edit(_draft with { DecisionType = opt })" />
+                                       checked="@(Draft.DecisionType == opt)"
+                                       @onchange="() => Edit(d => d with { DecisionType = opt })" />
                                 <label class="form-check-label" for="dt_@opt">
                                     @opt.ToLabel()
                                 </label>
@@ -411,7 +406,7 @@
                        The position-pattern field's shape, over a facet whose rule the
                        panel does not own: the lib names FilterField.MatchScores when any
                        entry is a token its grammar rejects, the input reds itself on that
-                       membership, and the same IsCommittable member closes Apply — so a
+                       membership, and the same verdict closes Apply — so a
                        mistyped or retired score can never silently drop the filter the
                        user meant to set.
 
@@ -435,8 +430,8 @@
                         <input @attributes="@(FieldAttributes(invalidFields, FilterField.MatchScores, "facetHint_MatchScores", "matchScoreFeedback"))"
                                aria-labelledby="facetToggle_MatchScores"
                                placeholder="e.g. 4a5a, 1a1a, @MatchScoreToken.DoubleMatchPoint, 1a2aC, @MatchScoreToken.MoneyWithJacoby, @MatchScoreToken.MoneyWithoutJacoby"
-                               value="@_draft.MatchScoresText"
-                               @oninput="e => Edit(_draft with { MatchScoresText = e.Value?.ToString() ?? string.Empty })" />
+                               value="@Draft.MatchScoresText"
+                               @oninput="e => Edit(d => d with { MatchScoresText = e.Value?.ToString() ?? string.Empty })" />
                         <div class="form-text">
                             MaNa is on-roll-anchored — M = points the player on roll needs, N = the
                             opponent — so 4a5a and 5a4a are distinct (list both to catch either
@@ -449,7 +444,7 @@
                            reason — the input is a sibling here, but rendering the verdict
                            only while it applies keeps one idiom for the panel's feedback.
                            The faults are read only inside the branch: asking them costs a
-                           buffer flush plus a sweep of the list, and outside the branch
+                           parse plus a sweep of the list, and outside the branch
                            the answer is always "none". *@
                         @if (invalidFields.Contains(FilterField.MatchScores))
                         {
@@ -486,7 +481,7 @@
                        and a misordered pair blames both while neither bound is
                        wrong alone. It reads the hoisted invalidFields evaluation
                        the error range reads, and closes Apply through the same
-                       IsCommittable member — no rule of the panel's own, here or
+                       verdict — no rule of the panel's own, here or
                        there. The facets differ only in the floor each bound must
                        clear (zero for an error magnitude, one for a 1-based move
                        ordinal), and the floor is the lib's to set; the panel only
@@ -501,16 +496,16 @@
                                    style="max-width:140px"
                                    aria-labelledby="facetToggle_MoveNumberRange"
                                    type="number" step="1" min="1" placeholder="Min"
-                                   value="@_draft.MoveNumberMinText"
-                                   @oninput="e => Edit(_draft with { MoveNumberMinText = e.Value?.ToString() ?? string.Empty })" />
+                                   value="@Draft.MoveNumberMinText"
+                                   @oninput="e => Edit(d => d with { MoveNumberMinText = e.Value?.ToString() ?? string.Empty })" />
                             <span>–</span>
                             <input id="moveNumberMax"
                                    @attributes="@(FieldAttributes(invalidFields, FilterField.MoveNumberMax, "facetHint_MoveNumberRange", "moveNumberFeedback"))"
                                    style="max-width:140px"
                                    aria-labelledby="facetToggle_MoveNumberRange"
                                    type="number" step="1" min="1" placeholder="Max"
-                                   value="@_draft.MoveNumberMaxText"
-                                   @oninput="e => Edit(_draft with { MoveNumberMaxText = e.Value?.ToString() ?? string.Empty })" />
+                                   value="@Draft.MoveNumberMaxText"
+                                   @oninput="e => Edit(d => d with { MoveNumberMaxText = e.Value?.ToString() ?? string.Empty })" />
                         </div>
                         @* #errorRangeFeedback's shape, for the same reasons: the
                            explicit @if and d-block because the inputs sit one level
@@ -552,8 +547,8 @@
                                 <div class="form-check form-check-inline">
                                     <input class="form-check-input" type="checkbox"
                                            id="ct_@ct"
-                                           checked="@_draft.ContactTypes.Contains(ct)"
-                                           @onchange="(e) => Edit(_draft.WithContactType(ct, e.Value is true))" />
+                                           checked="@Draft.ContactTypes.Contains(ct)"
+                                           @onchange="(e) => Edit(d => d.WithContactType(ct, e.Value is true))" />
                                     <label class="form-check-label" for="ct_@ct">@ct.ToLabel()</label>
                                 </div>
                             }
@@ -581,12 +576,13 @@
                        ("any" / "N selected") already carries everything the closed state
                        hides, so remembering the open state buys no information and would
                        cost three more localStorage entries. The badge reads the live
-                       buffer, so it is honest mid-edit and after restore / LoadConfig /
-                       Clear. Collapsing or expanding a group is navigation, not an edit —
-                       no ReportAppliedState, exactly as for the row above it.
+                       draft, so it is honest mid-edit and after restore, a saved
+                       filter's staging, and Clear. Collapsing or expanding a group is
+                       navigation, not an edit — the owner hears nothing, exactly as for
+                       the row above it.
 
                        Unchecking a mode hides its level group but keeps the checked levels
-                       in the buffer (and in the emitted config): the lib guarantees a level
+                       in the draft (and in the committed config): the lib guarantees a level
                        list whose toggle is off is inert — no activation, no constraint — so
                        re-toggling the mode restores the user's selection instead of
                        punishing an exploratory untoggle. *@
@@ -600,11 +596,11 @@
                                 <div class="form-check">
                                     <input class="form-check-input" type="checkbox"
                                            id="md_@group.Mode"
-                                           checked="@_draft.Includes(group.Mode)"
-                                           @onchange="(e) => Edit(_draft.WithIncludes(group.Mode, e.Value is true))" />
+                                           checked="@Draft.Includes(group.Mode)"
+                                           @onchange="(e) => Edit(d => d.WithIncludes(group.Mode, e.Value is true))" />
                                     <label class="form-check-label" for="md_@group.Mode">@group.Mode.ToLabel()</label>
                                 </div>
-                                @if (_draft.Includes(group.Mode))
+                                @if (Draft.Includes(group.Mode))
                                 {
                                     <div class="ms-4 mb-2">
                                         <button type="button" id="lvlToggle_@group.Mode"
@@ -615,7 +611,7 @@
                                             Analysis level
                                             @if (!group.LevelsExpanded)
                                             {
-                                                var levelCount = _draft.LevelsOf(group.Mode).Count;
+                                                var levelCount = Draft.LevelsOf(group.Mode).Count;
                                                 <span id="lvlBadge_@group.Mode"
                                                       class="badge ms-1 @(levelCount > 0 ? "text-bg-primary" : "text-bg-secondary")">
                                                     @(levelCount > 0 ? $"{levelCount} selected" : "any")
@@ -631,8 +627,8 @@
                                                         <div class="form-check form-check-inline">
                                                             <input class="form-check-input" type="checkbox"
                                                                    id="lv_@(group.Mode)_@level"
-                                                                   checked="@_draft.LevelsOf(group.Mode).Contains(level)"
-                                                                   @onchange="(e) => Edit(_draft.WithLevel(group.Mode, level, e.Value is true))" />
+                                                                   checked="@Draft.LevelsOf(group.Mode).Contains(level)"
+                                                                   @onchange="(e) => Edit(d => d.WithLevel(group.Mode, level, e.Value is true))" />
                                                             <label class="form-check-label" for="lv_@(group.Mode)_@level">@level.ToLabel()</label>
                                                         </div>
                                                     }
@@ -669,8 +665,8 @@
                                 <div class="form-check form-check-inline">
                                     <input class="form-check-input" type="checkbox"
                                            id="dr_@roll"
-                                           checked="@_draft.DiceRolls.Contains(roll)"
-                                           @onchange="(e) => Edit(_draft.WithDiceRoll(roll, e.Value is true))" />
+                                           checked="@Draft.DiceRolls.Contains(roll)"
+                                           @onchange="(e) => Edit(d => d.WithDiceRoll(roll, e.Value is true))" />
                                     <label class="form-check-label" for="dr_@roll">@roll</label>
                                 </div>
                             }
@@ -681,13 +677,13 @@
                        Per-location checker-range constraint, entered as the lib's raw bracket
                        list until the board-grid widget replaces this field in a later arc.
                        The text is the config's text, both ways (halheinrich/backgammon#269):
-                       the buffer rides into FilterConfig.PositionPattern as typed and a
-                       restored or loaded config's text lands back in the buffer as stored,
+                       the draft's text rides into FilterConfig.PositionPattern as typed and
+                       a restored or loaded config's text lands back in the draft as stored,
                        so a stored pattern a newer grammar rule refuses still shows the user
                        what they wrote. Validity is the lib's ruling like every other
                        field's: GetInvalidFields names FilterField.PositionPattern iff the
                        text is present and BoardPattern.TryParse refuses it, the input reds
-                       itself on that membership, and the same IsCommittable member closes
+                       itself on that membership, and the same verdict closes
                        Apply — so an invalid pattern can never silently drop, or silently
                        become, the filter the user meant to set. No BoardPattern is built
                        here for the config's sake; Build() parses, on the lib's side.
@@ -725,8 +721,8 @@
                                @attributes="@(FieldAttributes(invalidFields, FilterField.PositionPattern, "facetHint_PositionPattern", "positionPatternFeedback"))"
                                aria-labelledby="facetToggle_PositionPattern"
                                placeholder="e.g. [6,2,] [5,,-2] [7-12,3,] [@CheckerLocation.OpponentOff,,-2]"
-                               value="@_draft.PositionPatternText"
-                               @oninput="e => Edit(_draft with { PositionPatternText = e.Value?.ToString() ?? string.Empty })" />
+                               value="@Draft.PositionPatternText"
+                               @oninput="e => Edit(d => d with { PositionPatternText = e.Value?.ToString() ?? string.Empty })" />
                         <div class="form-text">
                             [location,min,max] per location; blank bound = unbounded; positive counts
                             belong to the player on roll, negative to the opponent.
@@ -775,29 +771,32 @@
            either stretch, and it keeps the disabled-reason line reading as the
            line under the buttons, which is how the help describes it.
 
-           Apply is gated on CanApply: the lib must name no invalid field AND
-           the selection must differ from the last-committed config.
-           ApplyDisabledReason explains the second case in the
-           NamedEntriesPanel disabled-reason idiom (title + muted hint line);
-           the first already explains itself in the offending field's own
-           invalid-feedback line. Hoisted into a local like the active-facet
-           set above: both surfaces of the reason read the one evaluation.
+           Apply wears the owner's gate (SPEC-filtering.md §2): a source is
+           established, restoration has settled, no field is wrong, and the
+           selection is not already in effect. ApplyDisabledReason explains
+           the last case in the NamedEntriesPanel disabled-reason idiom (title
+           + muted hint line); an invalid value already explains itself in the
+           offending field's own invalid-feedback line. Hoisted into a local
+           like the active-facet set above: both surfaces of the reason read
+           the one evaluation.
 
-           Clear is the full-clear gesture under an honest name and is never
-           gated: it clears filter values only (buffers to defaults, persist +
-           raise the empty config) — it never touches host state, and never
-           opens or closes a row, so it claims nothing about what is on
+           Clear is the full-clear gesture under an honest name, gated only
+           until restoration has settled (§4's transitions table): it clears
+           filter values only — the draft and this setup's baseline to the
+           empty selection, then remembered — never touches host state, and
+           never opens or closes a row, so it claims nothing about what is on
            screen. *@
         @{ var applyDisabledReason = ApplyDisabledReason; }
         <div class="d-flex gap-2">
             <button class="btn btn-primary btn-sm"
-                    disabled="@(!CanApply)"
+                    disabled="@(!_snapshot.CanApply)"
                     title="@applyDisabledReason"
                     @onclick="ApplyAsync">
                 Apply Filter
             </button>
             <button type="button" id="clearFilters"
                     class="btn btn-outline-secondary btn-sm"
+                    disabled="@(!_snapshot.CanClear)"
                     @onclick="ClearFiltersAsync">
                 Clear filters
             </button>
@@ -811,145 +810,39 @@
 </div>
 
 @code {
-    /// <summary>
-    /// Raised on <b>Apply</b> and on <b>Clear filters</b> — never per keystroke —
-    /// carrying the committed <see cref="FilterConfig"/>. The same instance is first
-    /// persisted to <c>localStorage</c> (see <see cref="ConfigKey"/>) so the panel
-    /// rehydrates it on the next first render. A consumer that wants a
-    /// <c>DecisionFilterSet</c> for in-memory filtering calls <c>cfg.Build()</c> on
-    /// the received config; a consumer that ships the selection to a server
-    /// serializes <c>cfg</c> as JSON. Required: the panel exists to produce this,
-    /// so <see cref="EditorRequiredAttribute"/> makes a missing binding an
-    /// <c>RZ2012</c> compile error rather than a silent Razor splat.
-    /// </summary>
-    [Parameter, EditorRequired] public EventCallback<FilterConfig> OnFilterConfigChanged { get; set; }
+    // The app-scoped owner of the selection, the baseline and this boot's
+    // restoration (SPEC-filtering.md §4), and the surface's storage seam for
+    // this panel's own display preferences. Injected rather than passed: one
+    // instance per app by construction, the same one the host reads its gate
+    // from, so no binding can hand this panel a second owner.
+    [Inject] private FilterSetup Setup { get; set; } = default!;
+    [Inject] private FilterStorage Storage { get; set; } = default!;
 
-    /// <summary>
-    /// Raised after <em>every</em> gesture that touches the edit buffers — a
-    /// control edit (typing, radio, checkbox), <see cref="LoadConfig"/> staging,
-    /// Apply, and Clear filters — carrying the committed <see cref="FilterConfig"/>
-    /// the buffers now equal, or <see langword="null"/> when they equal none. A
-    /// consumer gating a downstream action (a Run / Start button) on "is the
-    /// panel's selection still the one I acted on?" compares the payload against
-    /// the config it last received from <see cref="OnFilterConfigChanged"/>; a
-    /// <see langword="null"/> payload always means uncommitted edits are pending.
-    /// <para>
-    /// <b>Per-gesture, not transition-only — deliberately.</b> The panel
-    /// re-reports the current answer on every gesture rather than firing only
-    /// when the answer changes, and the reason is remounting. The committed
-    /// config is component-instance state that dies with the panel, so a freshly
-    /// mounted panel has committed nothing and reports <see langword="null"/> on
-    /// the user's first edit — while a consumer whose own applied state survived
-    /// the navigation is still holding a config from the previous mount, and so
-    /// a stale "clean" belief that only this event can correct. A transition-only
-    /// event is silent in exactly that state, because from the new panel's point
-    /// of view nothing transitioned. Consumers therefore handle it statelessly
-    /// and idempotently — assign from the payload, never diff it against a
-    /// remembered previous one.
-    /// </para>
-    /// Required: gating downstream actions is what this panel's consumers use it
-    /// for, and an unbound callback fails silently at runtime as a gate that
-    /// never re-opens, so <see cref="EditorRequiredAttribute"/> turns a missing
-    /// binding into an <c>RZ2012</c> compile error — see the silent-splat entry
-    /// in this subproject's Pitfalls.
-    /// </summary>
-    [Parameter, EditorRequired] public EventCallback<FilterConfig?> OnAppliedStateChanged { get; set; }
+    // The owner's latest snapshot — delivered on attach, before the first
+    // render, and replaced at every change the owner publishes. Everything
+    // this panel shows about the selection reads it.
+    private FilterSetupSnapshot _snapshot = default!;
+    private IDisposable? _attachment;
 
-    /// <summary>
-    /// The restored-filter notice's state (see <see cref="FilterRestoreNotice"/>),
-    /// armed by this panel's first-render restore when it stages a stored
-    /// selection and dismissed at the first buffer-affecting gesture or
-    /// commit, or by the user closing the notice — one dismissal, held there
-    /// and nowhere in this panel. The composite forwards the host's app-scoped instance — the
-    /// lifetime that lets the notice survive navigation and die on reload by
-    /// construction. The default is a fresh, panel-scoped instance so the
-    /// panel is coherent in isolation (tests render it bare); only the
-    /// composite's forwarding makes it §4-correct across remounts, and the
-    /// composite's trap pin fails if that forwarding is ever dropped.
-    /// </summary>
-    [Parameter] public FilterRestoreNotice RestoreNotice { get; set; } = new();
+    // The selection on screen.
+    private FilterDraft Draft => _snapshot.Draft;
 
-    /// <summary>
-    /// Raised once per mount, the first time a <c>localStorage</c> call this
-    /// panel makes is refused by the browser (halheinrich/backgammon#102) — a
-    /// disabled-storage or hostile-privacy setting, which reaches Blazor as a
-    /// <see cref="JSException"/>. The panel has already degraded by the time
-    /// this fires: a refused read reads as nothing stored and the read site's
-    /// own default applies, a refused write keeps the in-memory state, and
-    /// Apply still delivers the applied selection through
-    /// <see cref="OnFilterConfigChanged"/> and <see cref="OnAppliedStateChanged"/>
-    /// — what the failure costs is only that the next visit will not remember.
-    /// The host owns what the page says about it: whether storage is one
-    /// page-level fact shared with the host's own keys, and the notice, are
-    /// the host's (the condition notice under the umbrella's
-    /// <c>SPEC-notices.md</c>). Optional, deliberately: a host that binds
-    /// nothing behaves as before, and the panel keeps working either way.
-    /// Raised outside the guard, so a host handler's own failure is never
-    /// relabelled as unavailable storage.
-    /// </summary>
-    [Parameter] public EventCallback OnStorageUnavailable { get; set; }
+    protected override void OnInitialized() => _attachment = Setup.Attach(OnSetupChanged);
 
-    /// <summary>
-    /// Single <c>localStorage</c> key holding the whole filter state as one serialized
-    /// <see cref="FilterConfig"/> blob. The lib owns the JSON shape (<c>ToJson</c> /
-    /// <c>TryFromJson</c>); this component never touches a JSON serializer directly.
-    /// </summary>
-    /// <remarks>
-    /// <c>internal</c>, not private, so <see cref="FilterHelp"/> can render the key
-    /// name in its "what the panel remembers" copy from this one constant rather than
-    /// repeating it as a prose literal. Deliberately not <c>public</c>: a consumer must
-    /// never see — let alone depend on — this panel's storage keys, which is precisely
-    /// why the copy naming them is producer-owned and lives here.
-    /// </remarks>
-    internal const string ConfigKey = "xg_filter_config";
+    // Each snapshot becomes this panel's, and a render follows. The first
+    // arrives inside Attach, before the first render, so it needs none.
+    private void OnSetupChanged(FilterSetupSnapshot snapshot)
+    {
+        var attached = _snapshot is not null;
+        _snapshot = snapshot;
+        if (attached)
+        {
+            _ = InvokeAsync(StateHasChanged);
+        }
+    }
 
-    /// <summary>
-    /// The set of expanded facet rows, under its own key (camelCase after the
-    /// <c>xg_</c> prefix, per the sibling convention: <c>xg_quizMix</c>,
-    /// <c>xg_xgpPattern</c>). User preference, not filter state — it never rides in the
-    /// <see cref="ConfigKey"/> blob, and <see cref="LoadConfig"/> / Clear filters never
-    /// change it. The value is a JSON array of <see cref="FilterFacet"/> member names,
-    /// written in row order; restore is all-or-nothing, so anything unreadable — not
-    /// an array, a name no row answers to, a numeric token — restores every row
-    /// collapsed rather than salvaging part of it. A display preference that resets
-    /// once is not data, which is also why the key this replaced is neither read nor
-    /// migrated.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <c>internal</c> for the same reason as <see cref="ConfigKey"/> — see its remarks.
-    /// </para>
-    /// <para>
-    /// This is the one value the panel does serialize itself, and the exception proves
-    /// the rule: the <see cref="ConfigKey"/> blob's shape is the lib's, so the panel
-    /// must never touch a serializer for it, while the set of open rows is the panel's
-    /// own view-state and belongs to no other party.
-    /// </para>
-    /// </remarks>
-    internal const string DisclosureKey = "xg_expandedFilters";
-
-    /// <summary>
-    /// Whether the container over the rows is open — the one disclosure
-    /// over all eight rows (halheinrich/backgammon#231). Its own key, beside
-    /// <see cref="DisclosureKey"/> rather than inside it: that key's value is a
-    /// list of <see cref="FilterFacet"/> member names and this container is not
-    /// a facet, so a sentinel name in it would be the very corruption its
-    /// all-or-nothing restore exists to refuse. User preference like the rows':
-    /// never part of the <see cref="ConfigKey"/> blob, and
-    /// <see cref="LoadConfig"/> / Clear filters never change it.
-    /// <para>
-    /// The value is the literal <c>true</c> or <c>false</c> and nothing else —
-    /// one bit needs no serializer, which is why <see cref="DisclosureKey"/>
-    /// remains the only value this panel serializes itself. Restore is
-    /// <see cref="bool.TryParse(string?, out bool)"/>: anything unreadable
-    /// leaves the container folded, the same posture a fresh visit gets.
-    /// </para>
-    /// </summary>
-    /// <remarks>
-    /// <c>internal</c> for the same reason as <see cref="ConfigKey"/> — see its
-    /// remarks.
-    /// </remarks>
-    internal const string MoreFiltersKey = "xg_moreFiltersOpen";
+    /// <summary>Stops observing the owner; anything the owner is doing carries on without this panel.</summary>
+    public void Dispose() => _attachment?.Dispose();
 
     /// <summary>
     /// What the container's toggle is called while the rows are folded away
@@ -957,7 +850,7 @@
     /// follows from them.
     /// </summary>
     /// <remarks>
-    /// <c>internal</c> for <see cref="ConfigKey"/>'s reason and no other: it
+    /// <c>internal</c> for <see cref="FilterStorage.ConfigKey"/>'s reason and no other: it
     /// is how <see cref="FilterHelp"/> names this control in prose without
     /// retyping it, exactly as that block renders a facet heading from the
     /// lib's <c>ToLabel()</c> rather than spelling the facet out. Deliberately
@@ -984,16 +877,6 @@
     /// </summary>
     private string MoreFiltersLabel =>
         _moreFiltersExpanded ? MoreFiltersExpandedLabel : MoreFiltersFoldedLabel;
-
-    // The selection as the user is editing it — every box's text as typed,
-    // valid or not, and every choice — held as one immutable FilterDraft
-    // (halheinrich/backgammon#374). The parsed config and the lib's verdicts
-    // on it are derived from this on every ask, never kept beside it, and an
-    // edit is a new draft through Edit. Holding the text rather than its
-    // config is what keeps a box the config cannot represent ("1.5" in a
-    // move-number bound) on screen and marked, instead of rebuilt as no
-    // criterion; see FilterDraft.
-    private FilterDraft _draft = FilterDraft.Empty;
 
     // Depth facet — raw user intent as three per-mode pairs, held in the
     // draft verbatim and handed to FilterConfig.Build(), which owns the
@@ -1040,40 +923,6 @@
     // cannot reference the instance fields above.
     private IReadOnlyList<DepthModeGroup> DepthGroups => [_evaluations, _rollouts, _bookRollouts];
 
-    // The config this panel last committed — the one it raised through
-    // OnFilterConfigChanged from Apply or Clear filters — and the reference
-    // point for "has the selection moved since?". Plain component-instance
-    // state, deliberately dying on unmount: a host that remounts the panel
-    // (BgQuiz on a new folder pick) starts with nothing committed, which is
-    // what re-enables Apply for the new folder without any host-side reset
-    // call. Never persisted and never a holder: the first-render localStorage
-    // restore *stages* a selection, it does not commit one, so a fresh mount
-    // has no committed config even when it restores a full selection.
-    //
-    // A remount over an *unchanged* source is the one case where dying is the
-    // wrong answer — the selection really is still applied, so Apply would
-    // re-arm with nothing to do. FilterSurface reconciles that at its first
-    // render through ResumeApplied, from the applied holder it mediates and
-    // never from localStorage (see ResumeApplied and the composite's
-    // first-mount reconcile).
-    private FilterConfig? _committedConfig;
-
-    // True once LoadConfig has staged an externally supplied config, or
-    // ResumeApplied has staged the applied selection a previous mount
-    // committed. The first-render localStorage restore checks it both before
-    // and after its await, so a restore completing late can never clobber
-    // either. Blazor's single-threaded sync context makes the segments between
-    // awaits atomic — a plain bool is a sufficient guard, no locking.
-    private bool _externalConfigLoaded;
-
-    // Latched the first time a localStorage call is refused this mount, never
-    // retried: storage does not come back mid-session, and a failed call per
-    // key would be one identical console error each. Per mount rather than
-    // app-scoped because this panel holds no app-scoped state of its own; a
-    // remount rediscovers the condition at one refused call and tells the host
-    // again, which the host's own page-level fact absorbs idempotently.
-    private bool _storageUnavailable;
-
     // The facets that carry a row, in render order: FilterFacet declaration
     // order minus ErrorRange, which is always visible above the rows, and
     // minus the two UI-shelved facets (PositionTypes, PlayTypes), which an old
@@ -1108,11 +957,11 @@
         RowFacets.ToDictionary(f => f.ToString(), StringComparer.Ordinal);
 
     // Which rows are open. Default: none — every row starts collapsed, the
-    // posture the hierarchy ruling asks for. _disclosureTouched is the
-    // visibility counterpart of _externalConfigLoaded — true once the user has
-    // opened or closed a row this session, checked before and after the
-    // restore's await so a restore completing late can never clobber a fresh
-    // user choice.
+    // posture the hierarchy ruling asks for. _disclosureTouched is true once
+    // the user has opened or closed a row this mount, checked before and after
+    // the restore's await so a restore completing late can never clobber a
+    // fresh user choice. Blazor's single-threaded sync context makes the
+    // segments between awaits atomic, so a plain bool is a sufficient guard.
     private HashSet<FilterFacet> _expandedFacets = [];
     private bool _disclosureTouched;
 
@@ -1129,46 +978,70 @@
     {
         if (!firstRender) return;
 
-        await RestoreMoreFiltersAsync();
-        await RestoreDisclosureAsync();
-        await RestoreConfigAsync();
+        // The owner's restoration runs once per boot: this starts it on the
+        // first mount and finds it settled, or still in flight, on every later
+        // one. The display preferences are this mount's own. The restoration is
+        // awaited last only so a failure that is not a refusal surfaces here,
+        // in the lifecycle, rather than being lost.
+        try
+        {
+            var restoration = Setup.RestoreAsync();
+            await RestoreMoreFiltersAsync();
+            await RestoreDisclosureAsync();
+            await restoration;
+            _mountRestored.TrySetResult();
+        }
+        catch (Exception failure)
+        {
+            _mountRestored.TrySetException(failure);
+            throw;
+        }
     }
 
+    // Completes when this mount's restores have settled — its two display
+    // preferences and the boot's restoration of the selection. It is the one
+    // observation the restores' own continuation produces: a late restore
+    // that rightly yields to a gesture renders nothing, so no render can
+    // prove it ran.
+    private readonly TaskCompletionSource _mountRestored = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>Completes when this mount's restores have settled (see the field above).</summary>
+    internal Task MountRestored => _mountRestored.Task;
+
     // The container's restore, RestoreDisclosureAsync's shape over one bit:
-    // ungated by _externalConfigLoaded for the same reason (a host-driven load
-    // stages filter values and must not move what the user left open), and
     // re-checking its own touched flag after the await so a gesture that
-    // landed while the interop was in flight wins. Tolerant like the rows':
-    // anything bool.TryParse refuses leaves the container folded.
+    // landed while the read was in flight wins. Tolerant like the rows':
+    // anything bool.TryParse refuses — nothing stored and a refused read
+    // included — leaves the container folded.
     private async Task RestoreMoreFiltersAsync()
     {
         if (_moreFiltersTouched) return;
 
-        var stored = await TryGetItemAsync(MoreFiltersKey);
+        var read = await Storage.ReadAsync(FilterStorage.MoreFiltersKey);
 
         if (_moreFiltersTouched) return;
 
-        if (bool.TryParse(stored, out var open))
+        if (bool.TryParse(read.Value, out var open))
         {
             _moreFiltersExpanded = open;
             StateHasChanged();
         }
     }
 
-    // Deliberately not gated by _externalConfigLoaded: LoadConfig stages
-    // filter values, but which rows are open belongs to the user, so a
-    // host-driven load must not suppress restoring them.
+    // Which rows are open belongs to the user, so nothing that stages filter
+    // values — a saved filter loaded, the selection restored — suppresses
+    // restoring them.
     private async Task RestoreDisclosureAsync()
     {
         if (_disclosureTouched) return;
 
-        var stored = await TryGetItemAsync(DisclosureKey);
+        var read = await Storage.ReadAsync(FilterStorage.DisclosureKey);
 
-        // Re-check after the await: a row toggled while the interop was in
+        // Re-check after the await: a row toggled while the read was in
         // flight is a fresh user choice and must win.
         if (_disclosureTouched) return;
 
-        if (TryParseExpandedFacets(stored, out var restored))
+        if (TryParseExpandedFacets(read.Value, out var restored))
         {
             _expandedFacets = restored;
             StateHasChanged();
@@ -1216,381 +1089,58 @@
         return true;
     }
 
-    private async Task RestoreConfigAsync()
-    {
-        if (_externalConfigLoaded) return;
-
-        var stored = await TryGetItemAsync(ConfigKey);
-
-        // Re-check after the await: a host's LoadConfig or the composite's
-        // ResumeApplied may have run while the interop was in flight, and
-        // what they staged must win.
-        if (_externalConfigLoaded) return;
-
-        // Tolerant restore: a missing key, the literal null token, or corrupt
-        // JSON all yield a fresh default config — no try/catch here. Only a
-        // genuine parse arms the restored-selection notice: nothing stored
-        // (or nothing readable) means nothing was restored, and the notice
-        // must not claim otherwise over a defaults screen. An empty stored
-        // config does arm it — the empty filter is still a filter and still
-        // a choice the previous session made.
-        //
-        // The three outcomes are told apart here and nowhere else. Null is
-        // nothing stored — an ordinary first visit, or a refused read, which
-        // the seam already reported as the storage condition — and gets
-        // defaults with no word. A document that is present but unreadable
-        // gets defaults and the failed-restore notice: a failed restore is never silent
-        // (Hal's ruling, halheinrich/backgammon#367). TryFromJson alone
-        // cannot draw that line — it answers false for a missing key too —
-        // which is why the null check precedes it. The unreadable document
-        // is left as it is; the next commit writes over it.
-        if (FilterConfig.TryFromJson(stored, out var cfg))
-        {
-            RestoreNotice.Arm();
-        }
-        else if (stored is not null)
-        {
-            RestoreNotice.ArmFailure();
-        }
-
-        HydrateFrom(cfg);
-
-        StateHasChanged();
-    }
-
-    // ── The storage seam ────────────────────────────────────────────────────
-    //
-    // Every localStorage call the panel makes goes through these two, and
-    // neither throws for a refused call (halheinrich/backgammon#102). A
-    // browser with storage disabled raises a SecurityError on getItem and
-    // setItem alike, which reaches Blazor as a JSException; unguarded, the
-    // first read faulted the first render and a throwing write stopped the
-    // commit before the host heard of the applied selection. The guard is
-    // per call and translates the failure into "nothing is stored", a state
-    // every read site already answers with its own documented default, so
-    // nothing restates those defaults here. A refused write keeps whatever
-    // in-memory state the caller had already moved.
-    //
-    // JSException only, as ExtractFromXgToCsv's BrowserStorage (the ruled
-    // precedent, halheinrich/backgammon#91) catches: a serialization bug in a
-    // caller, or a host callback that throws, is not a storage failure and
-    // must still surface. The host is told once per mount, from the first
-    // refused call, outside the catch — see OnStorageUnavailable.
-    private async Task<string?> TryGetItemAsync(string key)
-    {
-        if (_storageUnavailable) return null;
-
-        string? stored;
-        try
-        {
-            stored = await JS.InvokeAsync<string?>("localStorage.getItem", key);
-        }
-        catch (JSException)
-        {
-            await RecordStorageUnavailableAsync();
-            return null;
-        }
-
-        return stored;
-    }
-
-    // Reports whether the write landed: a caller whose claim depends on the
-    // stored value having changed (the failed-restore notice's) must not
-    // act on a write that was skipped or refused.
-    private async Task<bool> TrySetItemAsync(string key, string value)
-    {
-        if (_storageUnavailable) return false;
-
-        try
-        {
-            await JS.InvokeVoidAsync("localStorage.setItem", key, value);
-            return true;
-        }
-        catch (JSException)
-        {
-            await RecordStorageUnavailableAsync();
-            return false;
-        }
-    }
-
-    private Task RecordStorageUnavailableAsync()
-    {
-        _storageUnavailable = true;
-        return OnStorageUnavailable.InvokeAsync();
-    }
-
-    /// <summary>
-    /// Projects <paramref name="config"/> into the panel's edit buffers as a
-    /// staging-only bulk edit — exactly as if the user had typed every value.
-    /// No <em>Apply-side</em> effects occur: nothing is persisted to
-    /// <c>localStorage</c> and <see cref="OnFilterConfigChanged"/> is not
-    /// raised — the user (or host) still commits via Apply, and this method
-    /// never moves the committed config.
-    /// <see cref="OnAppliedStateChanged"/> <em>is</em> raised, like any other
-    /// edit gesture, reporting what the staged buffers now equal: normally
-    /// <see langword="null"/>, since a loaded config generally differs from
-    /// what was committed — but the committed config itself when the load
-    /// happens to stage exactly it, which is a genuinely clean state and is
-    /// reported as one. Calling this also suppresses the first-render
-    /// <c>localStorage</c> restore, so a config loaded during host startup
-    /// cannot be clobbered when the restore's interop completes afterwards.
-    /// Which rows are open is deliberately untouched — a staged config can
-    /// activate facets whose rows are collapsed, which those rows' badges
-    /// report, but opening one is the user's gesture, never this method's.
-    /// Must be called on the renderer's synchronization context (any event
-    /// handler or lifecycle method qualifies), typically via <c>&#64;ref</c>.
-    /// </summary>
-    /// <param name="config">The configuration to stage. Read, never stored.</param>
-    /// <exception cref="ArgumentNullException">
-    /// Thrown when <paramref name="config"/> is <see langword="null"/>.
-    /// </exception>
-    public void LoadConfig(FilterConfig config)
-    {
-        ArgumentNullException.ThrowIfNull(config);
-        _externalConfigLoaded = true;
-        HydrateFrom(config);
-        ReportAppliedState();
-        StateHasChanged();
-    }
-
-    /// <summary>
-    /// Snapshots the current edit buffers — including unapplied edits — into a
-    /// <see cref="FilterConfig"/>, for host-driven save-as while the panel is
-    /// dirty. The gate is exactly Apply's validity gate, single-sourced through
-    /// the same build path: this fails when
-    /// <see cref="FilterConfig.GetInvalidFields"/> names any field — the
-    /// state in which Apply refuses to commit, pattern text the grammar
-    /// refuses included. It is deliberately no stricter than Apply either:
-    /// both read the one <see cref="IsCommittable"/> member, so a rule joining
-    /// the lib's field table (the score-token grammar did, in
-    /// <c>halheinrich/backgammon#121</c>; the pattern grammar did, in
-    /// <c>halheinrich/backgammon#269</c>) tightens both gates in the same
-    /// edit. Save-as therefore captures exactly what Apply could produce, and
-    /// no saved document is minted from a selection Apply would have refused.
-    /// </summary>
-    /// <param name="config">
-    /// The snapshot when this returns <see langword="true"/>; otherwise
-    /// <see langword="null"/>.
-    /// </param>
-    /// <returns>
-    /// <see langword="true"/> when the buffers are in a state Apply would
-    /// accept; <see langword="false"/> otherwise.
-    /// </returns>
-    public bool TryGetEditedConfig([NotNullWhen(true)] out FilterConfig? config)
-    {
-        if (!IsCommittable)
-        {
-            config = null;
-            return false;
-        }
-
-        config = BuildConfig();
-        return true;
-    }
-
-    /// <summary>
-    /// Drops the last-committed config so Apply re-arms on a still-mounted
-    /// panel — the programmatic equivalent of the remount that "a new folder
-    /// re-enables Apply" falls out of, for hosts that keep the panel mounted
-    /// across a source change. The buffers, the persisted
-    /// <c>localStorage</c> state, and which rows are open are all untouched:
-    /// the user's selection stays on screen, it just no longer counts as
-    /// committed, so <see cref="OnAppliedStateChanged"/> re-reports through
-    /// the normal path (necessarily <see langword="null"/> — the buffers can
-    /// equal no committed config once there is none).
-    /// <c>internal</c> by design: the composite component is the only
-    /// intended caller (tests reach it via <c>InternalsVisibleTo</c>) — a
-    /// host never needs it, because a host either remounts the panel or hosts
-    /// the composite, which owns the source-change rule.
-    /// </summary>
-    internal void ForgetCommitted()
-    {
-        // RaiseAppliedState, not ReportAppliedState: this is source-change
-        // choreography, not a user gesture, so it must not dismiss the
-        // restored-selection notice — a host whose source change crosses an
-        // unmount runs no panel code at all, and the notice's fate cannot
-        // differ by host mechanics. The restored selections survive a source
-        // change untouched, so the notice's statement still holds.
-        _committedConfig = null;
-        RaiseAppliedState();
-        StateHasChanged();
-    }
-
-    /// <summary>
-    /// Resumes <paramref name="config"/> as the selection a previous mount
-    /// applied — the mirror of <see cref="ForgetCommitted"/>, for a fresh
-    /// mount over a source the caller's applied holder says is already
-    /// filtered. It stages the config into the edit buffers <em>and</em>
-    /// adopts it as the last-committed config, so the screen shows the
-    /// applied selection and Apply does not re-arm over it. The committed
-    /// config dies on unmount while the caller's applied state outlives it;
-    /// without this a remount would arm Apply over a selection that is
-    /// already applied, with the disabled-because-nothing-changed
-    /// explanation missing.
-    /// <para>
-    /// <b>The buffers come from the holder too, never from storage.</b> The
-    /// stored selection and the applied one agree only while remembering
-    /// works: after an Apply whose write the browser refused
-    /// (halheinrich/backgammon#102), storage still holds the previous
-    /// selection, and a refused read holds nothing. A remount that hydrated
-    /// from storage would then show one selection while the holder — and
-    /// the host's gate — said another was applied. So this suppresses the
-    /// first-render storage restore the way <see cref="LoadConfig"/> does,
-    /// and overwrites it if it already ran: whichever lands first, the
-    /// applied holder's selection is what the mount ends on. Nothing is
-    /// written — the committed config stays unpersisted by contract (see
-    /// this panel's Pitfalls) — and which rows are open is untouched.
-    /// </para>
-    /// <para>
-    /// <b>Silent, unlike <see cref="ForgetCommitted"/> — deliberately.</b>
-    /// Forgetting is news: a gate the consumer believes clean just went
-    /// stale, and only <see cref="OnAppliedStateChanged"/> can say so. A
-    /// resume is by definition no news — the caller resumes from applied
-    /// state it is already holding, so a report would only tell it what it
-    /// just said. The asymmetry is the contract, not an oversight. The
-    /// restored-selection notice is not touched either: an applied holder
-    /// means a commit happened this boot, which already spent it.
-    /// </para>
-    /// <c>internal</c> for exactly <see cref="ForgetCommitted"/>'s reason: the
-    /// composite component is the only intended caller (tests reach it via
-    /// <c>InternalsVisibleTo</c>) — it is the party that mediates the applied
-    /// holder and can therefore say what was committed; a host holds no such
-    /// answer about <em>this</em> panel.
-    /// </summary>
-    /// <param name="config">The applied config to resume.</param>
-    /// <exception cref="ArgumentNullException">
-    /// Thrown when <paramref name="config"/> is <see langword="null"/>.
-    /// </exception>
-    internal void ResumeApplied(FilterConfig config)
-    {
-        ArgumentNullException.ThrowIfNull(config);
-        _externalConfigLoaded = true;
-        HydrateFrom(config);
-        _committedConfig = config;
-        StateHasChanged();
-    }
-
-    // The panel's cleanliness truth, computed in one place and consumed by the
-    // two surfaces that need it — the Apply gate (CanApply) and the payload of
-    // OnAppliedStateChanged — so the button and the event can never disagree.
-    // Null means the buffers equal no committed config: either nothing has been
-    // committed this mount, or the selection has moved since. Equality is
-    // FilterConfig's own value equality, which is precisely why an edit undone
-    // back to the committed values counts as clean again — a one-way dirty flag
-    // would strand the user behind a disabled Apply in exactly that state.
-    // Only a committable draft can match: a committed config always passed
-    // the gate, and a draft the gate refuses is not the selection that was
-    // committed, whatever it parses to. That is load-bearing, not cosmetic —
-    // a box the config cannot represent parses as no criterion, so "1.5" in
-    // a move-number bound over a committed config with no such bound would
-    // otherwise compare equal and read as the applied selection.
-    private FilterConfig? MatchedCommittedConfig =>
-        _committedConfig is not null && IsCommittable && _committedConfig.Equals(BuildConfig())
-            ? _committedConfig
-            : null;
-
-    // Apply's gate: the selection must be committable and must differ from what
-    // was last committed.
-    private bool CanApply => IsCommittable && MatchedCommittedConfig is null;
-
     // Why Apply is disabled — the NamedEntriesPanel disabled-reason idiom
     // (button title plus a muted hint line), except that here the panel knows
     // its own reason instead of being told it by the host. Covers only the
-    // nothing-to-apply case: an invalid value already explains itself in its own
-    // field's invalid-feedback line, and re-stating it here would be a second
-    // encoding of the same rule. Null while Apply is enabled, so no stale
-    // explanation lingers.
+    // nothing-to-apply case: an invalid value already explains itself in its
+    // own field's invalid-feedback line, and re-stating it here would be a
+    // second encoding of the same rule. Null while Apply is enabled, so no
+    // stale explanation lingers.
     private string? ApplyDisabledReason =>
-        IsCommittable && MatchedCommittedConfig is not null
+        _snapshot.IsAlreadyApplied
             ? "No changes to apply — this filter is already applied."
             : null;
 
-    // Report what the buffers now equal, after a gesture that touched them.
-    // Fire-and-forget like the edit handlers that call it: the panel has nothing
-    // to await on the consumer's reaction. Every caller is a buffer-affecting
-    // gesture — a control edit or LoadConfig staging — so this is also where
-    // the restored selection stops being "the restored selection" and the
-    // notice dies. Choreography that raises the event without a gesture
-    // (ForgetCommitted) calls RaiseAppliedState directly.
-    private void ReportAppliedState()
-    {
-        RestoreNotice.Dismiss();
-        RaiseAppliedState();
-    }
+    // The owner guards both commits on the gate it publishes, so a dispatch
+    // that ignores the disabled attribute cannot re-commit an unchanged
+    // selection or clear before restoration settles. The click's task is the
+    // owner's: it completes when the commit's write has been answered.
+    private Task ApplyAsync() => Setup.ApplyAsync();
 
-    // The raw raise, shared by the gesture path above and non-gesture
-    // choreography.
-    private void RaiseAppliedState() => OnAppliedStateChanged.InvokeAsync(MatchedCommittedConfig);
+    // "Clear filters" — the full-clear gesture, the owner's: draft and
+    // baseline to the empty selection, then remembered. Filter values only:
+    // the panel has no path to host state, and which rows are open is the
+    // user's choice, not this gesture's.
+    private Task ClearFiltersAsync() => Setup.ClearAsync();
 
-    // Guarded as well as visually disabled, matching NamedEntriesPanel's
-    // handler-side gates: programmatic event dispatch ignores the disabled
-    // attribute, and re-committing an unchanged selection would raise a
-    // spurious OnFilterConfigChanged.
-    private Task ApplyAsync() =>
-        CanApply ? PersistAndRaiseAsync(BuildConfig()) : Task.CompletedTask;
-
-    // "Clear filters" — the full-clear gesture: the draft back to an untouched
-    // panel, then persist + raise the empty config (consumers treat it as
-    // applied). Filter values only: the panel has no path to host state, and
-    // which rows are open is the user's choice, not this gesture's.
-    private Task ClearFiltersAsync()
-    {
-        _draft = FilterDraft.Empty;
-        return PersistAndRaiseAsync(BuildConfig());
-    }
-
-    // The single commit point — Apply and Clear filters both land here, and it
-    // is the only place _committedConfig moves on a gesture (ResumeApplied
-    // moves it at mount). A commit is the other gesture that makes the
-    // selection the user's own, so the restored-selection notice dies here
-    // too (Apply is additionally the very consent the notice asks for). The
-    // failed-restore notice ends here only when the write lands: its claim
-    // is about the stored document, and a refused or skipped write leaves
-    // the unreadable one in place, so the notice stays beside whatever the
-    // host says about storage (Hal's ruling, 2026-10-07).
-    //
-    // The committed config is assigned before the write and both callbacks
-    // are raised after it whether or not the write landed: the host must
-    // hear of the applied selection even when remembering it fails
-    // (Hal's ruling, halheinrich/backgammon#367), and the write is guarded
-    // so a refused one costs only the next visit's memory.
-    private async Task PersistAndRaiseAsync(FilterConfig cfg)
-    {
-        RestoreNotice.Dismiss();
-        _committedConfig = cfg;
-        if (await TrySetItemAsync(ConfigKey, cfg.ToJson()))
-        {
-            RestoreNotice.DismissFailure();
-        }
-        await OnFilterConfigChanged.InvokeAsync(cfg);
-
-        // Re-derived through MatchedCommittedConfig rather than handing cfg
-        // straight on: one computation feeds both the gate and the payload, so
-        // the event can never claim clean while the button says otherwise.
-        await OnAppliedStateChanged.InvokeAsync(MatchedCommittedConfig);
-    }
-
-    // Flip one row + persist the whole set. Not an edit gesture: no
-    // OnAppliedStateChanged and no config write — the choice is remembered
-    // immediately under its own key, independent of Apply.
+    // Flip one row + persist the whole set. Not an edit gesture: the owner
+    // hears nothing and the selection is not written — the choice is
+    // remembered immediately under its own key, independent of Apply. A
+    // refused write keeps the row as the user left it for this mount; the
+    // seam has told the host.
     private async Task ToggleFacetAsync(FilterFacet facet)
     {
         _disclosureTouched = true;
         if (!_expandedFacets.Remove(facet)) _expandedFacets.Add(facet);
-        await TrySetItemAsync(DisclosureKey, SerializeExpandedFacets());
+        await Storage.WriteAsync(FilterStorage.DisclosureKey, SerializeOpenRows(_expandedFacets));
     }
 
     // Fold or unfold the container + persist the one bit, ToggleFacetAsync's
-    // shape and for the same reasons: not an edit gesture, so no
-    // OnAppliedStateChanged and no config write, and the choice is remembered
-    // immediately under its own key rather than at Apply. The two literals are
-    // the whole wire format — see MoreFiltersKey.
+    // shape and for the same reasons: not an edit gesture, so the owner hears
+    // nothing and the selection is not written, and the choice is remembered
+    // immediately under its own key rather than at Apply.
     private async Task ToggleMoreFiltersAsync()
     {
         _moreFiltersTouched = true;
         _moreFiltersExpanded = !_moreFiltersExpanded;
-        await TrySetItemAsync(MoreFiltersKey, _moreFiltersExpanded ? "true" : "false");
+        await Storage.WriteAsync(FilterStorage.MoreFiltersKey, SerializeFold(_moreFiltersExpanded));
     }
+
+    // The container's state as stored: the two literals are the whole wire
+    // format — see FilterStorage.MoreFiltersKey. Internal, with
+    // SerializeOpenRows, so the producer's test support states a toggle's
+    // write for a host's test in this panel's own spelling rather than a copy.
+    internal static string SerializeFold(bool open) => open ? "true" : "false";
 
     // The open rows as the stored JSON array. Written in RowFacets order rather
     // than the set's own enumeration order, so one arrangement of open rows has
@@ -1604,10 +1154,13 @@
     // reflection path at publish — halheinrich/backgammon#193 shipped it once
     // and broke that publish. The trim analyzer in this project's own build
     // now refuses it first, as IL2026 under TreatWarningsAsErrors.
-    private string SerializeExpandedFacets() =>
-        JsonSerializer.Serialize(
-            RowFacets.Where(_expandedFacets.Contains).Select(f => f.ToString()).ToArray(),
+    internal static string SerializeOpenRows(IEnumerable<FilterFacet> openRows)
+    {
+        var open = openRows.ToHashSet();
+        return JsonSerializer.Serialize(
+            RowFacets.Where(open.Contains).Select(f => f.ToString()).ToArray(),
             XgFilterRazorJsonContext.Default.StringArray);
+    }
 
     // Which facets currently hold active filters — the presence half of every
     // row's badge. Judged by the lib's activation predicates via
@@ -1617,7 +1170,7 @@
     // is a criterion the user meant rather than none (FilterDraft.ActiveFacets).
     // Recomputed per render; the cost is a parse plus predicate sweep,
     // accepted over caching.
-    private IReadOnlySet<FilterFacet> ActiveFacets => _draft.ActiveFacets;
+    private IReadOnlySet<FilterFacet> ActiveFacets => _snapshot.ActiveFacets;
 
     // The words on an active row's badge — the panel's display concern, and
     // the only half of the badge that is. It says how much the collapsed row
@@ -1637,30 +1190,19 @@
         // not a number this panel could arrive at differently.
         FilterFacet.DecisionType => "1 selected",
 
-        FilterFacet.ContactTypes => $"{_draft.ContactTypes.Count} selected",
-        FilterFacet.AnalysisDepth => $"{DepthGroups.Count(g => _draft.Includes(g.Mode))} selected",
-        FilterFacet.DiceRolls => $"{_draft.DiceRolls.Count} selected",
+        FilterFacet.ContactTypes => $"{Draft.ContactTypes.Count} selected",
+        FilterFacet.AnalysisDepth => $"{DepthGroups.Count(g => Draft.Includes(g.Mode))} selected",
+        FilterFacet.DiceRolls => $"{Draft.DiceRolls.Count} selected",
 
         _ => throw new ArgumentOutOfRangeException(
             nameof(facet), facet, "Not a facet this panel gives a row."),
     };
 
-    // The draft's parsed config — a fresh instance each call, so what Apply
-    // commits and what a save snapshots share nothing with the draft.
-    private FilterConfig BuildConfig() => _draft.ToConfig();
-
-    // Put a config on screen: the draft becomes the editor showing it, values
-    // copied, a stored value a rule outlaws kept exactly as stored.
-    private void HydrateFrom(FilterConfig cfg) => _draft = FilterDraft.From(cfg);
-
-    // One edit gesture: the draft it produced becomes the draft, and the panel
-    // reports what that now equals. Every control's handler comes through
-    // here, so no control can change the selection without reporting it.
-    private void Edit(FilterDraft edited)
-    {
-        _draft = edited;
-        ReportAppliedState();
-    }
+    // One edit gesture, the owner's: the draft it produces becomes the
+    // draft, applied to whatever the draft is when it arrives. Every
+    // control's handler comes through here, so no control can change the
+    // selection behind the owner's back.
+    private void Edit(Func<FilterDraft, FilterDraft> edit) => Setup.Edit(edit);
 
     // The verdict on every value that can be wrong — the lib's on the bounds,
     // the score tokens and the pattern text, asked of the same parsed config
@@ -1669,7 +1211,7 @@
     // be at all (FilterDraft.InvalidFields). Safe on every render: neither
     // verdict throws. Recomputed per render like the active-facet set, at the
     // same accepted cost.
-    private IReadOnlySet<FilterField> InvalidFields => _draft.InvalidFields;
+    private IReadOnlySet<FilterField> InvalidFields => _snapshot.InvalidFields;
 
     // How an input wears the lib's verdict — the one place a field's validity
     // is rendered (halheinrich/backgammon#270), splatted onto every text and
@@ -1704,21 +1246,12 @@
     // list without saying what is wrong in it. Asked of the grammar itself
     // (MatchScoreToken.GetFault) — the same rule GetInvalidFields swept over
     // the list, so the field the lib named and the verdict the panel words
-    // cannot disagree — and read off the same BuildConfig() output every other
+    // cannot disagree — and read off the same parsed config every other
     // verdict here reads. Distinct faults only: the line explains a kind of
     // mistake once, however many entries made it.
     private IReadOnlySet<MatchScoreTokenFault> MatchScoreFaults =>
-        BuildConfig().MatchScores
+        Draft.ToConfig().MatchScores
                      .Select(MatchScoreToken.GetFault)
                      .Where(f => f != MatchScoreTokenFault.None)
                      .ToHashSet();
-
-    // The panel's whole validity truth, in one place: no field is wrong. The
-    // domain rules are the lib's — since halheinrich/backgammon#269 the
-    // pattern text's too — and the one rule beside them is the draft's own
-    // about representation, so the panel keeps no rule of its own. Both
-    // surfaces that must refuse an uncommittable selection read this one
-    // member — the Apply gate and TryGetEditedConfig — so a save can never
-    // capture a selection Apply itself would refuse.
-    private bool IsCommittable => _draft.IsValid;
 }

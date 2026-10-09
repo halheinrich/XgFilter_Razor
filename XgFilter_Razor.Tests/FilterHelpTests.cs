@@ -118,12 +118,12 @@ public class FilterHelpTests : BunitContext
     // Wiring, not content. Per the copy-pin SSOT ruling, an independent literal
     // is the right oracle for "the user can read X" and lives in the e2e suite;
     // here the property under test is that the key names in the copy are the
-    // *same* source the panel writes with. Two literals would agree today and
-    // drift silently the day a key is renamed, so this assertion deliberately
-    // references FilterPanel's constants (visible test-only via
-    // InternalsVisibleTo) — that is what makes it catch the drift.
+    // *same* source the surface writes with. Two literals would agree today
+    // and drift silently the day a key is renamed, so this assertion
+    // deliberately references FilterStorage's constants (visible test-only
+    // via InternalsVisibleTo) — that is what makes it catch the drift.
     [Fact]
-    public void WhatIsRemembered_NamesTheKeysFromFilterPanelsConstants()
+    public void WhatIsRemembered_NamesTheKeysFromTheSurfacesStorageConstants()
     {
         var cut = RenderHelp();
 
@@ -132,7 +132,7 @@ public class FilterHelpTests : BunitContext
                       .ToArray();
 
         Assert.Equal(
-            new[] { FilterPanel.ConfigKey, FilterPanel.DisclosureKey, FilterPanel.MoreFiltersKey },
+            new[] { FilterStorage.ConfigKey, FilterStorage.DisclosureKey, FilterStorage.MoreFiltersKey },
             keys);
     }
 

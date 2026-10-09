@@ -1,380 +1,228 @@
 using AngleSharp.Dom;
 using Bunit;
-using Microsoft.JSInterop;
+using BgUiPrimitives_Razor;
+using BgUiPrimitives_Razor.TestSupport;
+using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Web;
+using Microsoft.Extensions.DependencyInjection;
 using XgFilter_Lib.Filtering;
 using XgFilter_Razor.Components;
-using XgFilter_Razor.Components.Internal;
+using XgFilter_Razor.Testing;
 
 namespace XgFilter_Razor.Tests;
 
 /// <summary>
-/// Pins the panel's degradation, through <see cref="FilterSurface"/>, when
-/// <c>localStorage</c> is unavailable (halheinrich/backgammon#102) — a
-/// disabled-storage or hostile-privacy setting, where every call raises a
-/// <c>SecurityError</c> that reaches Blazor as a <see cref="JSException"/>.
+/// Pins the surface's storage policy (halheinrich/backgammon#374, over
+/// BgUiPrimitives_Razor's <c>BrowserStorage</c>) where the browser refuses
+/// storage — a disabled-storage or hostile-privacy setting, or a full quota:
+/// every requested call is made, every refusal reaches the host's sink, a
+/// refused commit write never undoes the choice, and rejecting a stale
+/// completion never discards its refusal.
 /// <para>
-/// Hal's ruling (2026-10-06, halheinrich/backgammon#367): the panel must
-/// still deliver an applied selection to its host when remembering that
-/// selection fails, with coverage of both shapes — reads failing, and reads
-/// succeeding while writes fail. Unguarded, the first refused read faulted
-/// the panel's first render (a host saw no filter panel at all), and a
-/// refused write stopped the commit between assigning the committed config
-/// and raising the events, so the host never heard of the applied
-/// selection. ExtractFromXgToCsv's <c>HomeStorageUnavailableTests</c>
-/// (halheinrich/backgammon#91) is the shape: a fix-prover that fails
-/// against the unguarded component.
-/// </para>
-/// <para>
-/// The failure modelled here is per browser, not per key: every
-/// <c>localStorage</c> call the panel makes is refused, under the real
-/// identifiers, through the composite hosts embed. What the host is told is
-/// pinned here too, by binding what a host binds.
+/// The refusals are planned per call, through the real accessor, in the
+/// accessor's vocabulary; a host's side is played by
+/// <see cref="RefusalNoticeHost"/> over the recording sink, which is what a
+/// host binds.
 /// </para>
 /// </summary>
 public class FilterSurfaceStorageUnavailableTests : BunitContext
 {
+    private static readonly FilterSourceToken TokenA = FilterSourceToken.FromGeneration(1);
+    private static readonly FilterSourceToken TokenB = FilterSourceToken.FromGeneration(2);
+
+    private readonly RecordingRefusalSink _refusals = new();
+    private readonly BrowserStoragePlan _storage;
+
     public FilterSurfaceStorageUnavailableTests()
     {
-        JSInterop.Mode = JSRuntimeMode.Loose;
+        Services.AddSingleton(_refusals);
+        Services.AddFilterSurface<RecordingRefusalSink>();
+        _storage = BrowserStoragePlan.On(JSInterop);
+        Setup.ReportSource(TokenA);
     }
 
-    private static readonly FilterSourceToken TokenA = FilterSourceToken.FromGeneration(1);
+    private FilterSetup Setup => Services.GetRequiredService<FilterSetup>();
 
-    // Host-side captures: the holder and the notice state (both app-scoped
-    // in a real host — one instance across every render here, like one
-    // across every mount in an app) and the two re-raised event channels.
-    private readonly AppliedFilter _holder = new();
-    private readonly FilterRestoreNotice _notice = new();
-    private readonly List<FilterConfig> _committed = [];
-    private readonly List<FilterConfig?> _reports = [];
-
-    // The host's binding of the storage-unavailable fact: how many times the
-    // composite told it. A count, not a bool, because "once per mount" is
-    // part of the contract.
-    private int _storageUnavailableReports;
-
-    /// <summary>
-    /// What a browser with storage refused actually raises: the JS-side
-    /// <c>SecurityError</c>, surfaced through the interop boundary.
-    /// </summary>
-    private static JSException StorageRefused() =>
-        new("SecurityError: The operation is insecure.");
-
-    /// <summary>Every read throws, as a dead store does — whatever the key.</summary>
-    private void WithReadsRefused() =>
-        JSInterop.Setup<string?>("localStorage.getItem", _ => true)
-                 .SetException(StorageRefused());
-
-    /// <summary>Every write throws — whatever the key.</summary>
-    private void WithWritesRefused() =>
-        JSInterop.SetupVoid("localStorage.setItem", _ => true)
-                 .SetException(StorageRefused());
-
-    // A previous visit's remembered selection, for the reads-succeed shape.
-    private void StoredConfig(FilterConfig config) =>
-        JSInterop.Setup<string?>("localStorage.getItem", FilterPanel.ConfigKey)
-                 .SetResult(config.ToJson());
-
-    // Binds what a host binds, the storage-unavailable report included; a
-    // host that binds nothing new is the other render below.
-    private IRenderedComponent<FilterSurface> RenderSurface() =>
-        Render<FilterSurface>(parameters => parameters
-            .Add(p => p.AppliedFilter, _holder)
-            .Add(p => p.RestoreNotice, _notice)
-            .Add(p => p.Source, TokenA)
-            .Add(p => p.Storage, new FakeDocumentStorage())
-            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => _committed.Add(c))
-            .Add(p => p.OnAppliedStateChanged, (FilterConfig? c) => _reports.Add(c))
-            .Add(p => p.OnStorageUnavailable, () => _storageUnavailableReports++));
-
-    private IRenderedComponent<FilterSurface> RenderSurfaceBindingNothingNew() =>
-        Render<FilterSurface>(parameters => parameters
-            .Add(p => p.AppliedFilter, _holder)
-            .Add(p => p.RestoreNotice, _notice)
-            .Add(p => p.Source, TokenA)
-            .Add(p => p.Storage, new FakeDocumentStorage())
-            .Add(p => p.OnFilterConfigChanged, (FilterConfig c) => _committed.Add(c))
-            .Add(p => p.OnAppliedStateChanged, (FilterConfig? c) => _reports.Add(c)));
-
-    private static IElement Apply(IRenderedComponent<FilterSurface> cut) =>
+    // The surface's Apply button and Error-range Min box, in whatever renders
+    // the surface — the surface itself or a host page around it.
+    private static IElement ApplyIn(IRenderedComponent<IComponent> cut) =>
         cut.FindAll("button").Single(b => b.TextContent.Trim().StartsWith("Apply Filter"));
 
-    private static IElement ErrorMin(IRenderedComponent<FilterSurface> cut) =>
-        cut.Find("#errorMin");
+    private static IElement ErrorMinIn(IRenderedComponent<IComponent> cut) => cut.Find("#errorMin");
 
-    private int Reads => JSInterop.Invocations.Count(i => i.Identifier == "localStorage.getItem");
+    // ── Every call made, every refusal told ────────────────────────────────
 
-    // ── Reads refused: the structural failure this exists for ───────────────
-
+    // A browser that refuses every read: the restoration and both display
+    // preferences are refused, each refusal reaches the sink, and the first
+    // render completes on the defaults with no notice of the panel's own.
     [Fact]
-    public void ReadsRefused_TheFirstRenderCompletes_OnTheDefaults_WithNoException()
+    public void ReadsRefused_EveryRefusalReachesTheSink_AndThePanelStartsOnItsDefaults()
     {
-        WithReadsRefused();
+        _storage.ExpectFilterRestore(FilterRestoration.Refused);
+        _storage.ExpectFilterPanelMountRefused();
 
-        // Unguarded, the first restore faults the panel's after-render and
-        // the host has no filter panel, silently.
-        var cut = RenderSurface();
+        var cut = Render<FilterSurface>();
 
-        cut.WaitForAssertion(() => Assert.Equal(1, Reads));
-        Assert.Equal(string.Empty, ErrorMin(cut).GetAttribute("value"));
-        Assert.False(Apply(cut).HasAttribute("disabled"));
-        // A refused read is nothing stored, not an unreadable document: no
-        // restore claim either way.
+        Assert.Equal(3, _refusals.Refusals.Count);
+        Assert.Equal(FilterRestoration.Refused, Setup.Current.Restoration);
+        Assert.Equal(string.Empty, ErrorMinIn(cut).GetAttribute("value"));
         Assert.Empty(cut.FindAll("#filterRestoredNotice"));
         Assert.Empty(cut.FindAll("#filterRestoreFailedNotice"));
+        _storage.Verify();
     }
 
-    // The latch: one refused call tells the panel storage is dead for this
-    // mount, and the two reads behind it are not attempted — a failed call
-    // per key would be one identical console error each.
+    // No latch: after the reads were refused, the next call is still made —
+    // a toggle's write, then a commit's — and each refusal is told again.
+    // A refusal is never followed by a skipped call.
     [Fact]
-    public void ReadsRefused_StorageIsNotRetried_WithinTheMount()
+    public async Task AfterARefusal_TheNextCallIsStillMade_AndItsRefusalToldToo()
     {
-        WithReadsRefused();
-
-        var cut = RenderSurface();
-
-        cut.WaitForAssertion(() => Assert.Equal(1, Reads));
-        cut.Find("#moreFiltersToggle").Click();
-        Assert.Equal(1, Reads);
-    }
-
-    [Fact]
-    public async Task ReadsRefused_ApplyDeliversTheAppliedSelection_ToTheHost()
-    {
-        WithReadsRefused();
-        var cut = RenderSurface();
-        cut.WaitForAssertion(() => Assert.Equal(1, Reads));
-
-        ErrorMin(cut).Input("0.05");
-        await Apply(cut).ClickAsync(new());
-
-        var applied = Assert.Single(_committed);
-        Assert.Equal(0.05, applied.ErrorMin);
-        Assert.Equal(applied, _reports[^1]);
-        Assert.Equal(applied, _holder.ConfigFor(TokenA));
-        Assert.True(Apply(cut).HasAttribute("disabled"));
-    }
-
-    // ── Reads succeed, writes refused ───────────────────────────────────────
-
-    [Fact]
-    public async Task WritesRefused_TheRestoredSelectionIsOnScreen_AndApplyDeliversToTheHost()
-    {
-        StoredConfig(new FilterConfig { ErrorMin = 0.1 });
-        WithWritesRefused();
-        var cut = RenderSurface();
-        cut.WaitForAssertion(() => Assert.Equal("0.1", ErrorMin(cut).GetAttribute("value")));
-
-        ErrorMin(cut).Input("0.2");
-        // Unguarded, the refused write throws out of the commit between
-        // assigning the committed config and raising the events.
-        await Apply(cut).ClickAsync(new());
-
-        var applied = Assert.Single(_committed);
-        Assert.Equal(0.2, applied.ErrorMin);
-        Assert.Equal(applied, _reports[^1]);
-        Assert.Equal(applied, _holder.ConfigFor(TokenA));
-        Assert.True(Apply(cut).HasAttribute("disabled"));
-    }
-
-    // A refused write keeps the in-memory state it was recording: the row the
-    // user opened stays open for this mount. (Its retention promise is the
-    // mount's, like the key's own: a remount restores from storage.)
-    [Fact]
-    public void WritesRefused_AToggledRowStaysOpen_ForTheMount()
-    {
-        WithWritesRefused();
-        var cut = RenderSurface();
+        _storage.ExpectFilterRestore(FilterRestoration.Refused);
+        _storage.ExpectFilterPanelMountRefused();
+        _storage.ExpectFilterFoldToggle(open: true, BrowserStorageWriteAnswer.Refused);
+        _storage.ExpectFilterCommit(new FilterConfig { ErrorMin = 0.05 }, BrowserStorageWriteAnswer.Refused);
+        var cut = Render<FilterSurface>();
 
         cut.Find("#moreFiltersToggle").Click();
+        ErrorMinIn(cut).Input("0.05");
+        await ApplyIn(cut).ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal(
-            "true", cut.Find("#moreFiltersToggle").GetAttribute("aria-expanded")));
-        cut.Find("#facetToggle_DiceRolls").Click();
-        Assert.Equal("true", cut.Find("#facetToggle_DiceRolls").GetAttribute("aria-expanded"));
+        Assert.Equal(5, _refusals.Refusals.Count);
+        _storage.Verify();
     }
 
-    // ── The retention promise across a same-source remount ──────────────────
-    //
-    // The applied holder outlives the mount and is the owner of the applied
-    // selection. After an Apply whose write was refused, storage holds the
-    // previous selection (writes refused) or nothing (reads refused); a
-    // remount that hydrated from storage would show one selection while the
-    // holder — and the host's gate — said another was applied. The resume
-    // comes from the holder, buffers and committed config both, silently.
-
+    // A storage call that succeeds after one was refused is just a success:
+    // nothing about the refusal is remembered below the host's sink.
     [Fact]
-    public async Task WritesRefused_SameSourceRemountAfterApply_RetainsTheAppliedSelection_NotTheStaleStoredOne()
+    public async Task ARefusalThenASuccess_TheSuccessStands()
     {
-        StoredConfig(new FilterConfig { ErrorMin = 0.1 });
-        WithWritesRefused();
-        var first = RenderSurface();
-        first.WaitForAssertion(() => Assert.Equal("0.1", ErrorMin(first).GetAttribute("value")));
-        ErrorMin(first).Input("0.2");
-        await Apply(first).ClickAsync(new());
-        var applied = Assert.Single(_committed);
-        var reportsBeforeRemount = _reports.Count;
+        _storage.ExpectFilterRestore(FilterRestoration.Refused);
+        _storage.ExpectFilterPanelMount();
+        _storage.ExpectFilterCommit(new FilterConfig { ErrorMin = 0.05 }, BrowserStorageWriteAnswer.Succeeded);
+        var cut = Render<FilterSurface>();
 
-        var second = RenderSurface();
+        ErrorMinIn(cut).Input("0.05");
+        await ApplyIn(cut).ClickAsync(new MouseEventArgs());
 
-        // The stored 0.1 is what a storage-hydrated remount would show.
-        second.WaitForAssertion(() => Assert.Equal("0.2", ErrorMin(second).GetAttribute("value")));
-        Assert.True(Apply(second).HasAttribute("disabled"));
-        Assert.Equal(applied, _holder.ConfigFor(TokenA));
-        // Silent: a resume derives from the holder, which already agrees.
-        Assert.Equal(reportsBeforeRemount, _reports.Count);
-        Assert.Empty(second.FindAll("#filterRestoredNotice"));
+        Assert.Single(_refusals.Refusals);
+        Assert.True(Setup.Current.IsInEffectFor(TokenA));
+        _storage.Verify();
     }
 
+    // ── A refused commit write never undoes the choice ─────────────────────
+
+    // The commit is in memory before its write: refused, it is still in
+    // effect, still on screen, and still both after a navigate-back — which
+    // reads nothing of the selection, since the owner holds it.
     [Fact]
-    public async Task ReadsRefused_SameSourceRemountAfterApply_RetainsTheAppliedSelection_NotTheDefaults()
+    public async Task ARefusedCommitWrite_LeavesTheSelectionInEffect_AcrossANavigateBack()
     {
-        WithReadsRefused();
-        var first = RenderSurface();
-        first.WaitForAssertion(() => Assert.Equal(1, Reads));
-        ErrorMin(first).Input("0.05");
-        await Apply(first).ClickAsync(new());
-        var applied = Assert.Single(_committed);
-        var reportsBeforeRemount = _reports.Count;
+        _storage.ExpectFilterRestore(new FilterConfig { ErrorMin = 0.1 });
+        _storage.ExpectFilterPanelMount(times: 2);
+        _storage.ExpectFilterCommit(new FilterConfig { ErrorMin = 0.2 }, BrowserStorageWriteAnswer.Refused);
+        var first = Render<FilterSurface>();
+        ErrorMinIn(first).Input("0.2");
 
-        var second = RenderSurface();
+        await ApplyIn(first).ClickAsync(new MouseEventArgs());
 
-        second.WaitForAssertion(() => Assert.Equal("0.05", ErrorMin(second).GetAttribute("value")));
-        Assert.True(Apply(second).HasAttribute("disabled"));
-        Assert.Equal(applied, _holder.ConfigFor(TokenA));
-        Assert.Equal(reportsBeforeRemount, _reports.Count);
+        Assert.Equal(new FilterConfig { ErrorMin = 0.2 }, Setup.Current.ConfigInEffectFor(TokenA));
+        Assert.True(ApplyIn(first).HasAttribute("disabled"));
+
+        await DisposeComponentsAsync();
+        var second = Render<FilterSurface>();
+
+        Assert.Equal("0.2", ErrorMinIn(second).GetAttribute("value"));
+        Assert.True(ApplyIn(second).HasAttribute("disabled"));
+        Assert.Equal(new FilterConfig { ErrorMin = 0.2 }, Setup.Current.ConfigInEffectFor(TokenA));
+        Assert.Single(_refusals.Refusals);
+        _storage.Verify();
     }
 
-    // The control for the remount pins: with storage working — the write
-    // landed and the next read returns it — the same remount lands on the
-    // same answer by either route, since the resume and the restore agree.
-    // So the pins above are about the disagreeing case, and this one passes
-    // against the unguarded component too.
+    // The failed-restore notice claims the stored document could not be read,
+    // and it ends at a commit only because the commit replaces that document.
+    // A commit whose write the browser refused replaces nothing, so the
+    // notice stands — beside whatever the host says about storage — while the
+    // selection is still committed (Hal's ruling, 2026-10-07). The control is
+    // FilterSurfaceTests' RestoreFailedNotice_SurvivesAnEdit_AndEndsAtACommitWhoseWriteLands.
     [Fact]
-    public async Task StorageWorking_SameSourceRemountAfterApply_RetainsTheAppliedSelection()
+    public async Task ARefusedCommitWrite_LeavesTheFailedRestoreNotice_AcrossARemount()
     {
-        var first = RenderSurface();
-        ErrorMin(first).Input("0.05");
-        await Apply(first).ClickAsync(new());
-        var applied = Assert.Single(_committed);
-        var stored = JSInterop.Invocations["localStorage.setItem"]
-            .Last(i => (string?)i.Arguments[0] == FilterPanel.ConfigKey).Arguments[1] as string;
-        Assert.NotNull(stored);
-        JSInterop.Setup<string?>("localStorage.getItem", FilterPanel.ConfigKey).SetResult(stored);
-
-        var second = RenderSurface();
-
-        second.WaitForAssertion(() => Assert.Equal("0.05", ErrorMin(second).GetAttribute("value")));
-        Assert.True(Apply(second).HasAttribute("disabled"));
-        Assert.Equal(applied, _holder.ConfigFor(TokenA));
-        Assert.Equal(0, _storageUnavailableReports);
-    }
-
-    // ── What the host is told ───────────────────────────────────────────────
-    //
-    // The panel discovers the condition; the host owns the page's notice
-    // about it (SPEC-notices.md: a condition notice, dismissible per
-    // occurrence — the host's leg, halheinrich/backgammon#102). So the
-    // composite re-exposes the panel's report as-is: once per mount, at the
-    // first refused call, with no payload.
-
-    [Fact]
-    public void ReadsRefused_TheFactReachesTheHostsBinding_OnceForTheMount()
-    {
-        WithReadsRefused();
-
-        var cut = RenderSurface();
-
-        cut.WaitForAssertion(() => Assert.Equal(1, _storageUnavailableReports));
-        // The latch holds the count: a later write is not attempted either.
-        cut.Find("#moreFiltersToggle").Click();
-        Assert.Equal(1, _storageUnavailableReports);
-    }
-
-    [Fact]
-    public async Task WritesRefused_TheFactReachesTheHostsBinding_AtTheFirstRefusedWrite()
-    {
-        StoredConfig(new FilterConfig { ErrorMin = 0.1 });
-        WithWritesRefused();
-        var cut = RenderSurface();
-        cut.WaitForAssertion(() => Assert.Equal("0.1", ErrorMin(cut).GetAttribute("value")));
-
-        // Reads succeeded, so the page booted clean and nothing was said.
-        Assert.Equal(0, _storageUnavailableReports);
-
-        ErrorMin(cut).Input("0.2");
-        await Apply(cut).ClickAsync(new());
-
-        Assert.Equal(1, _storageUnavailableReports);
-    }
-
-    [Fact]
-    public async Task StorageWorking_NothingIsReported()
-    {
-        // The control: Loose mode answers every read with null — nothing
-        // stored, which is not a failure — and swallows every write.
-        var cut = RenderSurface();
-        ErrorMin(cut).Input("0.05");
-        await Apply(cut).ClickAsync(new());
-
-        Assert.Equal(0, _storageUnavailableReports);
-    }
-
-    // ── The failed-restore notice outlives a refused write ──────────────────
-    //
-    // The notice claims the stored document could not be read, and it ends at
-    // a commit only because the commit replaces that document. A commit whose
-    // write the browser refused replaces nothing, so the notice must stand —
-    // beside whatever the host says about storage — while the applied
-    // selection is still committed and delivered (Hal's ruling, 2026-10-07).
-    // The control is FilterSurfaceTests'
-    // RestoreFailedNotice_SurvivesAnEdit_AndEndsAtACommit, where the write
-    // lands and the notice ends.
-
-    [Fact]
-    public async Task WritesRefused_ApplyCommits_ButTheFailedRestoreNoticeStays_AcrossARemount()
-    {
-        JSInterop.Setup<string?>("localStorage.getItem", FilterPanel.ConfigKey)
-                 .SetResult("}{ not a config");
-        WithWritesRefused();
-        var first = RenderSurface();
-        first.WaitForAssertion(() => first.Find("#filterRestoreFailedNotice"));
-
-        ErrorMin(first).Input("0.05");
-        await Apply(first).ClickAsync(new());
-
-        // Committed and delivered, exactly as a landed write would be.
-        var applied = Assert.Single(_committed);
-        Assert.Equal(applied, _reports[^1]);
-        Assert.Equal(applied, _holder.ConfigFor(TokenA));
-        // But the unreadable document was never replaced, so the notice stands.
+        _storage.ExpectFilterRestore(FilterRestoration.Unreadable);
+        _storage.ExpectFilterPanelMount(times: 2);
+        _storage.ExpectFilterCommit(new FilterConfig { ErrorMin = 0.05 }, BrowserStorageWriteAnswer.Refused);
+        var first = Render<FilterSurface>();
         Assert.NotNull(first.Find("#filterRestoreFailedNotice"));
-        Assert.True(_notice.IsFailureVisible);
 
-        var second = RenderSurface();
+        ErrorMinIn(first).Input("0.05");
+        await ApplyIn(first).ClickAsync(new MouseEventArgs());
 
-        second.WaitForAssertion(() => Assert.Equal("0.05", ErrorMin(second).GetAttribute("value")));
-        Assert.True(Apply(second).HasAttribute("disabled"));
+        Assert.True(Setup.Current.IsInEffectFor(TokenA));
+        Assert.NotNull(first.Find("#filterRestoreFailedNotice"));
+
+        await DisposeComponentsAsync();
+        var second = Render<FilterSurface>();
+
+        Assert.True(ApplyIn(second).HasAttribute("disabled"));
         Assert.NotNull(second.Find("#filterRestoreFailedNotice"));
+        _storage.Verify();
     }
 
-    // The parameter is optional by design: both hosts bind it in their own
-    // legs, and until then — or in a host that never does — the panel
-    // degrades exactly the same way and the host simply is not told.
+    // ── What the host is told, and when ────────────────────────────────────
+
+    // A refusal arriving after the first render still reaches what the host
+    // renders: the sink is the host's holder, and its own notification
+    // re-renders the page already on screen.
     [Fact]
-    public async Task HostBindingNothingNew_StillGetsTheAppliedSelection_WhenStorageIsRefused()
+    public async Task ARefusalAfterTheFirstRender_ReachesTheHostsPage()
     {
-        WithReadsRefused();
-        WithWritesRefused();
-        var cut = RenderSurfaceBindingNothingNew();
-        cut.WaitForAssertion(() => Assert.Equal(1, Reads));
+        _storage.ExpectFilterRestore(FilterRestoration.NothingStored);
+        _storage.ExpectFilterPanelMount();
+        _storage.ExpectFilterCommit(new FilterConfig { ErrorMin = 0.05 }, BrowserStorageWriteAnswer.Refused);
+        var page = Render<RefusalNoticeHost>();
+        Assert.Empty(page.FindAll("#hostStorageNotice"));
 
-        ErrorMin(cut).Input("0.05");
-        await Apply(cut).ClickAsync(new());
+        ErrorMinIn(page).Input("0.05");
+        await ApplyIn(page).ClickAsync(new MouseEventArgs());
 
-        var applied = Assert.Single(_committed);
-        Assert.Equal(applied, _reports[^1]);
-        Assert.Equal(applied, _holder.ConfigFor(TokenA));
+        page.WaitForAssertion(() => Assert.Equal("1 refused", page.Find("#hostStorageNotice").TextContent));
+        _storage.Verify();
+    }
+
+    // Rejecting stale state never discards a refusal. A commit's write is
+    // held while the user navigates away and the host changes the source;
+    // released as refused, it changes nothing in the new setup — and its
+    // refusal still reaches the host's sink, so returning to the page shows
+    // it with no further storage failure. The sink is reached because it is
+    // the owner's, registered in the same app scope: no page's attachment or
+    // disposal stands between a storage call and it.
+    [Fact]
+    public async Task ARefusalCompletingAfterUnmountAndASourceChange_StillReachesTheHost_AndChangesNothing()
+    {
+        _storage.ExpectFilterRestore(FilterRestoration.NothingStored);
+        _storage.ExpectFilterPanelMount(times: 2);
+        var write = _storage.ExpectHeldFilterCommit(new FilterConfig { ErrorMin = 0.05 });
+        var page = Render<RefusalNoticeHost>();
+        ErrorMinIn(page).Input("0.05");
+        var apply = ApplyIn(page).ClickAsync(new MouseEventArgs());
+        Assert.True(write.IsReached);
+
+        await DisposeComponentsAsync();
+        Setup.ReportSource(TokenB);
+        var replaced = Setup.Current;
+
+        write.Release(BrowserStorageWriteAnswer.Refused);
+        await apply.WaitAsync(DefaultWaitTimeout);
+
+        Assert.Same(replaced, Setup.Current);
+        Assert.False(Setup.Current.IsInEffectFor(TokenA));
+        Assert.False(Setup.Current.IsInEffectFor(TokenB));
+        Assert.Single(_refusals.Refusals);
+
+        var back = Render<RefusalNoticeHost>();
+
+        Assert.Equal("1 refused", back.Find("#hostStorageNotice").TextContent);
+        Assert.Equal("0.05", ErrorMinIn(back).GetAttribute("value"));
+        Assert.Single(_refusals.Refusals);
+        _storage.Verify();
     }
 }

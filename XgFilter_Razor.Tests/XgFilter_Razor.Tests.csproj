@@ -27,6 +27,11 @@
          suite exercises it — the seam ships to hosts, so it is pinned against a
          real panel render rather than trusted. -->
     <ProjectReference Include="..\XgFilter_Razor.Testing\XgFilter_Razor.Testing.csproj" />
+    <!-- Direct reference: these suites plan the real BrowserStorage's calls
+         with BrowserStoragePlan (halheinrich/backgammon#377), so they compile
+         against it rather than taking it transitively through the test-support
+         assembly above. -->
+    <ProjectReference Include="..\..\BgUiPrimitives_Razor\BgUiPrimitives_Razor.TestSupport\BgUiPrimitives_Razor.TestSupport.csproj" />
   </ItemGroup>
 
   <ItemGroup>

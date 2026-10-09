@@ -29,7 +29,7 @@ using System.Globalization;
 /// <para>
 /// "No source yet" is expressed as <see cref="Nullable{T}"/>
 /// (<c>FilterSourceToken?</c>) at use sites — see
-/// <see cref="AppliedFilter"/>. A <c>default(FilterSourceToken)</c>
+/// <see cref="FilterSetup.ReportSource"/>. A <c>default(FilterSourceToken)</c>
 /// (reachable, as for any struct) equals no factory-minted token, so an
 /// accidental default can never read as a real source.
 /// </para>
