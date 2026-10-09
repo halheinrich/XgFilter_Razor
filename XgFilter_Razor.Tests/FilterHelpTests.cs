@@ -136,6 +136,28 @@ public class FilterHelpTests : BunitContext
             keys);
     }
 
+    // Ruled copy (the carve-out): Hal approved the halheinrich/backgammon#371
+    // wording on 2026-10-08 with three edits (halheinrich/backgammon#374).
+    // Remembering is conditional; refused, the filters work "for this visit,
+    // including navigation within the app"; a user whose remembered filter
+    // could not be read is told to confirm the choice first; and an invalid
+    // value is fixed or cleared "to continue", since correcting one can leave
+    // Apply rightly off. The superseded phrasings are gone.
+    [Fact]
+    public void StorageAndApplyCopy_SayWhatWasRuled()
+    {
+        var prose = Regex.Replace(RenderHelp().Find(".filter-help").TextContent, @"\s+", " ");
+
+        Assert.Contains("When your browser allows it, the panel remembers your filter settings", prose);
+        Assert.Contains("for this visit, including navigation within the app", prose);
+        Assert.Contains(
+            "If your remembered filter couldn't be read, first press Apply Filter or Clear filters to confirm your choice.",
+            prose);
+        Assert.Contains("fix or clear it to continue", prose);
+        Assert.DoesNotContain("for as long as the page is open", prose);
+        Assert.DoesNotContain("Apply comes back", prose);
+    }
+
     // Same posture, same reason, one section down. The match-scores section
     // teaches a vocabulary the lib owns and exports, so the spellings it
     // renders must be that export rather than a copy of it — a second literal

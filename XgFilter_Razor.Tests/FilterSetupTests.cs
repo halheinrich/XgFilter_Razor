@@ -238,17 +238,28 @@ public class FilterSetupTests : BunitContext
         _storage.Verify();
     }
 
-    // Clear waits for restoration to settle (§4's transitions table), then
-    // commits the empty selection as the baseline even with no source.
+    // Clear waits for a source and for restoration to settle (§4's
+    // transitions table; Hal's ruling of 2026-10-08), then commits the empty
+    // selection as the baseline. Before either, it changes nothing and
+    // writes nothing — the strict plan has no write for it — while editing
+    // goes on.
     [Fact]
-    public async Task Clear_WaitsForRestoration_ThenCommitsTheEmptySelection()
+    public async Task Clear_WaitsForASourceAndForRestoration_ThenCommitsTheEmptySelection()
     {
         Setup.Edit(d => d with { PlayersText = "Hal" });
         await Setup.ClearAsync();
         Assert.Equal("Hal", Setup.Current.Draft.PlayersText);
+        Assert.False(Setup.Current.CanClear);
 
         _storage.ExpectFilterRestore(FilterRestoration.NothingStored);
         await Setup.RestoreAsync();
+        await Setup.ClearAsync();
+        Assert.Equal("Hal", Setup.Current.Draft.PlayersText);
+        Assert.Null(Setup.Current.Baseline);
+        Assert.False(Setup.Current.CanClear);
+
+        Setup.ReportSource(TokenA);
+        Assert.True(Setup.Current.CanClear);
         _storage.ExpectFilterCommit(new FilterConfig(), BrowserStorageWriteAnswer.Succeeded);
         await Setup.ClearAsync();
 

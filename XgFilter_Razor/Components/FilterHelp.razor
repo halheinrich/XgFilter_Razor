@@ -79,14 +79,16 @@
         </p>
         <p>
             With no filter set, every decision is included, and that needs no
-            Apply. A filter you type or check takes effect when you press
+            Apply. If your remembered filter couldn't be read, first press
+            <em>Apply Filter</em> or <em>Clear filters</em> to confirm your
+            choice. A filter you type or check takes effect when you press
             <em>Apply Filter</em>, and not before. Apply is unavailable when
             there is nothing to apply — no filter is set, or you have not
             changed anything since you last applied, and the panel says which
             under the button — and when some value is not usable as a filter.
             In that second case the box is marked and says what is wrong —
             once you have left it, if you were typing there; fix or clear it
-            and Apply comes back. Nothing is guessed at or quietly ignored, so
+            to continue. Nothing is guessed at or quietly ignored, so
             a filter you meant to set can never be silently dropped.
         </p>
         <p>
@@ -328,9 +330,14 @@
        What it promises is what the surface does (halheinrich/backgammon#371):
        it asks the browser to keep these entries, and a browser may refuse —
        blocked storage, or a full allowance. The surface then keeps working
-       from memory for the visit and remembers nothing, so the copy says
-       "when your browser allows it" and what happens when it does not,
-       rather than promising that the settings will be there.
+       from memory for the visit — the owner is app-scoped, so navigating
+       within the app keeps it — and remembers nothing for the next, so the
+       copy says "when your browser allows it" and what happens when it does
+       not, rather than promising that the settings will be there. Hal
+       approved this wording on 2026-10-08 with three edits
+       (halheinrich/backgammon#374): "for this visit, including navigation
+       within the app" below, and in the Apply paragraph the failed-restore
+       step and "fix or clear it to continue".
 
        The prose around the list never says how MANY entries there are, and
        must not start (halheinrich/backgammon#231). The list is the count: a
@@ -379,9 +386,10 @@
         <p>
             Some browsers refuse to keep them — a privacy setting can block this
             site's local storage, and storage that is full refuses anything new.
-            Then the filters still work as you set them for as long as the page
-            is open, but they are not remembered: the next visit starts from
-            the defaults, or from whatever was kept before.
+            Then the filters still work as you set them for this visit,
+            including navigation within the app, but they are not remembered:
+            the next visit starts from the defaults, or from whatever was kept
+            before.
         </p>
         <p>
             You can see these entries under local storage for this site in your

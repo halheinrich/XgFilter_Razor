@@ -186,8 +186,8 @@ derived fact is kept anywhere as a copy that could change.
 | A → B → A, mounted or not | two endings; A's consent never returns |
 | an edit, or a saved filter staged | the draft changes; the restored notice ends |
 | Apply (gate open) | the draft becomes the baseline and is resolved |
-| Clear (restoration settled) | the draft and the baseline become the empty selection, resolved |
-| the restoration settles | its outcome is recorded; the draft is hydrated only if nobody edited it since the read began |
+| Clear (a source reported, restoration settled) | the draft and the baseline become the empty selection, resolved |
+| the restoration settles | its outcome is recorded; the draft is hydrated only if no gesture touched it since the read began |
 | a commit's write completes | a refusal goes to the host's sink; a write that landed ends the failed-restore notice; nothing else |
 
 **Order.** Every accepted change takes effect, and is published, before any
@@ -767,6 +767,14 @@ its own reason: "no filter is set" over the empty selection, "already
 applied" over a non-empty one. Neither invalid-value case gets a hint line:
 the offending field's own feedback already explains it, once shown.
 
+**Before a source is reported** (Hal's ruling of 2026-10-08): editing is
+allowed, so a user can prepare a selection before picking what to filter;
+Apply is off; and Clear is off and writes nothing (`CanClear` requires a
+source, as `CanApply` does), since Clear commits and a commit belongs to a
+setup. A disabled Apply gives no reason while there is no source or while
+restoration is pending — either reason would claim a filter state that is
+not yet known — and that is as built and approved.
+
 **Restoring at mount.** `OnAfterRenderAsync(firstRender: true)` starts the
 owner's restoration (once per boot; a later mount finds it settled or in
 flight) and restores this mount's two display preferences — the container's
@@ -1302,8 +1310,12 @@ when both have migrated.
   commit. Delete any mirrored storage key, and wait on the restoration
   marker in browser tests.
 - **Copy:** FilterHelp's storage section is conditional now
-  (halheinrich/backgammon#371); a host's own data-ownership copy that
-  promised remembering should say the same.
+  (halheinrich/backgammon#371, wording approved by Hal on 2026-10-08): the
+  filters still work "for this visit, including navigation within the app"
+  when the browser refuses to keep them. A host's own data-ownership copy
+  that promised remembering should say the same.
+- **Before a source:** Clear is off and writes nothing now, as Apply is; a
+  host test that cleared before reporting its source reports it first.
 
 ### `FilterPanel` (`.Internal` — via `FilterSurface` only)
 

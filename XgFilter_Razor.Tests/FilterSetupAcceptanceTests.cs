@@ -403,16 +403,22 @@ public class FilterSetupAcceptanceTests : BunitContext
 
     // A restoration still pending is not evidence that the user chose no
     // filter: Run stays off until it settles, so an unrestricted run is never
-    // briefly enabled over a stored filter that has not loaded yet.
+    // briefly enabled over a stored filter that has not loaded yet. Apply and
+    // Clear are off meanwhile, and Apply gives no reason — "no filter is set"
+    // would be a claim about a selection not yet known (Hal's ruling of
+    // 2026-10-08: as built).
     [Fact]
     public async Task APendingRestoration_IsNotReady_UntilItSettles()
     {
         var restore = _storage.ExpectHeldFilterRestore();
         _storage.ExpectFilterPanelMount();
         Setup.ReportSource(TokenA);
-        Mount();
+        var cut = Mount();
 
         Assert.False(Setup.Current.IsInEffectFor(TokenA));
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+        Assert.True(cut.Find("#clearFilters").HasAttribute("disabled"));
+        Assert.Empty(cut.FindAll("#applyDisabledReason"));
 
         restore.Release(FilterSurfaceStorage.RestoreAnswer(FilterRestoration.NothingStored));
         await Setup.RestoreAsync().WaitAsync(DefaultWaitTimeout);

@@ -202,9 +202,11 @@ public sealed class FilterSetup
     }
 
     /// <summary>
-    /// Clear filters: once restoration has settled, the draft becomes the
-    /// empty selection and so does the baseline, and that is published, then
-    /// written. A refused write never undoes it.
+    /// Clear filters: when the gate allows it — a source reported and
+    /// restoration settled — the draft becomes the empty selection and so
+    /// does the baseline, and that is published, then written. Before a
+    /// source, it does nothing and writes nothing. A refused write never
+    /// undoes it.
     /// </summary>
     /// <returns>A task that completes when the write has been answered.</returns>
     internal Task ClearAsync()

@@ -171,8 +171,14 @@ public sealed class FilterSetupSnapshot
     internal bool CanApply =>
         Source is not null && IsRestorationSettled && InvalidFields.Count == 0 && _inEffect is null;
 
-    /// <summary>Clear filters' gate: restoration has settled (§4's transitions table).</summary>
-    internal bool CanClear => IsRestorationSettled;
+    /// <summary>
+    /// Clear filters' gate: a source is established and restoration has
+    /// settled (§4's transitions table). Before a source is reported, Clear is
+    /// off and writes nothing (Hal's ruling of 2026-10-08): Clear commits, and
+    /// a commit belongs to a setup, which needs a source. Editing is allowed
+    /// meanwhile; Apply is off for the same reason.
+    /// </summary>
+    internal bool CanClear => Source is not null && IsRestorationSettled;
 
     /// <summary>
     /// The draft's config when it may be saved — exactly when it could be

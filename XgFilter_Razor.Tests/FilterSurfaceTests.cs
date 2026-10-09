@@ -354,6 +354,34 @@ public class FilterSurfaceTests : BunitContext
         Assert.Empty(cut.FindAll("#applyDisabledReason"));
     }
 
+    // Hal's ruling of 2026-10-08 on the surface before a source is reported:
+    // editing is allowed, Apply is off, and Clear is off and writes nothing —
+    // the strict plan has no write for it, so a dispatch that ignored the
+    // disabled button would fail here — and no disabled button gives a
+    // reason. A draft prepared meanwhile is kept for the source to come.
+    [Fact]
+    public async Task BeforeASource_EditingIsAllowed_ApplyAndClearAreOff_AndClearWritesNothing()
+    {
+        Setup.ReportSource(null);
+        var plan = Booting(FilterSurfaceStorage.RestoreAnswer(FilterRestoration.NothingStored));
+        var cut = RenderSurface(storage: null);
+
+        ErrorMin(cut).Input("0.1");
+
+        Assert.Equal("0.1", ErrorMin(cut).GetAttribute("value"));
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+        Assert.True(cut.Find("#clearFilters").HasAttribute("disabled"));
+        Assert.Empty(cut.FindAll("#applyDisabledReason"));
+
+        await cut.Find("#clearFilters").ClickAsync(new());
+        await cut.InvokeAsync(() => Setup.ClearAsync());
+
+        Assert.Equal("0.1", Setup.Current.Draft.ErrorMinText);
+        Assert.Null(Setup.Current.Baseline);
+        Assert.Equal("0.1", ErrorMin(cut).GetAttribute("value"));
+        plan.Verify();
+    }
+
     // ── The setup-change rule for the saved-filters context ────────────────
 
     [Fact]
