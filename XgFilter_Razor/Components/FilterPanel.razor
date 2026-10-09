@@ -1092,14 +1092,19 @@
     // Why Apply is disabled — the NamedEntriesPanel disabled-reason idiom
     // (button title plus a muted hint line), except that here the panel knows
     // its own reason instead of being told it by the host. Covers only the
-    // nothing-to-apply case: an invalid value already explains itself in its
-    // own field's invalid-feedback line, and re-stating it here would be a
-    // second encoding of the same rule. Null while Apply is enabled, so no
-    // stale explanation lingers.
+    // nothing-to-apply cases, of which there are two: the empty selection,
+    // which is in effect without Apply (halheinrich/backgammon#266), and a
+    // selection already applied. The empty one says so first, since "already
+    // applied" would be false of a selection nobody applied. An invalid value
+    // already explains itself in its own field's invalid-feedback line, and
+    // re-stating it here would be a second encoding of the same rule. Null
+    // while Apply is enabled, so no stale explanation lingers.
     private string? ApplyDisabledReason =>
-        _snapshot.IsAlreadyApplied
-            ? "No changes to apply — this filter is already applied."
-            : null;
+        _snapshot.IsTheEmptySelectionInEffect
+            ? "Nothing to apply — no filter is set, so every decision is included."
+            : _snapshot.IsAlreadyApplied
+                ? "No changes to apply — this filter is already applied."
+                : null;
 
     // The owner guards both commits on the gate it publishes, so a dispatch
     // that ignores the disabled attribute cannot re-commit an unchanged

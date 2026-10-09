@@ -14,7 +14,9 @@ namespace XgFilter_Razor;
 /// <para>
 /// <b>What it holds.</b> The setup's identity — the source the host reported
 /// and a generation advanced whenever a setup ends; the draft, the selection
-/// on screen as the user left it (<see cref="FilterDraft"/>); the committed
+/// on screen as the user left it (<see cref="FilterDraft"/>), and whether it
+/// is <i>resolved</i> — unresolved only after a failed restoration, until a
+/// valid Apply or Clear makes it the user's choice; the committed
 /// baseline, the last selection applied in this setup, or none; this boot's
 /// restoration outcome (<see cref="FilterRestoration"/>); and the two
 /// restoration notices, whose occurrence — this boot's restore — is the same
@@ -60,6 +62,14 @@ public sealed class FilterSetup
     private int _generation;
     private FilterDraft _draft = FilterDraft.Empty;
     private FilterDraft? _baseline;
+
+    // Whether the draft is the user's choice, or the defaults a failed
+    // restoration left on screen (§4, halheinrich/backgammon#266). Current
+    // state, not history: it travels with the draft through navigation and
+    // source changes, a valid Apply or Clear makes it true, and only a failed
+    // restoration — once per boot — makes it false. The restoration outcome
+    // stays the diagnostic, and is never rewritten to make Run possible.
+    private bool _resolved = true;
     private FilterRestoration _restoration = FilterRestoration.Pending;
     private bool _restoredNoticeShowing;
     private bool _failureNoticeShowing;
@@ -180,6 +190,7 @@ public sealed class FilterSetup
         if (!_current.CanApply) return Task.CompletedTask;
 
         _baseline = _draft;
+        _resolved = true;
         _restoredNoticeShowing = false;
         Publish();
         return RememberAsync(_draft);
@@ -197,6 +208,7 @@ public sealed class FilterSetup
 
         SetDraft(FilterDraft.Empty);
         _baseline = FilterDraft.Empty;
+        _resolved = true;
         _restoredNoticeShowing = false;
         Publish();
         return RememberAsync(FilterDraft.Empty);
@@ -242,6 +254,7 @@ public sealed class FilterSetup
         if (read.IsRefused)
         {
             _restoration = FilterRestoration.Refused;
+            _resolved = false;
         }
         else if (read.IsAbsent)
         {
@@ -255,17 +268,20 @@ public sealed class FilterSetup
         else
         {
             _restoration = FilterRestoration.Unreadable;
+            _resolved = false;
         }
 
         // The outcome is recorded whatever happened meanwhile; the draft is
         // hydrated only if nobody has edited it since the read began, so a
         // late answer never overwrites a newer draft. The source may have
         // changed in between: the draft is kept across a setup's end, so that
-        // changes nothing here.
+        // changes nothing here. A restored empty selection raises no notice:
+        // it is ready as it stands, and nothing differs from a first visit
+        // (§1, Reload).
         if (restored is not null && _draftRevision == revisionAtStart)
         {
             SetDraft(FilterDraft.From(restored));
-            _restoredNoticeShowing = true;
+            _restoredNoticeShowing = !_draft.RestrictsNothing;
         }
 
         _failureNoticeShowing = _restoration == FilterRestoration.Unreadable;
@@ -297,7 +313,7 @@ public sealed class FilterSetup
     }
 
     private FilterSetupSnapshot Snapshot() => new(
-        _source, _generation, _draft, _baseline, _restoration, _restoredNoticeShowing, _failureNoticeShowing);
+        _source, _generation, _draft, _resolved, _baseline, _restoration, _restoredNoticeShowing, _failureNoticeShowing);
 
     // Publish the state as it now stands — only when it differs from the last
     // published snapshot, so each observer sees each real change and nothing

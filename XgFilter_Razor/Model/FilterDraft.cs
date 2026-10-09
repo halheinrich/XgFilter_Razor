@@ -220,6 +220,18 @@ internal sealed record FilterDraft
     public bool IsValid => InvalidFields.Count == 0;
 
     /// <summary>
+    /// Whether this draft is the empty selection: valid, and holding no
+    /// criterion by the lib's own activation predicates
+    /// (<see cref="FilterConfig.GetActiveFacets"/>), so it filters nothing out
+    /// (<c>SPEC-filtering.md</c> §1; halheinrich/backgammon#266). A property of
+    /// the selection, not of how it got here — never chosen, every criterion
+    /// cleared, or edited back to nothing. A box whose text its field cannot
+    /// be makes the draft invalid, so input like that is never the empty
+    /// selection, however its config reads.
+    /// </summary>
+    public bool RestrictsNothing => IsValid && ToConfig().GetActiveFacets().Count == 0;
+
+    /// <summary>
     /// The facets holding a criterion: the lib's verdict on the parsed config
     /// (<see cref="FilterConfig.GetActiveFacets"/>), together with the facet
     /// of every unrepresentable box. Text that cannot be its field's value is

@@ -301,6 +301,201 @@ public class FilterSetupAcceptanceTests : BunitContext
         _storage.Verify();
     }
 
+    // ── Readiness (§1, halheinrich/backgammon#266) ────────────────────────
+
+    // A first visit has chosen nothing: the empty selection is ready without
+    // Apply, so the host's gate is open with no gesture and Apply has
+    // nothing to do. The host adds no empty-filter exception of its own; it
+    // reads the owner.
+    [Fact]
+    public void AFirstVisit_TheEmptySelectionIsReady_WithoutApply()
+    {
+        _storage.ExpectFilterRestore(FilterRestoration.NothingStored);
+        _storage.ExpectFilterPanelMount();
+        Setup.ReportSource(TokenA);
+
+        var cut = Mount();
+
+        Assert.Equal(new FilterConfig(), Setup.Current.ConfigInEffectFor(TokenA));
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+        Assert.Contains("no filter is set", cut.Find("#applyDisabledReason").TextContent);
+        _storage.Verify();
+    }
+
+    // A restored valid empty selection is ready once restoration settles, and
+    // raises no "restored, not in effect until Apply" notice: nothing differs
+    // from a first visit (§1, Reload).
+    [Fact]
+    public void ARestoredEmptySelection_IsReady_AndRaisesNoRestoredNotice()
+    {
+        _storage.ExpectFilterRestore(new FilterConfig());
+        _storage.ExpectFilterPanelMount();
+        Setup.ReportSource(TokenA);
+
+        var cut = Mount();
+
+        Assert.Equal(FilterRestoration.Restored, Setup.Current.Restoration);
+        Assert.True(Setup.Current.IsInEffectFor(TokenA));
+        Assert.Empty(cut.FindAll("#filterRestoredNotice"));
+        _storage.Verify();
+    }
+
+    // A property of the selection, not of a gesture: editing an applied
+    // filter back to nothing is the empty selection, ready as it stands.
+    [Fact]
+    public async Task EditingAnAppliedFilterBackToEmpty_IsReady()
+    {
+        _storage.ExpectFilterRestore(FilterRestoration.NothingStored);
+        _storage.ExpectFilterPanelMount();
+        _storage.ExpectFilterCommit(SelectionA, BrowserStorageWriteAnswer.Succeeded);
+        Setup.ReportSource(TokenA);
+        var cut = Mount();
+        ErrorMin(cut).Input("0.1");
+        await ClickApplyAsync(cut);
+
+        ErrorMin(cut).Input(string.Empty);
+
+        Assert.Equal(new FilterConfig(), Setup.Current.ConfigInEffectFor(TokenA));
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+        _storage.Verify();
+    }
+
+    // A restoration still pending is not evidence that the user chose no
+    // filter: Run stays off until it settles, so an unrestricted run is never
+    // briefly enabled over a stored filter that has not loaded yet.
+    [Fact]
+    public async Task APendingRestoration_IsNotReady_UntilItSettles()
+    {
+        var restore = _storage.ExpectHeldFilterRestore();
+        _storage.ExpectFilterPanelMount();
+        Setup.ReportSource(TokenA);
+        Mount();
+
+        Assert.False(Setup.Current.IsInEffectFor(TokenA));
+
+        restore.Release(FilterSurfaceStorage.RestoreAnswer(FilterRestoration.NothingStored));
+        await Setup.RestoreAsync().WaitAsync(DefaultWaitTimeout);
+
+        Assert.True(Setup.Current.IsInEffectFor(TokenA));
+        _storage.Verify();
+    }
+
+    // ── Recovering from a failed restore ───────────────────────────────────
+
+    public static TheoryData<FilterRestoration, bool> FailedRestoresAndEmptyChoices => new()
+    {
+        { FilterRestoration.Refused, true },
+        { FilterRestoration.Refused, false },
+        { FilterRestoration.Unreadable, true },
+        { FilterRestoration.Unreadable, false },
+    };
+
+    // A failed restore shows the defaults, and the defaults are unresolved:
+    // not ready, with Apply on for them. Clear — or a valid Apply of the empty
+    // defaults — resolves the choice in memory even though remembering it is
+    // refused, and the retained empty draft then stays resolved and ready
+    // across a navigation and a source change. The outcome stays what it was:
+    // it is the diagnostic, never rewritten to make Run possible.
+    [Theory]
+    [MemberData(nameof(FailedRestoresAndEmptyChoices))]
+    public async Task AFailedRestore_ThenAnEmptyChoice_StaysReady_ThroughARefusedWrite_NavigationAndASourceChange(
+        FilterRestoration failure, bool byClear)
+    {
+        _storage.ExpectFilterRestore(failure);
+        _storage.ExpectFilterPanelMount(times: 2);
+        _storage.ExpectFilterCommit(new FilterConfig(), BrowserStorageWriteAnswer.Refused);
+        Setup.ReportSource(TokenA);
+        var cut = Mount();
+
+        Assert.False(Setup.Current.IsInEffectFor(TokenA));
+        Assert.False(Apply(cut).HasAttribute("disabled"));
+
+        if (byClear)
+            await cut.Find("#clearFilters").ClickAsync(new MouseEventArgs());
+        else
+            await ClickApplyAsync(cut);
+
+        Assert.True(Setup.Current.IsInEffectFor(TokenA));
+
+        await NavigateAwayAsync();
+        var back = Mount();
+        Assert.True(Setup.Current.IsInEffectFor(TokenA));
+        Assert.True(Apply(back).HasAttribute("disabled"));
+
+        await HostReportsAsync(back, TokenB);
+
+        Assert.True(Setup.Current.IsInEffectFor(TokenB));
+        Assert.Equal(new FilterConfig(), Setup.Current.ConfigInEffectFor(TokenB));
+        Assert.Equal(failure, Setup.Current.Restoration);
+        _storage.Verify();
+    }
+
+    public static TheoryData<FilterRestoration> FailedRestores => new()
+    {
+        FilterRestoration.Refused,
+        FilterRestoration.Unreadable,
+    };
+
+    // The same with a non-empty choice: resolution and the draft survive the
+    // refused write and the navigation, but a non-empty choice is consent,
+    // and the source change drops it — Apply is required again for the new
+    // source. Resolution is still there to find: edited back to empty, the
+    // draft is ready at once.
+    [Theory]
+    [MemberData(nameof(FailedRestores))]
+    public async Task AFailedRestore_ThenANonEmptyApply_SurvivesNavigation_ButTheSourceChangeRequiresApplyAgain(
+        FilterRestoration failure)
+    {
+        _storage.ExpectFilterRestore(failure);
+        _storage.ExpectFilterPanelMount(times: 2);
+        _storage.ExpectFilterCommit(SelectionA, BrowserStorageWriteAnswer.Refused);
+        Setup.ReportSource(TokenA);
+        var cut = Mount();
+        ErrorMin(cut).Input("0.1");
+        await ClickApplyAsync(cut);
+        Assert.Equal(SelectionA, Setup.Current.ConfigInEffectFor(TokenA));
+
+        await NavigateAwayAsync();
+        var back = Mount();
+        Assert.Equal("0.1", ErrorMin(back).GetAttribute("value"));
+        Assert.Equal(SelectionA, Setup.Current.ConfigInEffectFor(TokenA));
+
+        await HostReportsAsync(back, TokenB);
+
+        Assert.False(Setup.Current.IsInEffectFor(TokenB));
+        Assert.False(Apply(back).HasAttribute("disabled"));
+        Assert.Equal("0.1", ErrorMin(back).GetAttribute("value"));
+
+        ErrorMin(back).Input(string.Empty);
+
+        Assert.True(Setup.Current.IsInEffectFor(TokenB));
+        _storage.Verify();
+    }
+
+    // Clear commits the empty selection as this setup's baseline (§4's
+    // transitions table), so a non-empty applied filter does not survive it:
+    // editing back to it after a Clear is a selection nobody applied since,
+    // and Apply is required.
+    [Fact]
+    public async Task ApplyA_ThenClear_ThenEditBackToA_ApplyIsRequired()
+    {
+        _storage.ExpectFilterRestore(FilterRestoration.NothingStored);
+        _storage.ExpectFilterPanelMount();
+        _storage.ExpectFilterCommit(SelectionA, BrowserStorageWriteAnswer.Succeeded);
+        _storage.ExpectFilterCommit(new FilterConfig(), BrowserStorageWriteAnswer.Succeeded);
+        Setup.ReportSource(TokenA);
+        var cut = Mount();
+        ErrorMin(cut).Input("0.1");
+        await ClickApplyAsync(cut);
+
+        await cut.Find("#clearFilters").ClickAsync(new MouseEventArgs());
+        ErrorMin(cut).Input("0.1");
+
+        Assert.False(Setup.Current.IsInEffectFor(TokenA));
+        Assert.False(Apply(cut).HasAttribute("disabled"));
+        _storage.Verify();
+    }
+
     // ── Mutation through a retained config reference ───────────────────────
 
     // Nothing a consumer holds reaches the owner: not the config it read as

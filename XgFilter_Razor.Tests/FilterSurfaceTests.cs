@@ -348,6 +348,9 @@ public class FilterSurfaceTests : BunitContext
 
         Assert.True(Apply(cut).HasAttribute("disabled"));
         Assert.Null(Setup.Current.Baseline);
+        // And no reason claims a filter state: with no source, "no filter is
+        // set, so every decision is included" would be false.
+        Assert.Empty(cut.FindAll("#applyDisabledReason"));
     }
 
     // ── The setup-change rule for the saved-filters context ────────────────

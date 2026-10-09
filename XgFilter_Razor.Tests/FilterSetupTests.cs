@@ -134,7 +134,8 @@ public class FilterSetupTests : BunitContext
     public async Task InEffect_IsAnsweredOnlyForTheSetupsOwnSource()
     {
         await SettledAsync(TokenA);
-        _storage.ExpectFilterCommit(new FilterConfig(), BrowserStorageWriteAnswer.Succeeded);
+        Setup.Edit(d => d with { ErrorMinText = "0.1" });
+        _storage.ExpectFilterCommit(new FilterConfig { ErrorMin = 0.1 }, BrowserStorageWriteAnswer.Succeeded);
         await Setup.ApplyAsync();
 
         Assert.True(Setup.Current.IsInEffectFor(TokenA));
@@ -311,6 +312,104 @@ public class FilterSetupTests : BunitContext
     // The restoration changes the draft and nothing else of the setup: no
     // baseline, no generation — a restored selection is a choice, not a
     // consent (§4).
+    // ── Readiness (§1, halheinrich/backgammon#266) ────────────────────────
+
+    // The empty selection is ready without Apply once restoration settles —
+    // resolved, valid, restricting nothing, with a source — and Apply has
+    // nothing to do over it.
+    [Fact]
+    public async Task TheEmptySelection_IsInEffect_WithoutApply()
+    {
+        await SettledAsync(TokenA);
+
+        Assert.True(Setup.Current.IsInEffectFor(TokenA));
+        Assert.Equal(new FilterConfig(), Setup.Current.ConfigInEffectFor(TokenA));
+        Assert.False(Setup.Current.CanApply);
+        _storage.Verify();
+    }
+
+    // None of these is evidence that the user chose no filter: a pending
+    // restoration, a failed one, an invalid draft, and no source at all.
+    [Fact]
+    public async Task TheEmptySelection_IsNotReady_WhilePending_AfterAFailure_OrWithoutASource()
+    {
+        Setup.ReportSource(TokenA);
+        Assert.False(Setup.Current.IsInEffectFor(TokenA));
+
+        _storage.ExpectFilterRestore(FilterRestoration.Unreadable);
+        await Setup.RestoreAsync();
+        Assert.False(Setup.Current.IsResolved);
+        Assert.False(Setup.Current.IsInEffectFor(TokenA));
+        Assert.True(Setup.Current.CanApply);
+
+        Setup.ReportSource(null);
+        Assert.False(Setup.Current.IsReadyEmpty);
+        _storage.Verify();
+    }
+
+    // Having a source is the filter's condition (§2): with none, a settled,
+    // resolved, empty draft is still not ready — there is nothing to run it
+    // against — so nothing claims it is in effect, not even Apply's reason.
+    [Fact]
+    public async Task TheEmptySelection_IsNotReady_WithoutASource()
+    {
+        await SettledAsync();
+
+        Assert.True(Setup.Current.IsResolved);
+        Assert.True(Setup.Current.Draft.RestrictsNothing);
+        Assert.False(Setup.Current.IsReadyEmpty);
+        Assert.False(Setup.Current.IsTheEmptySelectionInEffect);
+        _storage.Verify();
+    }
+
+    [Fact]
+    public async Task AnUnrepresentableBound_IsNotTheEmptySelection()
+    {
+        await SettledAsync(TokenA);
+
+        Setup.Edit(d => d with { MoveNumberMinText = "1.5" });
+
+        Assert.False(Setup.Current.IsInEffectFor(TokenA));
+        Assert.False(Setup.Current.Draft.RestrictsNothing);
+        _storage.Verify();
+    }
+
+    // Resolution is current state: a failed restoration unresolves the
+    // defaults, a valid Apply or Clear resolves the draft, and a source
+    // change leaves resolution as it is — it travels with the draft.
+    [Fact]
+    public async Task Resolution_TravelsWithTheDraft_AcrossASourceChange()
+    {
+        _storage.ExpectFilterRestore(FilterRestoration.Refused);
+        await Setup.RestoreAsync();
+        Setup.ReportSource(TokenA);
+        _storage.ExpectFilterCommit(new FilterConfig(), BrowserStorageWriteAnswer.Refused);
+
+        await Setup.ClearAsync();
+        Setup.ReportSource(TokenB);
+
+        Assert.True(Setup.Current.IsResolved);
+        Assert.True(Setup.Current.IsInEffectFor(TokenB));
+        Assert.Equal(FilterRestoration.Refused, Setup.Current.Restoration);
+        _storage.Verify();
+    }
+
+    // A restored valid empty selection is ready, and nothing differs from a
+    // first visit, so it raises no restored notice (§1, Reload).
+    [Fact]
+    public async Task ARestoredEmptySelection_IsReady_AndRaisesNoNotice()
+    {
+        Setup.ReportSource(TokenA);
+        _storage.ExpectFilterRestore(new FilterConfig());
+
+        await Setup.RestoreAsync();
+
+        Assert.Equal(FilterRestoration.Restored, Setup.Current.Restoration);
+        Assert.False(Setup.Current.IsRestoredNoticeShowing);
+        Assert.True(Setup.Current.IsInEffectFor(TokenA));
+        _storage.Verify();
+    }
+
     [Fact]
     public async Task Restoration_TouchesNeitherTheBaselineNorTheGeneration()
     {

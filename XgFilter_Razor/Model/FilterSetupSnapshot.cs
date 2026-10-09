@@ -39,6 +39,7 @@ public sealed class FilterSetupSnapshot
         FilterSourceToken? source,
         int generation,
         FilterDraft draft,
+        bool resolved,
         FilterDraft? baseline,
         FilterRestoration restoration,
         bool restoredNoticeShowing,
@@ -47,6 +48,7 @@ public sealed class FilterSetupSnapshot
         Source = source;
         Generation = generation;
         Draft = draft;
+        IsResolved = resolved;
         Baseline = baseline;
         Restoration = restoration;
         IsRestoredNoticeShowing = restoredNoticeShowing;
@@ -66,7 +68,19 @@ public sealed class FilterSetupSnapshot
             && InvalidFields.Count == 0
             && draft.ToConfig().Equals(baseline.ToConfig());
 
-        _inEffect = IsAlreadyApplied ? draft : null;
+        // The empty selection is ready without Apply (§1,
+        // halheinrich/backgammon#266): resolved, valid and restricting
+        // nothing, once restoration has settled, it runs everything — what is
+        // on screen is what would run, so there is no consent to give. A
+        // pending or failed restoration is not evidence that the user chose
+        // no filter, and an invalid draft is not the empty selection.
+        IsReadyEmpty =
+            source is not null
+            && restoration != FilterRestoration.Pending
+            && resolved
+            && draft.RestrictsNothing;
+
+        _inEffect = IsAlreadyApplied || IsReadyEmpty ? draft : null;
     }
 
     /// <summary>
@@ -90,7 +104,9 @@ public sealed class FilterSetupSnapshot
     /// Whether a filter is in effect for <paramref name="source"/> — the
     /// filter half of a host's Run gate (<c>SPEC-filtering.md</c> §2). True
     /// when <paramref name="source"/> is this setup's source and the selection
-    /// on screen is the one the user applied for it.
+    /// on screen is either the one the user applied for it, or the ready empty
+    /// selection, which needs no Apply. The producer answers readiness: a host
+    /// adds no empty-filter exception of its own.
     /// </summary>
     /// <param name="source">The host's current source.</param>
     /// <returns>Whether a filter is in effect for it.</returns>
@@ -116,6 +132,15 @@ public sealed class FilterSetupSnapshot
 
     /// <summary>The selection as the user is editing it.</summary>
     internal FilterDraft Draft { get; }
+
+    /// <summary>Whether the draft is the user's choice rather than the defaults a failed restoration left.</summary>
+    internal bool IsResolved { get; }
+
+    /// <summary>Whether the draft is the ready empty selection (§1), in effect without Apply.</summary>
+    internal bool IsReadyEmpty { get; }
+
+    /// <summary>Whether what is in effect restricts nothing — Apply's "no filter is set".</summary>
+    internal bool IsTheEmptySelectionInEffect => _inEffect is not null && Draft.RestrictsNothing;
 
     /// <summary>The committed baseline for this setup — the last applied selection — or none.</summary>
     internal FilterDraft? Baseline { get; }
@@ -173,6 +198,7 @@ public sealed class FilterSetupSnapshot
         Source == other.Source
         && Generation == other.Generation
         && Draft.Equals(other.Draft)
+        && IsResolved == other.IsResolved
         && Equals(Baseline, other.Baseline)
         && Restoration == other.Restoration
         && IsRestoredNoticeShowing == other.IsRestoredNoticeShowing

@@ -288,11 +288,13 @@ public class FilterPanelTests : BunitContext
     public async Task ApplyButton_CommitsTheSelection()
     {
         var cut = Render<FilterPanel>();
+        ErrorMin(cut).Input("0.05");
 
         await cut.Find("button.btn-primary").ClickAsync(new());
 
         Assert.NotNull(LastCommit);
         Assert.Equal(DecisionTypeOption.Both, LastCommit!.DecisionType);
+        Assert.Equal(0.05, LastCommit.ErrorMin);
         Assert.Equal(LastCommit, InEffect);
     }
 
@@ -304,15 +306,19 @@ public class FilterPanelTests : BunitContext
     // host's read of what is in effect — which come from one snapshot and must
     // therefore never disagree.
 
-    // Nothing has been committed on a fresh mount, so Apply is offered from the
-    // start and the panel volunteers no disabled-reason.
+    // A first visit has chosen nothing, and the empty selection is ready
+    // without Apply (§1, halheinrich/backgammon#266): it is in effect, so
+    // there is nothing to apply, and the panel says why the button is dark —
+    // in words that are true of a selection nobody applied.
     [Fact]
-    public void FreshMount_LeavesApplyEnabled_WithNoDisabledReason()
+    public void FreshMount_TheEmptySelectionIsInEffect_AndApplyHasNothingToDo()
     {
         var cut = Render<FilterPanel>();
 
-        Assert.False(Apply(cut).HasAttribute("disabled"));
-        Assert.Empty(cut.FindAll("#applyDisabledReason"));
+        Assert.Equal(new FilterConfig(), InEffect);
+        Assert.Empty(_commits);
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+        Assert.Contains("no filter is set", cut.Find("#applyDisabledReason").TextContent);
     }
 
     // Applying commits: the draft becomes this setup's baseline, it is in
@@ -339,11 +345,11 @@ public class FilterPanelTests : BunitContext
     public async Task EditAfterApply_ReEnablesApply_AndNothingIsInEffect()
     {
         var cut = Render<FilterPanel>();
-
+        ErrorMin(cut).Input("0.05");
         await Apply(cut).ClickAsync(new());
         Assert.True(Apply(cut).HasAttribute("disabled"));
 
-        ErrorMin(cut).Input("0.05");
+        ErrorMin(cut).Input("0.1");
 
         Assert.Null(InEffect);
         Assert.False(Apply(cut).HasAttribute("disabled"));
@@ -424,7 +430,7 @@ public class FilterPanelTests : BunitContext
     public async Task Staging_ADifferentSelection_LeavesNothingInEffect_AndEnablesApply()
     {
         var cut = Render<FilterPanel>();
-
+        ErrorMin(cut).Input("0.05");
         await Apply(cut).ClickAsync(new());
         Assert.True(Apply(cut).HasAttribute("disabled"));
 
@@ -889,11 +895,13 @@ public class FilterPanelTests : BunitContext
 
     // The deliberate keep-on-untoggle behavior: unchecking a mode hides its
     // group but keeps the checked levels — in the draft, so re-toggling
-    // restores the user's selection, and in the committed config, where the lib
+    // restores the user's selection, and in the config, where the lib
     // guarantees a level list whose toggle is off is inert (no activation, no
-    // constraint). An exploratory untoggle costs nothing.
+    // constraint). Inert, it restricts nothing: with nothing else set, that is
+    // the empty selection, in effect without Apply — and carrying its inert
+    // levels. An exploratory untoggle costs nothing.
     [Fact]
-    public async Task LevelSelections_SurviveModeUntoggle()
+    public void LevelSelections_SurviveModeUntoggle()
     {
         var cut = RenderExpanded(FilterFacet.AnalysisDepth);
 
@@ -903,10 +911,9 @@ public class FilterPanelTests : BunitContext
         cut.Find("#md_Rollout").Change(false);
         Assert.Empty(cut.FindAll("input[id^='lv_Rollout_']"));
 
-        await cut.Find("button.btn-primary").ClickAsync(new());
-        Assert.NotNull(LastCommit);
-        Assert.False(LastCommit!.IncludeRollouts);
-        Assert.Equal(new[] { AnalysisLevel.Ply4 }, LastCommit.RolloutLevels);
+        Assert.NotNull(InEffect);
+        Assert.False(InEffect!.IncludeRollouts);
+        Assert.Equal(new[] { AnalysisLevel.Ply4 }, InEffect.RolloutLevels);
 
         cut.Find("#md_Rollout").Change(true);
         Assert.True(cut.Find("#lv_Rollout_Ply4").HasAttribute("checked"));
@@ -955,13 +962,12 @@ public class FilterPanelTests : BunitContext
         plan.Verify();
     }
 
-    // Deselecting everything back to nothing must emit the inactive state —
-    // all three toggles off with empty level lists — "facet off," not "reject
-    // everything." The Build()-skip on that combination is upstream's job; the
-    // panel's contract is only that it round-trips the emptied intent
-    // faithfully.
+    // Deselecting everything back to nothing is the inactive state — all
+    // three toggles off with empty level lists — "facet off," not "reject
+    // everything." With nothing else set, that is the empty selection, ready
+    // without Apply (halheinrich/backgammon#266): in effect as it stands.
     [Fact]
-    public async Task AnalysisDepth_DeselectedToEmpty_EmitsInactiveState()
+    public void AnalysisDepth_DeselectedToEmpty_IsTheInactiveState_InEffect()
     {
         var cut = RenderExpanded(FilterFacet.AnalysisDepth);
 
@@ -969,15 +975,16 @@ public class FilterPanelTests : BunitContext
         cut.Find("#lv_Rollout_Ply3").Change(true);
         cut.Find("#lv_Rollout_Ply3").Change(false);
         cut.Find("#md_Rollout").Change(false);
-        await cut.Find("button.btn-primary").ClickAsync(new());
 
-        Assert.NotNull(LastCommit);
-        Assert.False(LastCommit!.IncludeEvaluations);
-        Assert.False(LastCommit.IncludeRollouts);
-        Assert.False(LastCommit.IncludeBookRollouts);
-        Assert.Empty(LastCommit.EvaluationLevels);
-        Assert.Empty(LastCommit.RolloutLevels);
-        Assert.Empty(LastCommit.BookRolloutLevels);
+        var inEffect = InEffect;
+        Assert.NotNull(inEffect);
+        Assert.False(inEffect!.IncludeEvaluations);
+        Assert.False(inEffect.IncludeRollouts);
+        Assert.False(inEffect.IncludeBookRollouts);
+        Assert.Empty(inEffect.EvaluationLevels);
+        Assert.Empty(inEffect.RolloutLevels);
+        Assert.Empty(inEffect.BookRolloutLevels);
+        Assert.True(Apply(cut).HasAttribute("disabled"));
     }
 
     // Clear filters must reset all six depth fields — every toggle off (which
@@ -1279,21 +1286,20 @@ public class FilterPanelTests : BunitContext
         plan.Verify();
     }
 
-    // Deselecting every checked roll back to none must emit the inactive state —
-    // an empty DiceRolls list, "facet off," not "reject everything." The
-    // Build()-skip on the empty list is upstream's job; the panel's contract is
-    // only that it round-trips the emptied intent faithfully.
+    // Deselecting every checked roll back to none is the inactive state — an
+    // empty DiceRolls list, "facet off," not "reject everything" — and, with
+    // nothing else set, the empty selection, in effect without Apply.
     [Fact]
-    public async Task DiceRolls_DeselectedToEmpty_EmitsInactiveState()
+    public void DiceRolls_DeselectedToEmpty_IsTheInactiveState_InEffect()
     {
         var cut = RenderExpanded(FilterFacet.DiceRolls);
 
         cut.Find("#dr_31").Change(true);
         cut.Find("#dr_31").Change(false);
-        await cut.Find("button.btn-primary").ClickAsync(new());
 
-        Assert.NotNull(LastCommit);
-        Assert.Empty(LastCommit!.DiceRolls);
+        Assert.NotNull(InEffect);
+        Assert.Empty(InEffect!.DiceRolls);
+        Assert.True(Apply(cut).HasAttribute("disabled"));
     }
 
     // Silent-splat guard for the Position-pattern field: an unbound text input
@@ -1475,14 +1481,17 @@ public class FilterPanelTests : BunitContext
     }
 
     // A blank Position-pattern field means "no pattern filter," and the panel
-    // emits that as the lib's null rather than as blank text: null is the
+    // commits that as the lib's null rather than as blank text: null is the
     // value a fresh config carries, so a field never touched and a field
     // cleared both build the config a fresh panel builds, and no document is
     // minted carrying an empty pattern the user never wrote.
     [Fact]
-    public async Task EmptyPositionPattern_EmitsNullPattern()
+    public async Task EmptyPositionPattern_CommitsNullPattern()
     {
-        var cut = Render<FilterPanel>();
+        var cut = RenderExpanded(FilterFacet.PositionPattern);
+        ErrorMin(cut).Input("0.05");
+        cut.Find("#positionPattern").Input("[6,2,]");
+        cut.Find("#positionPattern").Input(string.Empty);
 
         await cut.Find("button.btn-primary").ClickAsync(new());
 
@@ -1505,8 +1514,11 @@ public class FilterPanelTests : BunitContext
 
         cut.Find("#positionPattern").Input(string.Empty);
 
+        // Cleared, the field is unmarked and the panel is back to the empty
+        // selection — in effect, so Apply is off for the other reason.
         Assert.DoesNotContain("is-invalid", cut.Find("#positionPattern").GetAttribute("class"));
-        Assert.False(cut.Find("button.btn-primary").HasAttribute("disabled"));
+        Assert.Equal(new FilterConfig(), InEffect);
+        Assert.Contains("no filter is set", cut.Find("#applyDisabledReason").TextContent);
     }
 
     // Proves the FilterConfig.TryFromJson tolerant path is wired: a stored
@@ -2330,16 +2342,33 @@ public class FilterPanelTests : BunitContext
         Assert.True(Apply(cut).HasAttribute("disabled"));
     }
 
-    // The defect's sharpest form: over an applied selection with no move
-    // bound, "1.5" parses to exactly that selection. It must not read as it —
-    // not in effect for the host, and Apply off for the invalid value rather
-    // than for "nothing changed".
+    // The defect's sharpest forms. A box its field cannot represent parses
+    // as no criterion, so "1.5" in a move-number bound parses to exactly the
+    // empty selection on a fresh panel — and to exactly an applied selection
+    // with no move bound. It must read as neither: input that cannot be a
+    // field's value is not a blank criterion, cannot make the selection
+    // ready-empty, and is not the applied selection; Apply is off for the
+    // invalid value rather than for "nothing to apply".
+    [Fact]
+    public void UnrepresentableBound_IsNotTheEmptySelection()
+    {
+        var cut = RenderExpanded(FilterFacet.MoveNumberRange);
+        Assert.NotNull(InEffect);
+
+        MoveNumberMin(cut).Input("1.5");
+
+        Assert.Null(InEffect);
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+        Assert.Empty(cut.FindAll("#applyDisabledReason"));
+    }
+
     [Fact]
     public async Task UnrepresentableBound_OverTheAppliedSelection_IsNotThatSelection()
     {
         var cut = RenderExpanded(FilterFacet.MoveNumberRange);
+        ErrorMin(cut).Input("0.1");
         await Apply(cut).ClickAsync(new());
-        Assert.NotNull(InEffect);
+        Assert.Equal(new FilterConfig { ErrorMin = 0.1 }, InEffect);
 
         MoveNumberMin(cut).Input("1.5");
 
