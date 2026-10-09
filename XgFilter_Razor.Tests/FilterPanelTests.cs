@@ -1976,8 +1976,8 @@ public class FilterPanelTests : BunitContext
 
     // ── Error-bound validity ───────────────────────────────────────────────
     //
-    // The rule itself lives in XgFilter_Lib (bounds non-negative, min ≤ max,
-    // NaN rejected) and is asked through FilterConfig.GetInvalidFields(); these
+    // The rule itself lives in XgFilter_Lib and is asked through
+    // FilterConfig.GetInvalidFields(), restated nowhere on this side; these
     // pins are about the panel's half — that it asks, that it marks the field
     // the lib names and no other, and that Apply and save both refuse while any
     // field is named. They deliberately assert no message text: the wording is
@@ -2039,8 +2039,8 @@ public class FilterPanelTests : BunitContext
 
     // The bounds are text boxes, so a user really can type a word into one.
     // "NaN" is not a number to the draft's grammar, so it is marked like any
-    // other text that is not a number — and the feedback line's "a number,
-    // zero or greater" is worded to stay true for exactly this input.
+    // other text that is not a number — and the feedback line's "a finite
+    // number, zero or greater" is worded to stay true for exactly this input.
     [Fact]
     public void NaNErrorBound_MarksField_AndGatesApply()
     {
@@ -2052,6 +2052,65 @@ public class FilterPanelTests : BunitContext
         Assert.Contains("is-invalid", ErrorMin(cut).GetAttribute("class"));
         Assert.True(Apply(cut).HasAttribute("disabled"));
         Assert.NotNull(cut.Find("#errorRangeFeedback"));
+    }
+
+    // "1e999" is a number to the draft's grammar and reads as infinity, and the
+    // lib refuses it (XgFilter_Lib 33f8873, halheinrich/backgammon#374). The
+    // draft's own pin, AnOverflowingErrorBound_IsInfinity_AndTheLibRulesOnIt,
+    // shows only that the draft agrees with the lib; this one pins the verdict
+    // as the user meets it, in each box with the other left blank. Unlike the
+    // pins above it asserts the line's wording, because what this case changed
+    // is the wording: "finite" is the word that explains the refusal.
+    [Theory]
+    [InlineData(FilterField.ErrorMin)]
+    [InlineData(FilterField.ErrorMax)]
+    public async Task AnOverflowingErrorBound_IsRefusedAsNotFinite_UntilAFiniteOneReplacesIt(FilterField field)
+    {
+        var cut = Render<FilterPanel>();
+        var box = field switch
+        {
+            FilterField.ErrorMin => "#errorMin",
+            FilterField.ErrorMax => "#errorMax",
+            _ => throw new ArgumentOutOfRangeException(nameof(field)),
+        };
+
+        cut.Find(box).Input("1e999");
+
+        // Validity is evaluated continuously: the gate is already shut and the
+        // selection out of effect before the user leaves the box, which only
+        // reveals the verdict (SPEC-filtering.md §1, "How an invalid field is
+        // shown").
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+        Assert.Null(InEffect);
+        Assert.DoesNotContain("is-invalid", cut.Find(box).GetAttribute("class"));
+        Assert.Empty(cut.FindAll("#errorRangeFeedback"));
+
+        cut.Find(box).Blur();
+
+        Assert.Contains("is-invalid", cut.Find(box).GetAttribute("class"));
+        Assert.Equal(
+            "Each bound must be a finite number, zero or greater, and Min can't be above Max "
+            + "— fix it to apply, or clear a bound for no limit on that side.",
+            Regex.Replace(cut.Find("#errorRangeFeedback").TextContent.Trim(), @"\s+", " "));
+        Assert.Equal("1e999", cut.Find(box).GetAttribute("value"));
+        Assert.True(Apply(cut).HasAttribute("disabled"));
+
+        // A large number that is still finite is a bound like any other.
+        cut.Find(box).Input("1e300");
+        cut.Find(box).Blur();
+
+        Assert.DoesNotContain("is-invalid", cut.Find(box).GetAttribute("class"));
+        Assert.Empty(cut.FindAll("#errorRangeFeedback"));
+        Assert.False(Apply(cut).HasAttribute("disabled"));
+
+        await Apply(cut).ClickAsync(new());
+
+        var committed = field == FilterField.ErrorMin
+            ? new FilterConfig { ErrorMin = 1e300 }
+            : new FilterConfig { ErrorMax = 1e300 };
+        Assert.Equal(committed, LastCommit);
+        Assert.Equal(committed, InEffect);
+        Assert.Equal("1e300", cut.Find(box).GetAttribute("value"));
     }
 
     // ── The bound boxes are text boxes (halheinrich/backgammon#379) ────────
@@ -2213,10 +2272,11 @@ public class FilterPanelTests : BunitContext
     // same three properties (the panel asks, it marks the field the lib names
     // and no other, and Apply and save both refuse while any field is named)
     // pinned separately rather than parameterized over the two facets. The
-    // shape is shared, the rules are not: the lib floors an error magnitude at
-    // zero and a move ordinal at one (halheinrich/backgammon#119), so a shared
-    // theory would carry per-facet data for every value anyway and would hide
-    // which floor each case is really exercising. Message text is deliberately
+    // shape is shared, the rules are not: each facet's bounds answer to their
+    // own rule in the lib (FilterConfig.GetInvalidFields(),
+    // halheinrich/backgammon#119), so a shared theory would carry per-facet
+    // data for every value anyway and would hide which facet's rule each case
+    // is really exercising. Message text is deliberately
     // unasserted here as it is above — the wording is the panel's to change,
     // the rule is not.
 

@@ -308,8 +308,8 @@ number must be whole however it is spelled (`3`, `3.0`, `3,0` are three;
 `3.5`, `3,5` are not move numbers) and within the field's range. The text
 stays as typed; the config, and so what is remembered, carries the number
 in its own canonical form. The grammar is `FilterDraft`'s
-(`BoundNumber`); the domain rules — floors, order, finiteness, `NaN` —
-stay XgFilter_Lib's and are not restated: `1e999` reads as infinity, and
+(`BoundNumber`); the domain rules stay XgFilter_Lib's, asked through
+`FilterConfig.GetInvalidFields()`, and are not restated here: `1e999` reads as infinity, and
 the lib's verdict decides it. Position Pattern's commas are its own
 grammar's delimiters, and nothing here touches that box, the player names
 or the match scores.
@@ -452,7 +452,7 @@ it shows (below).
 **Validity is the lib's ruling; the panel marks it and words it.** One
 verdict is the whole of it — the draft's `InvalidFields`:
 `FilterConfig.GetInvalidFields()` on the draft's parsed config must name no
-field (non-negative error bounds, `min ≤ max`, `NaN` rejected, a score token
+field (an error or move-number bound its rule refuses, a score token
 the grammar faults, and — since `halheinrich/backgammon#269` — pattern text
 `BoardPattern.TryParse` refuses; the lib's rule throughout, asked of the
 same parsed config Apply commits, so what the panel reds and what `Build()`
@@ -959,8 +959,9 @@ explains where it was typed), and Clear filters as the one-gesture return
 to the unfiltered set that leaves the open rows alone. The
 reject-and-explain posture is documented as behavior — *nothing is
 guessed at or quietly ignored* — while each rule stays with its facet:
-the error facet's own section carries the non-negative / ordered-bounds
-rule and why an impossible range is refused rather than applied.
+the error facet's own section words its bounds' rule for the reader (the
+rule itself is `FilterConfig.GetInvalidFields()`'s) and how to ask for
+zero-error decisions only.
 
 **Heading depth is the host's to state**, via the required `HeadingLevel`
 parameter: the lead heading renders at that level and every section one
@@ -1717,8 +1718,7 @@ are producer-side, so neither widens what consumers can see.
   `_ = InvokeAsync(...)` over work that can fault loses the fault
   (`ASourceChangeReload_ThatFailsAfterAnAwait_*`).
 - **Never restate a lib validity rule in the panel — ask it.** The error
-  bounds' rule (non-negative, `min ≤ max`, `NaN` rejected) lives in
-  `XgFilter_Lib` and is asked through `FilterConfig.GetInvalidFields()` on
+  bounds' rule lives in `XgFilter_Lib` and is asked through `FilterConfig.GetInvalidFields()` on
   the same config Apply commits (the draft's `ToConfig()`, inside its
   `InvalidFields`). A local
   `if (min < 0)` here would be a second encoding of a rule `Build()` also
@@ -1868,8 +1868,8 @@ are producer-side, so neither widens what consumers can see.
   blank bound (`ABoundBox_IsATextBox_AskingForDigits` sweeps the panel for
   a number control). `inputmode` is what asks for digits. Don't widen the
   grammar to strip a separator, and don't narrow it with a domain rule —
-  finiteness, floors and order are the lib's; the draft decides only what
-  text is a number at all. The pattern box's commas are its own grammar's:
+  those are the lib's (`FilterConfig.GetInvalidFields()`); the draft
+  decides only what text is a number at all. The pattern box's commas are its own grammar's:
   no decimal reading reaches it.
 - **What a box shows is per mount; validity is not.** The panel's
   `_revealed` set is presentation (halheinrich/backgammon#272): it starts at

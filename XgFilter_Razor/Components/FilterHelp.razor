@@ -116,12 +116,9 @@
             excluded, whatever the bounds.
         </p>
         <p>
-            An error is a size, never a direction, so each bound must be a
-            number of zero or more — zero itself is allowed, and means an
-            exactly-perfect play. The lower bound also cannot be above the
-            upper. Either mistake describes a range nothing could ever fall
-            into, so it is refused outright rather than applied as a filter
-            that silently admits nothing.
+            Each bound must be a finite number of zero or more, and the lower
+            bound cannot be above the upper. To include only decisions with
+            zero error, set both bounds to zero.
         </p>
     </section>
 

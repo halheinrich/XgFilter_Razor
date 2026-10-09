@@ -112,8 +112,8 @@
            most-used control, so it never rides behind a row of its own.
 
            Validity is the lib's ruling, not this panel's: GetInvalidFields()
-           names the offending bounds (non-negative, min ≤ max, NaN rejected)
-           and each input reds itself on its own FilterField, so a wrong max
+           names the offending bounds by the lib's own rule, restated nowhere
+           here, and each input reds itself on its own FilterField, so a wrong max
            never marks a min the user got right — the lib's attribution rules
            decide that, and a misordered pair blames both by design. Hoisted
            into a local like the active-facet set below: every marked input
@@ -218,9 +218,9 @@
                _heldLines says how long the second lasts — here, the always-
                visible error range, until the panel unmounts.
                One line for both violations, because the
-               user fixes them at the same two boxes: "a number, zero or
-               greater" is also the true verdict on text that is not a number
-               yet — unfinished input such as "1e-", or a word like NaN.
+               user fixes them at the same two boxes: "a finite number, zero
+               or greater" is also the true verdict on text that is not a
+               number yet — unfinished input such as "1e-", or a word like NaN.
                Keyed to this facet's own two fields, never to "the lib named
                something": the invalid set spans facets (the score tokens
                joined it in halheinrich/backgammon#121), and a line that fired
@@ -229,9 +229,9 @@
             @if (IsLineRendered(shownFields, FilterFacet.ErrorRange))
             {
                 <div @attributes="@(FeedbackLineAttributes(IsLineShown(shownFields, FilterFacet.ErrorRange), "errorRangeFeedback"))">
-                    Each bound must be a number, zero or greater, and Min can't be
-                    above Max — fix it to apply, or clear a bound for no limit on
-                    that side.
+                    Each bound must be a finite number, zero or greater, and Min
+                    can't be above Max — fix it to apply, or clear a bound for no
+                    limit on that side.
                 </div>
             }
         </div>
@@ -531,10 +531,9 @@
                        wrong alone. It reads the hoisted shownFields evaluation
                        the error range reads, and closes Apply through the same
                        verdict — no rule of the panel's own, here or
-                       there. The facets differ only in the floor each bound must
-                       clear (zero for an error magnitude, one for a 1-based move
-                       ordinal), and the floor is the lib's to set; the panel only
-                       words it. *@
+                       there. What each facet's bounds must be differs, and is the
+                       lib's to set (FilterConfig.GetInvalidFields()); the panel
+                       only words it. *@
                     @FacetRow(FilterFacet.MoveNumberRange, @<div class="ms-3">
                         <label class="form-label">
                             <small class="text-muted" id="facetHint_MoveNumberRange">(inclusive; blank = no bound; non-standard-start games are excluded)</small>

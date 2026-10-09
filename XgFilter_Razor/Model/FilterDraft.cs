@@ -185,8 +185,8 @@ internal sealed partial record FilterDraft
     /// takes either <c>.</c> or <c>,</c> as its decimal mark and has no
     /// grouping (halheinrich/backgammon#379). This is the editor's one rule of
     /// its own, and it is about representation, not the domain — whether a
-    /// number is an admissible bound (finite, non-negative, at least one, in
-    /// order) stays the lib's question, asked of the parsed config. Blank text
+    /// number is an admissible bound stays the lib's question, asked of the
+    /// parsed config (<see cref="FilterConfig.GetInvalidFields"/>). Blank text
     /// is no bound and never appears here.
     /// </summary>
     public IReadOnlySet<FilterField> UnrepresentableFields
@@ -392,9 +392,9 @@ internal sealed partial record FilterDraft
     // unrepresentable (false, null), unfinished text such as "1e-" included.
     // The one mark the grammar admits is the decimal one, so reading it as a
     // point gives the number the user wrote, never another. Whether the number
-    // is an admissible bound — finite, non-negative, in order — is the lib's
-    // verdict on the parsed config, and is not restated here: "1e999" reads
-    // as infinity, and the lib decides it.
+    // is an admissible bound is the lib's verdict on the parsed config
+    // (FilterConfig.GetInvalidFields()), and is not restated here: "1e999"
+    // reads as infinity, and the lib decides it.
     private static bool TryReadNumber(string text, out double? value)
     {
         value = null;
