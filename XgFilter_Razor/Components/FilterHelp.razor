@@ -15,9 +15,9 @@
    drifts.
 
    Render-only: it issues no JS interop and touches no storage or state of its
-   own. It does *document* what FilterPanel persists (the "what the panel
-   remembers" section) — but only by rendering the panel's own key constants,
-   never by reading or writing them.
+   own. It does *document* what the filter surface persists (the "what the
+   panel remembers" section) — but only by rendering FilterStorage's own key
+   constants, never by reading or writing them.
 
    Structured for embedding — one section per topic, each heading carrying a
    stable fh-* anchor id rendered from the named constants below (never a
@@ -48,8 +48,8 @@
 
     @* Panel chrome — the controls that govern every facet rather than
        describing one. Producer-owned for the same reason the facet prose is:
-       the filter rows and their badges, the Apply gate and its two
-       disabled states are the panel's behavior, so a host restating them
+       the filter rows and their badges, the Apply gate and its disabled
+       states are the panel's behavior, so a host restating them
        would be a second encoding that drifts. Placed before the facets: it is
        the frame a reader needs in order to find and commit any of them.
 
@@ -71,18 +71,21 @@
             while they are hidden, <em>@FilterPanel.MoreFiltersExpandedLabel</em>
             while they are showing — so at rest the panel is the error range
             and the buttons. Whatever you left open — that fold itself, and the
-            rows inside it — is open again next time. While a row is closed, a
-            badge on it says the filter inside is set, and while the fold is
-            closed, a badge on it counts how many of the filters behind it are
-            set, so a filter you set earlier can never be quietly out of sight.
+            rows inside it — is open again next time, as long as your browser
+            lets the panel remember it. While a row is closed, a badge on it
+            says the filter inside is set, and while the fold is closed, a
+            badge on it counts how many of the filters behind it are set, so a
+            filter you set earlier can never be quietly out of sight.
         </p>
         <p>
-            Nothing you type or check takes effect until you press <em>Apply
-            Filter</em>. Apply is unavailable when there is nothing to apply —
-            you have not changed anything since you last applied, and the panel
-            says so under the button — and when some value is not usable as a
-            filter. In that second case the offending box is marked and says
-            what is wrong with it, right where you typed it; fix or clear it
+            With no filter set, every decision is included, and that needs no
+            Apply. A filter you type or check takes effect when you press
+            <em>Apply Filter</em>, and not before. Apply is unavailable when
+            there is nothing to apply — no filter is set, or you have not
+            changed anything since you last applied, and the panel says which
+            under the button — and when some value is not usable as a filter.
+            In that second case the box is marked and says what is wrong —
+            once you have left it, if you were typing there; fix or clear it
             and Apply comes back. Nothing is guessed at or quietly ignored, so
             a filter you meant to set can never be silently dropped.
         </p>
@@ -315,11 +318,19 @@
         </p>
     </section>
 
-    @* Storage copy — every key is rendered from FilterPanel's own internal
+    @* Storage copy — every key is rendered from FilterStorage's own internal
        constant, never written here as a prose literal, so the names a reader
-       verifies in devtools cannot drift from the names the panel actually
-       writes. Scope is exactly what FilterPanel itself persists: a sibling key
-       belonging to a host app is that host's to document, not this panel's.
+       verifies in devtools cannot drift from the names the surface actually
+       writes. Scope is exactly what the filter surface itself persists: a
+       sibling key belonging to a host app is that host's to document, not
+       this panel's.
+
+       What it promises is what the surface does (halheinrich/backgammon#371):
+       it asks the browser to keep these entries, and a browser may refuse —
+       blocked storage, or a full allowance. The surface then keeps working
+       from memory for the visit and remembers nothing, so the copy says
+       "when your browser allows it" and what happens when it does not,
+       rather than promising that the settings will be there.
 
        The prose around the list never says how MANY entries there are, and
        must not start (halheinrich/backgammon#231). The list is the count: a
@@ -332,11 +343,11 @@
     <section>
         @Heading(SectionLevel, StorageSectionAnchorId, StorageSectionHeading)
         <p>
-            The panel remembers your filter settings so they are still there
-            next time. It saves them in your own browser, on this machine, and
-            nowhere else — nothing is uploaded. What is saved is the filter
-            settings themselves, not your positions, your matches, or the files
-            you analyzed.
+            When your browser allows it, the panel remembers your filter
+            settings so they are still there next time. It keeps them in your
+            own browser, on this machine, and nowhere else — nothing is
+            uploaded. What is kept is the filter settings themselves, not your
+            positions, your matches, or the files you analyzed.
         </p>
         <p>
             The entries below are kept in your browser's local storage for this
@@ -348,7 +359,8 @@
             <li>
                 <code>@FilterStorage.ConfigKey</code> — the filters you last
                 applied. Written when you press Apply Filter and when you press
-                Clear filters, and read back when the panel first appears.
+                Clear filters, and read back the first time the panel appears
+                after the page loads.
             </li>
             <li>
                 <code>@FilterStorage.DisclosureKey</code> — which filter rows
@@ -364,6 +376,13 @@
                 you left open inside it.
             </li>
         </ul>
+        <p>
+            Some browsers refuse to keep them — a privacy setting can block this
+            site's local storage, and storage that is full refuses anything new.
+            Then the filters still work as you set them for as long as the page
+            is open, but they are not remembered: the next visit starts from
+            the defaults, or from whatever was kept before.
+        </p>
         <p>
             You can see these entries under local storage for this site in your
             browser's developer tools, and delete them there whenever you like.
