@@ -46,7 +46,10 @@
    Location: XgFilter_Razor/Components/FilterPanel.razor
 ──────────────────────────────────────────────────────────────────────────── *@
 
-<div class="card mb-4" style="max-width:800px">
+@* The panel's root carries the restoration marker (RestorationAttribute,
+   halheinrich/backgammon#346): what a host's browser test waits on and reads
+   instead of the panel's storage keys. *@
+<div class="card mb-4" style="max-width:800px" @attributes="RestorationMarker">
     <div class="card-header">
         <strong>Filters</strong>
     </div>
@@ -990,6 +993,10 @@
             await RestoreDisclosureAsync();
             await restoration;
             _mountRestored.TrySetResult();
+
+            // The marker moves from Pending to the outcome here, and only
+            // here: this render is the one the settled restores produce.
+            StateHasChanged();
         }
         catch (Exception failure)
         {
@@ -1007,6 +1014,37 @@
 
     /// <summary>Completes when this mount's restores have settled (see the field above).</summary>
     internal Task MountRestored => _mountRestored.Task;
+
+    /// <summary>
+    /// The attribute on the panel's root that reports this boot's restoration
+    /// of the selection to a host's browser test (halheinrich/backgammon#346):
+    /// <see cref="FilterRestoration.Pending"/> until this mount has applied
+    /// everything it restores — its two display preferences and the boot's
+    /// restoration of the selection — and then the selection's outcome, by its
+    /// <see cref="FilterRestoration"/> member name. It is observable on
+    /// failure too (<c>Refused</c>, <c>Unreadable</c>), so nothing that waits
+    /// on it waits forever, and it says nothing about whether Apply or Run is
+    /// permitted. A test waits for it to leave Pending before it acts, which is
+    /// what lets it click the container's toggle without racing the mount's
+    /// own restore of it.
+    /// </summary>
+    /// <remarks>
+    /// <c>internal</c>: a host's test never spells it — the producer's test
+    /// support (<c>XgFilter_Razor.Testing.FilterRestorationMarker</c>) builds
+    /// the selectors from it, the storage keys' posture for a DOM fact. Host
+    /// code reads the outcome from <see cref="FilterSetupSnapshot.Restoration"/>.
+    /// </remarks>
+    internal const string RestorationAttribute = "data-filter-restoration";
+
+    // The marker's one attribute, as the root's splat. Pending until this
+    // mount's restores have settled, whatever the boot's outcome already is,
+    // so a remount reports its own settling too.
+    private IReadOnlyDictionary<string, object> RestorationMarker => new Dictionary<string, object>(StringComparer.Ordinal)
+    {
+        [RestorationAttribute] = (_mountRestored.Task.IsCompletedSuccessfully
+            ? _snapshot.Restoration
+            : FilterRestoration.Pending).ToString(),
+    };
 
     // The container's restore, RestoreDisclosureAsync's shape over one bit:
     // re-checking its own touched flag after the await so a gesture that
