@@ -74,10 +74,14 @@ public sealed class FilterSetup
     private bool _restoredNoticeShowing;
     private bool _failureNoticeShowing;
 
-    // Advanced by every change to the draft. The restoration notes it when its
-    // read begins and hydrates the draft only if it has not moved, so a read
-    // answered after the user edited never overwrites the edit.
-    private long _draftRevision;
+    // Advanced by every gesture on the draft — an edit, a staged saved filter,
+    // Clear — whether or not it changes the value. The restoration notes it
+    // when its read begins and hydrates the draft only if it has not moved, so
+    // a read answered after the user acted never overwrites what they did:
+    // loading an empty saved filter over the empty defaults is a choice too,
+    // though it changes no value (halheinrich/backgammon#374). Publication is
+    // separate, and stays change-only.
+    private long _draftGestures;
 
     // The one restoration of this boot, started by the first call to
     // RestoreAsync and shared by every later one.
@@ -154,14 +158,15 @@ public sealed class FilterSetup
     /// <summary>
     /// One edit gesture. The draft becomes <paramref name="edit"/>'s result,
     /// and the gesture makes the selection the user's own, so the restored
-    /// notice ends.
+    /// notice ends and a restoration still pending will not overwrite it —
+    /// even when the result equals the draft it replaced.
     /// </summary>
     /// <param name="edit">The edit, applied to the current draft.</param>
     internal void Edit(Func<FilterDraft, FilterDraft> edit)
     {
         ArgumentNullException.ThrowIfNull(edit);
 
-        SetDraft(edit(_draft));
+        TakeGesture(edit(_draft));
         _restoredNoticeShowing = false;
         Publish();
     }
@@ -206,7 +211,7 @@ public sealed class FilterSetup
     {
         if (!_current.CanClear) return Task.CompletedTask;
 
-        SetDraft(FilterDraft.Empty);
+        TakeGesture(FilterDraft.Empty);
         _baseline = FilterDraft.Empty;
         _resolved = true;
         _restoredNoticeShowing = false;
@@ -240,7 +245,7 @@ public sealed class FilterSetup
 
     private async Task RestoreCoreAsync()
     {
-        var revisionAtStart = _draftRevision;
+        var gesturesAtStart = _draftGestures;
         var read = await _storage.ReadAsync(FilterStorage.ConfigKey);
 
         // The four outcomes are told apart here and nowhere else. A refused
@@ -272,15 +277,15 @@ public sealed class FilterSetup
         }
 
         // The outcome is recorded whatever happened meanwhile; the draft is
-        // hydrated only if nobody has edited it since the read began, so a
-        // late answer never overwrites a newer draft. The source may have
-        // changed in between: the draft is kept across a setup's end, so that
-        // changes nothing here. A restored empty selection raises no notice:
-        // it is ready as it stands, and nothing differs from a first visit
-        // (§1, Reload).
-        if (restored is not null && _draftRevision == revisionAtStart)
+        // hydrated only if no gesture has touched it since the read began, so
+        // a late answer never overwrites the user's choice — a newer draft, or
+        // the same value chosen again. The source may have changed in between:
+        // the draft is kept across a setup's end, so that changes nothing
+        // here. A restored empty selection raises no notice: it is ready as it
+        // stands, and nothing differs from a first visit (§1, Reload).
+        if (restored is not null && _draftGestures == gesturesAtStart)
         {
-            SetDraft(FilterDraft.From(restored));
+            _draft = FilterDraft.From(restored);
             _restoredNoticeShowing = !_draft.RestrictsNothing;
         }
 
@@ -304,12 +309,14 @@ public sealed class FilterSetup
         }
     }
 
-    private void SetDraft(FilterDraft draft)
+    // A gesture on the draft: its result becomes the draft, and it counts as
+    // a gesture whether or not the value moved — what supersedes a pending
+    // restoration is the user acting, not the draft differing. Whether
+    // anything is published is Publish's question, asked of the state.
+    private void TakeGesture(FilterDraft draft)
     {
-        if (draft.Equals(_draft)) return;
-
         _draft = draft;
-        _draftRevision++;
+        _draftGestures++;
     }
 
     private FilterSetupSnapshot Snapshot() => new(

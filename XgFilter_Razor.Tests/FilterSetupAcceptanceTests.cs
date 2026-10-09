@@ -301,6 +301,47 @@ public class FilterSetupAcceptanceTests : BunitContext
         _storage.Verify();
     }
 
+    // Loading a saved filter is the user's choice even when it changes no
+    // value (halheinrich/backgammon#374, the review's second correction): an
+    // empty saved filter loaded over the empty defaults while the restore is
+    // held supersedes the restore, so the stored selection released
+    // afterwards does not overwrite it, and nothing says a selection was
+    // restored. The outcome is still recorded, and the empty choice is ready.
+    [Fact]
+    public async Task LoadingAnEmptySavedFilter_DuringAPendingRestore_SupersedesIt()
+    {
+        var restore = _storage.ExpectHeldFilterRestore();
+        _storage.ExpectFilterPanelMount();
+        var documents = new FakeDocumentStorage();
+        documents.Documents[SavedFiltersDocument.FileName] =
+            NamedFilterCollection.Empty.With("Everything", new FilterConfig()).ToJson();
+        Setup.ReportSource(TokenA);
+        var cut = Render<FilterSurface>(parameters => parameters.Add(p => p.Storage, documents));
+        Assert.True(restore.IsReached);
+        Assert.Equal(FilterDraft.Empty, Setup.Current.Draft);
+
+        await LoadButton(cut, "Everything").ClickAsync(new MouseEventArgs());
+        Assert.Contains("Everything", cut.Find("#savedFilterLoadedNotice").TextContent);
+
+        restore.Release(FilterSurfaceStorage.RestoreAnswer(SelectionA));
+        await Setup.RestoreAsync().WaitAsync(DefaultWaitTimeout);
+        cut.WaitForElement(FilterRestorationMarker.SettledSelector);
+
+        Assert.Equal(FilterRestoration.Restored, Setup.Current.Restoration);
+        Assert.Equal(FilterDraft.Empty, Setup.Current.Draft);
+        Assert.False(Setup.Current.IsRestoredNoticeShowing);
+        Assert.Empty(cut.FindAll("#filterRestoredNotice"));
+        Assert.Equal(string.Empty, ErrorMin(cut).GetAttribute("value"));
+        Assert.Equal(new FilterConfig(), Setup.Current.ConfigInEffectFor(TokenA));
+        _storage.Verify();
+    }
+
+    private static IElement LoadButton(IRenderedComponent<FilterSurface> cut, string name) =>
+        cut.FindAll("li.list-group-item")
+            .Single(row => row.QuerySelector("span")?.TextContent == name)
+            .QuerySelectorAll("button")
+            .Single(button => button.TextContent.Trim() == "Load");
+
     // ── Readiness (§1, halheinrich/backgammon#266) ────────────────────────
 
     // A first visit has chosen nothing: the empty selection is ready without

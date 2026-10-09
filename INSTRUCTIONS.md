@@ -197,8 +197,10 @@ has answered. Because a write's completion changes no draft, baseline or
 gate, a write that completes late — after a newer commit, after an edit,
 after the setup ended — cannot restore anything older. There is no stale
 callback left to reject. The restoration is the one read whose answer
-changes state, and it changes only a draft whose revision has not moved
-since the read began. It is boot-scoped rather than setup-scoped: a source
+changes state, and it changes only a draft no gesture has touched since the
+read began — an edit, a staged saved filter or Clear, counted whether or
+not it changed the value, so loading an empty saved filter over the empty
+defaults supersedes the restore too. It is boot-scoped rather than setup-scoped: a source
 change while it is pending neither strands it nor lets it overwrite a newer
 draft, and its outcome is still recorded.
 
@@ -1427,8 +1429,12 @@ are producer-side, so neither widens what consumers can see.
   write returns — is the v1.12.1 defect (halheinrich/backgammon#373): the
   completion can arrive after a newer commit, an edit, or the end of the
   setup, and would put an older state back. The restoration is the one
-  read whose answer changes state, and it is guarded by the draft's
-  revision; a new async read that changes state needs the same guard.
+  read whose answer changes state, and it is guarded by the count of
+  gestures on the draft; a new async read that changes state needs the
+  same guard. Count gestures, never value changes: a gesture that leaves
+  the value where it was (an empty saved filter over the empty defaults)
+  is still the user's choice, and a value-change guard lets the late read
+  overwrite it. Publication is the separate, change-only question.
 - **What is in effect is derived from equality, never latched.** The Apply
   gate and the host's gate are one snapshot's reading of the draft against
   the baseline (and of the ready empty selection). Don't add a dirty flag

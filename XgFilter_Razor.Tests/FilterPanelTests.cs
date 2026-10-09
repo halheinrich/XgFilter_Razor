@@ -1894,7 +1894,7 @@ public class FilterPanelTests : BunitContext
         plan.Verify();
     }
 
-    // The interleaving the owner's draft revision exists for: the boot's
+    // The interleaving the owner's gesture count exists for: the boot's
     // restoration is held at its read when a saved filter is staged. Released
     // afterwards with a different stored selection, the restoration must
     // record its outcome and yield the draft — the staged values survive.

@@ -87,8 +87,11 @@ public class FilterSetupTests : BunitContext
         _storage.Verify();
     }
 
-    // Only real changes: the same source reported again, and an edit that
-    // leaves the draft as it was, publish nothing.
+    // Only real changes: the same source reported again, and an edit or a
+    // staged saved filter that leaves the draft as it was, publish nothing —
+    // though such a gesture still supersedes a pending restoration
+    // (LoadingAnEmptySavedFilter_DuringAPendingRestore_SupersedesIt): the
+    // two are separate questions.
     [Fact]
     public async Task NothingIsPublished_WhenNothingChanged()
     {
@@ -100,6 +103,7 @@ public class FilterSetupTests : BunitContext
 
         Setup.ReportSource(TokenA);
         Setup.Edit(d => d with { ErrorMinText = "0.1" });
+        Setup.Stage(new FilterConfig { ErrorMin = 0.1 });
 
         Assert.Equal(0, published);
         _storage.Verify();
