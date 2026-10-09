@@ -130,7 +130,9 @@
            corrected; a wrong value that was not typed here — restored, staged
            from a saved filter, or still on screen when this panel mounts —
            shows at once. So typing never makes a message appear under the
-           box, which is what kept moving the layout beneath the caret.
+           box, which is what kept moving the layout beneath the caret; and a
+           corrected message's box stays where it was, saying nothing, so a
+           correction does not move it either (_heldLines).
            shownFields is that second fact: the wrong fields this panel has
            revealed (ShownFields).
 
@@ -198,14 +200,23 @@
                        @oninput="e => Edit(d => d with { ErrorMaxText = e.Value?.ToString() ?? string.Empty })"
                        @onblur="() => LeaveField(FilterField.ErrorMax)" />
             </div>
-            @* Rendered only while it applies, the #applyDisabledReason idiom,
+            @* Shown only while it applies, the #applyDisabledReason idiom,
                rather than left in the DOM for Bootstrap's sibling selector to
                reveal: the inputs sit one level down inside the flex row, so
                `.is-invalid ~ .invalid-feedback` cannot reach across — hence the
                explicit d-block and the @if. Since halheinrich/backgammon#270
                every feedback line on the panel renders this way, because the
                input's aria-describedby names it while it is invalid and a
-               reference to a hidden element is read out regardless.
+               reference to a hidden element is read out regardless — so the
+               id, the one thing that reference names, exists exactly while
+               the line is shown.
+               Once shown, the line's box stays where it is
+               (halheinrich/backgammon#272): corrected, the message and its
+               announcement go at once, but the box keeps its place and size,
+               saying nothing, so the layout below does not move while the
+               user types. FeedbackLineAttributes renders the two states and
+               _heldLines says how long the second lasts — here, the always-
+               visible error range, until the panel unmounts.
                One line for both violations, because the
                user fixes them at the same two boxes: "a number, zero or
                greater" is also the true verdict on text that is not a number
@@ -215,10 +226,9 @@
                joined it in halheinrich/backgammon#121), and a line that fired
                on any membership would explain the error bounds over a fault
                the user committed three sections down. *@
-            @if (shownFields.Contains(FilterField.ErrorMin)
-                 || shownFields.Contains(FilterField.ErrorMax))
+            @if (IsLineRendered(shownFields, FilterFacet.ErrorRange))
             {
-                <div id="errorRangeFeedback" class="invalid-feedback d-block">
+                <div @attributes="@(FeedbackLineAttributes(IsLineShown(shownFields, FilterFacet.ErrorRange), "errorRangeFeedback"))">
                     Each bound must be a number, zero or greater, and Min can't be
                     above Max — fix it to apply, or clear a bound for no limit on
                     that side.
@@ -473,17 +483,23 @@
                         </div>
                         @* Same d-block + @if as the error-range line and for the same
                            reason — the input is a sibling here, but rendering the verdict
-                           only while it applies keeps one idiom for the panel's feedback.
-                           The faults are read only inside the branch: asking them costs a
-                           parse plus a sweep of the list, and outside the branch
-                           the answer is always "none". *@
-                        @if (shownFields.Contains(FilterField.MatchScores))
+                           only while it applies keeps one idiom for the panel's feedback —
+                           and the same held box once it has shown. Its words differ by
+                           fault kind, so its space is per kind too: a kind it has shown
+                           and the list no longer has keeps its place in the line, saying
+                           nothing (_heldScoreFaults), and the kinds still true stay where
+                           they were. The faults are read only while the line is shown:
+                           asking them costs a parse plus a sweep of the list, and
+                           otherwise the answer is always "none". *@
+                        @if (IsLineRendered(shownFields, FilterFacet.MatchScores))
                         {
-                            var scoreFaults = MatchScoreFaults;
-                            <div id="matchScoreFeedback" class="invalid-feedback d-block">
-                                @if (scoreFaults.Contains(MatchScoreTokenFault.Malformed))
+                            var scoresShown = IsLineShown(shownFields, FilterFacet.MatchScores);
+                            var scoreFaults = scoresShown ? MatchScoreFaults : NoScoreFaults;
+                            <div @attributes="@(FeedbackLineAttributes(scoresShown, "matchScoreFeedback"))">
+                                @if (scoreFaults.Contains(MatchScoreTokenFault.Malformed)
+                                     || _heldScoreFaults.Contains(MatchScoreTokenFault.Malformed))
                                 {
-                                    <span>
+                                    <span @attributes="@(FeedbackPartAttributes(scoreFaults.Contains(MatchScoreTokenFault.Malformed)))">
                                         Not a valid score — write MaNa like 4a5a, add C for a
                                         Crawford game, or use @MatchScoreToken.DoubleMatchPoint,
                                         @MatchScoreToken.MoneyWithJacoby or
@@ -491,9 +507,10 @@
                                         clear it for no score filter.
                                     </span>
                                 }
-                                @if (scoreFaults.Contains(MatchScoreTokenFault.Retired))
+                                @if (scoreFaults.Contains(MatchScoreTokenFault.Retired)
+                                     || _heldScoreFaults.Contains(MatchScoreTokenFault.Retired))
                                 {
-                                    <span>
+                                    <span @attributes="@(FeedbackPartAttributes(scoreFaults.Contains(MatchScoreTokenFault.Retired)))">
                                         The @MatchScoreToken.RetiredMoney token is retired — a
                                         session now names the Jacoby rule it was played under: use
                                         @(string.Join(" or ", MatchScoreToken.RetiredMoneyReplacements)),
@@ -543,8 +560,10 @@
                         @* #errorRangeFeedback's shape, for the same reasons: the
                            explicit @if and d-block because the inputs sit one level
                            down inside the flex row and Bootstrap's sibling selector
-                           cannot reach across, and one line for both violations
-                           because the user fixes either at the same two boxes.
+                           cannot reach across, one line for both violations
+                           because the user fixes either at the same two boxes, and
+                           the same held box once shown — given up when this row,
+                           or the container over it, closes.
                            Keyed to this facet's own two fields, never to "the lib
                            named something" — the invalid set spans facets, and a
                            line that fired on any membership would explain the move
@@ -558,10 +577,9 @@
                            "(inclusive; blank = no bound)" above, "zero or greater"
                            down here — so a reader who learns one facet's boxes
                            knows where to look for the other's. *@
-                        @if (shownFields.Contains(FilterField.MoveNumberMin)
-                             || shownFields.Contains(FilterField.MoveNumberMax))
+                        @if (IsLineRendered(shownFields, FilterFacet.MoveNumberRange))
                         {
-                            <div id="moveNumberFeedback" class="invalid-feedback d-block">
+                            <div @attributes="@(FeedbackLineAttributes(IsLineShown(shownFields, FilterFacet.MoveNumberRange), "moveNumberFeedback"))">
                                 Each bound must be a whole number, one or greater, and
                                 Min can't be above Max — fix it to apply, or clear a
                                 bound for no limit on that side.
@@ -774,15 +792,17 @@
                             most n: [1-6,-1,] = at most one.
                             E.g. [6,2,] [5,,-2] [25,1,] [@CheckerLocation.OpponentOff,,-2] [@CheckerLocation.PlayerOff,10,] [7-12,3,] [13-18,,-2] [19-24,0,0].
                         </div>
-                        @* The panel's one feedback idiom — rendered only while it
+                        @* The panel's one feedback idiom — shown only while it
                            applies, d-block, keyed to this facet's own field — so the
-                           line exists exactly when the input's aria-describedby names
-                           it. It used to sit in the DOM for Bootstrap's sibling
+                           line's id exists exactly when the input's aria-describedby
+                           names it. It used to sit in the DOM for Bootstrap's sibling
                            selector to reveal; a described-by reference to a hidden
-                           element is read out regardless, which is why it moved. *@
-                        @if (shownFields.Contains(FilterField.PositionPattern))
+                           element is read out regardless, which is why it moved. Once
+                           shown, its box is held in place, saying nothing, until this
+                           row or the container closes (halheinrich/backgammon#272). *@
+                        @if (IsLineRendered(shownFields, FilterFacet.PositionPattern))
                         {
-                            <div id="positionPatternFeedback" class="invalid-feedback d-block">
+                            <div @attributes="@(FeedbackLineAttributes(IsLineShown(shownFields, FilterFacet.PositionPattern), "positionPatternFeedback"))">
                                 Not a valid pattern — check each entry against the rules above; fix it to apply, or clear it for no pattern filter.
                             </div>
                         }
@@ -889,6 +909,10 @@
                 _revealed = [.. snapshot.InvalidFields];
             }
         }
+
+        // What is shown now holds its space from here on; a correction that
+        // took a message away keeps the box it was in (see _heldLines).
+        HoldShownLines();
 
         if (previous is not null)
         {
@@ -1114,6 +1138,7 @@
         if (bool.TryParse(read.Value, out var open))
         {
             _moreFiltersExpanded = open;
+            HoldShownLines();
             StateHasChanged();
         }
     }
@@ -1134,6 +1159,7 @@
         if (TryParseExpandedFacets(read.Value, out var restored))
         {
             _expandedFacets = restored;
+            HoldShownLines();
             StateHasChanged();
         }
     }
@@ -1213,10 +1239,21 @@
     // remembered immediately under its own key, independent of Apply. A
     // refused write keeps the row as the user left it for this mount; the
     // seam has told the host.
+    // Closing a row gives up its feedback line's held space; opening one
+    // holds a line it shows at once (see _heldLines).
     private async Task ToggleFacetAsync(FilterFacet facet)
     {
         _disclosureTouched = true;
-        if (!_expandedFacets.Remove(facet)) _expandedFacets.Add(facet);
+        if (_expandedFacets.Remove(facet))
+        {
+            ReleaseLine(facet);
+        }
+        else
+        {
+            _expandedFacets.Add(facet);
+            HoldShownLines();
+        }
+
         await Storage.WriteAsync(FilterStorage.DisclosureKey, SerializeOpenRows(_expandedFacets));
     }
 
@@ -1224,10 +1261,25 @@
     // shape and for the same reasons: not an edit gesture, so the owner hears
     // nothing and the selection is not written, and the choice is remembered
     // immediately under its own key rather than at Apply.
+    // Folding the container folds every row inside it away, so their lines
+    // give up their held space; unfolding holds what they show at once. The
+    // error range is outside the container and keeps its own.
     private async Task ToggleMoreFiltersAsync()
     {
         _moreFiltersTouched = true;
         _moreFiltersExpanded = !_moreFiltersExpanded;
+        if (_moreFiltersExpanded)
+        {
+            HoldShownLines();
+        }
+        else
+        {
+            foreach (var line in FeedbackLines.Where(line => line != FilterFacet.ErrorRange))
+            {
+                ReleaseLine(line);
+            }
+        }
+
         await Storage.WriteAsync(FilterStorage.MoreFiltersKey, SerializeFold(_moreFiltersExpanded));
     }
 
@@ -1327,22 +1379,150 @@
     // misordered pair blames both — and nothing elsewhere.
     private void LeaveField(FilterField field)
     {
-        foreach (var member in FeedbackGroup(field))
+        foreach (var member in FieldsOf(LineOf(field)))
         {
             if (_snapshot.InvalidFields.Contains(member))
             {
                 _revealed.Add(member);
             }
         }
+
+        HoldShownLines();
     }
 
-    // The fields one feedback line speaks for.
-    private static FilterField[] FeedbackGroup(FilterField field) => field switch
+    // ── Feedback lines and the space they hold ───────────────────────────────
+    //
+    // The panel's four feedback lines, each named by the facet it speaks for:
+    // the error range's and the move numbers' (one line per pair of bounds),
+    // the match scores' and the position pattern's.
+    private static readonly FilterFacet[] FeedbackLines =
+    [
+        FilterFacet.ErrorRange,
+        FilterFacet.MatchScores,
+        FilterFacet.MoveNumberRange,
+        FilterFacet.PositionPattern,
+    ];
+
+    // The line a field's message is on.
+    private static FilterFacet LineOf(FilterField field) => field switch
     {
-        FilterField.ErrorMin or FilterField.ErrorMax => [FilterField.ErrorMin, FilterField.ErrorMax],
-        FilterField.MoveNumberMin or FilterField.MoveNumberMax => [FilterField.MoveNumberMin, FilterField.MoveNumberMax],
-        _ => [field],
+        FilterField.ErrorMin or FilterField.ErrorMax => FilterFacet.ErrorRange,
+        FilterField.MoveNumberMin or FilterField.MoveNumberMax => FilterFacet.MoveNumberRange,
+        FilterField.MatchScores => FilterFacet.MatchScores,
+        FilterField.PositionPattern => FilterFacet.PositionPattern,
+        _ => throw new ArgumentOutOfRangeException(nameof(field), field, "Not a field this panel words a verdict for."),
     };
+
+    // The fields one feedback line speaks for.
+    private static FilterField[] FieldsOf(FilterFacet line) => line switch
+    {
+        FilterFacet.ErrorRange => [FilterField.ErrorMin, FilterField.ErrorMax],
+        FilterFacet.MoveNumberRange => [FilterField.MoveNumberMin, FilterField.MoveNumberMax],
+        FilterFacet.MatchScores => [FilterField.MatchScores],
+        FilterFacet.PositionPattern => [FilterField.PositionPattern],
+        _ => throw new ArgumentOutOfRangeException(nameof(line), line, "Not a facet with a feedback line."),
+    };
+
+    // Whether a line's message is shown: any field it speaks for is.
+    private static bool IsLineShown(IReadOnlySet<FilterField> shownFields, FilterFacet line) =>
+        FieldsOf(line).Any(shownFields.Contains);
+
+    // Whether a line's group is on screen: the error range always is; a row's
+    // only while the More filters container and the row are both open — the
+    // markup's own condition for rendering the row's body.
+    private bool IsGroupVisible(FilterFacet line) =>
+        line == FilterFacet.ErrorRange || (_moreFiltersExpanded && _expandedFacets.Contains(line));
+
+    // The lines whose space is held (halheinrich/backgammon#272; Hal's ruling
+    // of 2026-10-08). A line, once shown on screen, keeps its space while its
+    // group is visible. A corrected message clears at once, and so does its
+    // announcement, but the box keeps its place and size, so nothing below it
+    // moves while the user types. The space goes only when the group folds
+    // away — its row closes, or the More filters container over it does — or
+    // when this panel unmounts. For the always-visible error range, that is
+    // unmount. Leaving a box, Apply, Clear, a staged saved filter and a restore
+    // never release it: a blur can move the clicked button between press and
+    // release, and a restore can finish while the user is typing.
+    //
+    // Recorded at the state changes that can show a line (HoldShownLines),
+    // not after a render: under a server host, OnAfterRender waits for the
+    // browser's acknowledgement, and a keystroke handled in between would
+    // find a line shown but not yet held.
+    private readonly HashSet<FilterFacet> _heldLines = [];
+
+    // The match-score fault kinds its line has shown since its space was
+    // held. Its words differ by kind, so its space is the space of those
+    // words: a kind the list no longer has keeps its place, saying nothing.
+    private readonly HashSet<MatchScoreTokenFault> _heldScoreFaults = [];
+
+    // Hold every line now shown in a visible group. Called wherever what is
+    // shown or what is visible can grow: a snapshot, a reveal, a group opened
+    // by the user or by a restored preference.
+    private void HoldShownLines()
+    {
+        var shownFields = ShownFields;
+        foreach (var line in FeedbackLines)
+        {
+            if (!IsGroupVisible(line) || !IsLineShown(shownFields, line)) continue;
+
+            _heldLines.Add(line);
+            if (line == FilterFacet.MatchScores)
+            {
+                _heldScoreFaults.UnionWith(MatchScoreFaults);
+            }
+        }
+    }
+
+    // A group folded away: its line gives its space up.
+    private void ReleaseLine(FilterFacet line)
+    {
+        _heldLines.Remove(line);
+        if (line == FilterFacet.MatchScores)
+        {
+            _heldScoreFaults.Clear();
+        }
+    }
+
+    // Whether a line renders at all: shown, or holding its space.
+    private bool IsLineRendered(IReadOnlySet<FilterField> shownFields, FilterFacet line) =>
+        IsLineShown(shownFields, line) || _heldLines.Contains(line);
+
+    /// <summary>
+    /// The attribute a held feedback line carries in place of its id, naming
+    /// the line whose space it holds — the test suite's handle on a box that
+    /// says nothing.
+    /// </summary>
+    internal const string HeldLineAttribute = "data-held-for";
+
+    // A feedback line's box. Shown, it carries the id its inputs'
+    // aria-describedby names, so it is announced. Held, it is the same box in
+    // the same place at the same size, saying nothing: no id, so nothing
+    // names it; invisible and aria-hidden; marked with the line it holds.
+    private static IReadOnlyDictionary<string, object> FeedbackLineAttributes(bool shown, string id) => shown
+        ? new Dictionary<string, object>(StringComparer.Ordinal)
+        {
+            ["id"] = id,
+            ["class"] = "invalid-feedback d-block",
+        }
+        : new Dictionary<string, object>(StringComparer.Ordinal)
+        {
+            ["class"] = "invalid-feedback d-block invisible",
+            ["aria-hidden"] = "true",
+            [HeldLineAttribute] = id,
+        };
+
+    // A part of a shown line that is not true now — a match-score fault kind
+    // the line has shown and the list no longer has — keeps its place, saying
+    // nothing; a part that is true carries nothing extra.
+    private static IReadOnlyDictionary<string, object> FeedbackPartAttributes(bool shown) => shown
+        ? new Dictionary<string, object>(StringComparer.Ordinal)
+        : new Dictionary<string, object>(StringComparer.Ordinal)
+        {
+            ["class"] = "invisible",
+            ["aria-hidden"] = "true",
+        };
+
+    private static readonly IReadOnlySet<MatchScoreTokenFault> NoScoreFaults = new HashSet<MatchScoreTokenFault>();
 
     // What the boxes show: the verdict, as far as it is revealed. The verdict
     // is the snapshot's — the lib's on the bounds, the score tokens and the

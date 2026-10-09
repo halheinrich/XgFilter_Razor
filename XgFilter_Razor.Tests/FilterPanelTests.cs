@@ -243,8 +243,11 @@ public class FilterPanelTests : BunitContext
     // incidental markup whitespace collapsed. A list, not a string: the panel
     // words a malformed token and a retired one differently, and how many
     // voices spoke is as much a part of the assertion as what they said.
+    // The verdicts the shown line speaks: its parts that are true now, not
+    // the ones holding the place of a kind it has shown and the list no
+    // longer has (halheinrich/backgammon#272).
     private static string[] MatchScoreVerdicts(IRenderedComponent<FilterPanel> cut) =>
-        cut.FindAll("#matchScoreFeedback span")
+        cut.FindAll("#matchScoreFeedback span:not(.invisible)")
            .Select(e => Regex.Replace(e.TextContent.Trim(), @"\s+", " "))
            .ToArray();
 
@@ -2581,22 +2584,301 @@ public class FilterPanelTests : BunitContext
     }
 
     // A shown error clears the moment the value is right — no need to leave
-    // the box first.
+    // the box first: the mark, aria-invalid and the description's reference
+    // to the message all go, and no element carries the message's id. The
+    // message's box stays where it was, with the same words, saying nothing —
+    // invisible, aria-hidden, named by nothing — so nothing below it moves
+    // while the user types (halheinrich/backgammon#272, Hal's ruling of
+    // 2026-10-08).
     [Theory]
     [MemberData(nameof(Boxes))]
-    public void AShownError_ClearsAsSoonAsCorrected_WithoutLeavingTheBox(
+    public void AShownError_ClearsAsSoonAsCorrected_AndItsBoxStays(
         FilterFacet? facet, string selector, string invalid, string valid)
     {
         var cut = facet is { } row ? RenderExpanded(row) : Render<FilterPanel>();
         cut.Find(selector).Input(invalid);
         cut.Find(selector).Blur();
-        Assert.Contains("is-invalid", cut.Find(selector).GetAttribute("class"));
+        var shown = Assert.Single(cut.FindAll(".invalid-feedback"));
+        var id = shown.GetAttribute("id");
+        var words = Words(shown);
+        var place = PlaceOf(shown);
 
         cut.Find(selector).Input(valid);
 
+        var corrected = cut.Find(selector);
+        Assert.DoesNotContain("is-invalid", corrected.GetAttribute("class"));
+        Assert.False(corrected.HasAttribute("aria-invalid"));
+        Assert.DoesNotContain(DescribedBy(cut, corrected), e => e.ClassList.Contains("invalid-feedback"));
+        Assert.Empty(cut.FindAll($"#{id}"));
+        var held = Assert.Single(cut.FindAll(".invalid-feedback"));
+        Assert.Equal(id, held.GetAttribute(FilterPanel.HeldLineAttribute));
+        Assert.False(held.HasAttribute("id"));
+        Assert.Contains("invisible", held.ClassList);
+        Assert.Equal("true", held.GetAttribute("aria-hidden"));
+        Assert.Equal(words, Words(held));
+        Assert.Equal(place, PlaceOf(held));
+    }
+
+    // The sequence the host's browser check runs (the review's fourth
+    // correction): wrong, left, returned to, corrected, wrong again, left.
+    // From the first leave on, the message's box is in one place in every
+    // state — shown, held while the correction and then the fresh error are
+    // typed (a fresh error still waits for the leave), and shown again on
+    // leaving — so nothing is inserted above what follows it, or removed.
+    [Theory]
+    [MemberData(nameof(Boxes))]
+    public void WrongLeftCorrectedWrongAgainLeft_KeepsTheMessagesBoxInOnePlace(
+        FilterFacet? facet, string selector, string invalid, string valid)
+    {
+        var cut = facet is { } row ? RenderExpanded(row) : Render<FilterPanel>();
+        cut.Find(selector).Input(invalid);
+        cut.Find(selector).Blur();
+        var shown = Assert.Single(cut.FindAll(".invalid-feedback"));
+        var id = shown.GetAttribute("id");
+        var place = PlaceOf(shown);
+
+        // Returning to the box has no handler of its own to fire — the panel
+        // keys nothing on focus — so the return is the typing that follows.
+        cut.Find(selector).Input(valid);
+        Assert.Equal(place, PlaceOf(cut.Find($"[{FilterPanel.HeldLineAttribute}='{id}']")));
+
+        cut.Find(selector).Input(invalid);
         Assert.DoesNotContain("is-invalid", cut.Find(selector).GetAttribute("class"));
-        Assert.False(cut.Find(selector).HasAttribute("aria-invalid"));
-        Assert.Empty(cut.FindAll(".invalid-feedback"));
+        Assert.Equal(place, PlaceOf(cut.Find($"[{FilterPanel.HeldLineAttribute}='{id}']")));
+
+        cut.Find(selector).Blur();
+        Assert.Equal(place, PlaceOf(cut.Find($"#{id}")));
+        Assert.Contains("is-invalid", cut.Find(selector).GetAttribute("class"));
+        Assert.Single(cut.FindAll(".invalid-feedback"));
+    }
+
+    // Once held, a box stays through every gesture that is not a fold:
+    // leaving the box, Apply, Clear filters, a staged saved filter. Each can
+    // land between a press and its release, or while the user is typing.
+    [Fact]
+    public async Task AHeldBox_StaysThroughLeavingApplyClearAndAStagedFilter()
+    {
+        var cut = Render<FilterPanel>();
+        ErrorMin(cut).Input("-1");
+        ErrorMin(cut).Blur();
+        ErrorMin(cut).Input("0.1");
+        var held = $"[{FilterPanel.HeldLineAttribute}='errorRangeFeedback']";
+
+        ErrorMin(cut).Blur();
+        Assert.NotNull(cut.Find(held));
+
+        await Apply(cut).ClickAsync(new());
+        Assert.NotNull(cut.Find(held));
+
+        await cut.Find("#clearFilters").ClickAsync(new());
+        Assert.NotNull(cut.Find(held));
+
+        await cut.InvokeAsync(() => Setup.Stage(new FilterConfig { ErrorMin = 0.2 }));
+        Assert.NotNull(cut.Find(held));
+        Assert.Empty(cut.FindAll("#errorRangeFeedback"));
+    }
+
+    // A restore finishing is not a fold either: the restoration's settling,
+    // released after a correction, leaves the held box where it is.
+    [Fact]
+    public async Task AHeldBox_StaysWhenARestoreFinishes()
+    {
+        var plan = Planned();
+        var restore = plan.ExpectHeldFilterRestore();
+        plan.ExpectFilterPanelMount();
+        var cut = Render<FilterPanel>();
+        ErrorMin(cut).Input("-1");
+        ErrorMin(cut).Blur();
+        ErrorMin(cut).Input("0.1");
+
+        restore.Release(FilterSurfaceStorage.RestoreAnswer(new FilterConfig { ErrorMin = 0.3 }));
+        await Setup.RestoreAsync().WaitAsync(DefaultWaitTimeout);
+        await cut.Instance.MountRestored.WaitAsync(DefaultWaitTimeout);
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            nameof(FilterRestoration.Restored), cut.Find($"[{FilterPanel.RestorationAttribute}]").GetAttribute(FilterPanel.RestorationAttribute)));
+        Assert.NotNull(cut.Find($"[{FilterPanel.HeldLineAttribute}='errorRangeFeedback']"));
+        Assert.Equal("0.1", ErrorMin(cut).GetAttribute("value"));
+        plan.Verify();
+    }
+
+    // A held box gives its space up only when its group folds away: its row
+    // closing, or the More filters container over the row. The error range
+    // sits outside the container, so folding the container leaves its box.
+    [Fact]
+    public void AHeldBox_GoesWhenItsRowCloses_OrTheContainerCloses_AndNotOtherwise()
+    {
+        var cut = RenderExpanded(FilterFacet.MoveNumberRange);
+        var heldMoveNumbers = $"[{FilterPanel.HeldLineAttribute}='moveNumberFeedback']";
+        var heldErrorRange = $"[{FilterPanel.HeldLineAttribute}='errorRangeFeedback']";
+        ErrorMin(cut).Input("-1");
+        ErrorMin(cut).Blur();
+        ErrorMin(cut).Input("0.1");
+        MoveNumberMin(cut).Input("0");
+        MoveNumberMin(cut).Blur();
+        MoveNumberMin(cut).Input("3");
+        Assert.NotNull(cut.Find(heldMoveNumbers));
+
+        cut.Find("#facetToggle_MoveNumberRange").Click();
+        cut.WaitForAssertion(() => Assert.Equal("false", cut.Find("#facetToggle_MoveNumberRange").GetAttribute("aria-expanded")));
+        cut.Find("#facetToggle_MoveNumberRange").Click();
+        cut.WaitForAssertion(() => Assert.Equal("true", cut.Find("#facetToggle_MoveNumberRange").GetAttribute("aria-expanded")));
+
+        Assert.Empty(cut.FindAll(heldMoveNumbers));
+
+        MoveNumberMin(cut).Input("0");
+        MoveNumberMin(cut).Blur();
+        MoveNumberMin(cut).Input("3");
+        Assert.NotNull(cut.Find(heldMoveNumbers));
+
+        FoldMoreFilters(cut);
+        OpenMoreFilters(cut);
+
+        Assert.Empty(cut.FindAll(heldMoveNumbers));
+        Assert.NotNull(cut.Find(heldErrorRange));
+    }
+
+    // A line can first reach the screen by its group opening rather than by a
+    // keystroke or a leave: a wrong value that arrived while the row was
+    // closed shows when the row opens, and holds its space from then — by the
+    // row's own toggle, by the container's over an open row, or by the
+    // panel's restored preferences at mount. Corrected afterwards, its box
+    // stays, as any shown line's does.
+    [Fact]
+    public async Task ALineFirstShownByOpeningItsRow_HoldsItsSpace()
+    {
+        var cut = Render<FilterPanel>();
+        await cut.InvokeAsync(() => Setup.Stage(new FilterConfig { MoveNumberMin = 0 }));
+
+        ExpandFacets(cut, FilterFacet.MoveNumberRange);
+        cut.WaitForAssertion(() => Assert.NotNull(cut.Find("#moveNumberFeedback")));
+        MoveNumberMin(cut).Input("3");
+
+        Assert.NotNull(cut.Find($"[{FilterPanel.HeldLineAttribute}='moveNumberFeedback']"));
+    }
+
+    [Fact]
+    public async Task ALineFirstShownByOpeningTheContainer_HoldsItsSpace()
+    {
+        var cut = RenderExpanded(FilterFacet.MoveNumberRange);
+        FoldMoreFilters(cut);
+        await cut.InvokeAsync(() => Setup.Stage(new FilterConfig { MoveNumberMin = 0 }));
+
+        OpenMoreFilters(cut);
+        cut.WaitForAssertion(() => Assert.NotNull(cut.Find("#moveNumberFeedback")));
+        MoveNumberMin(cut).Input("3");
+
+        Assert.NotNull(cut.Find($"[{FilterPanel.HeldLineAttribute}='moveNumberFeedback']"));
+    }
+
+    [Fact]
+    public async Task ALineFirstShownByARestoredOpenRow_HoldsItsSpace()
+    {
+        Setup.Stage(new FilterConfig { MoveNumberMin = 0 });
+        var (cut, plan) = RenderWithPreferences(
+            BrowserStorageReadAnswer.Stored(FilterPanel.SerializeFold(true)),
+            BrowserStorageReadAnswer.Stored(FilterPanel.SerializeOpenRows([FilterFacet.MoveNumberRange])));
+        await cut.Instance.MountRestored.WaitAsync(DefaultWaitTimeout);
+        cut.WaitForAssertion(() => Assert.NotNull(cut.Find("#moveNumberFeedback")));
+
+        MoveNumberMin(cut).Input("3");
+
+        Assert.NotNull(cut.Find($"[{FilterPanel.HeldLineAttribute}='moveNumberFeedback']"));
+        plan.Verify();
+    }
+
+    // A wrong value that arrives while its group is on screen — a staged
+    // saved filter, or a draft a remount finds — is shown at once, so it
+    // holds its space at once: corrected without the box ever being left, its
+    // box stays.
+    [Fact]
+    public async Task AnArrivingWrongValue_HoldsItsSpaceAtOnce()
+    {
+        var cut = Render<FilterPanel>();
+        await cut.InvokeAsync(() => Setup.Stage(new FilterConfig { ErrorMin = -1 }));
+        Assert.NotNull(cut.Find("#errorRangeFeedback"));
+
+        ErrorMin(cut).Input("0.1");
+
+        Assert.NotNull(cut.Find($"[{FilterPanel.HeldLineAttribute}='errorRangeFeedback']"));
+    }
+
+    [Fact]
+    public async Task AWrongValueARemountFinds_HoldsItsSpaceAtOnce()
+    {
+        var first = Render<FilterPanel>();
+        ErrorMin(first).Input("-1");
+        await DisposeComponentsAsync();
+
+        var cut = Render<FilterPanel>();
+        Assert.NotNull(cut.Find("#errorRangeFeedback"));
+        ErrorMin(cut).Input("0.1");
+
+        Assert.NotNull(cut.Find($"[{FilterPanel.HeldLineAttribute}='errorRangeFeedback']"));
+    }
+
+    // Held space is this mount's: the panel's next mount starts with none,
+    // since nothing it shows has been on screen in it yet.
+    [Fact]
+    public async Task AHeldBox_GoesWhenThePanelUnmounts()
+    {
+        var cut = Render<FilterPanel>();
+        ErrorMin(cut).Input("-1");
+        ErrorMin(cut).Blur();
+        ErrorMin(cut).Input("0.1");
+        Assert.NotNull(cut.Find($"[{FilterPanel.HeldLineAttribute}='errorRangeFeedback']"));
+
+        await DisposeComponentsAsync();
+        var again = Render<FilterPanel>();
+
+        Assert.Empty(again.FindAll(".invalid-feedback"));
+    }
+
+    // The match-score line's words differ by fault kind, so its space is per
+    // kind: shown with both kinds, then rid of the retired token while typing,
+    // the retired part keeps its place, saying nothing, and only the part
+    // still true is spoken — in the place it already had.
+    [Fact]
+    public void AMatchScoreKindCorrectedWhileTyping_KeepsItsPlaceInTheLine()
+    {
+        var cut = RenderExpanded(FilterFacet.MatchScores);
+        MatchScores(cut).Input($"not-a-score, {MatchScoreToken.RetiredMoney}");
+        MatchScores(cut).Blur();
+        var both = MatchScoreVerdicts(cut);
+        Assert.Equal(2, both.Length);
+
+        MatchScores(cut).Input("not-a-score");
+
+        Assert.Equal([both[0]], MatchScoreVerdicts(cut));
+        var parts = cut.FindAll("#matchScoreFeedback span");
+        Assert.Equal(2, parts.Count);
+        Assert.DoesNotContain("invisible", parts[0].ClassList);
+        Assert.Contains("invisible", parts[1].ClassList);
+        Assert.Equal("true", parts[1].GetAttribute("aria-hidden"));
+    }
+
+    // A feedback line's words, whitespace folded — what its box's size is made of.
+    private static string Words(IElement line) => Regex.Replace(line.TextContent.Trim(), @"\s+", " ");
+
+    // Where an element sits in the panel: the index of it and of each
+    // ancestor among its siblings, up to the panel's root. Equal places mean
+    // nothing was inserted before it, or removed, at any level.
+    private static string PlaceOf(IElement element)
+    {
+        var steps = new List<int>();
+        for (IElement? node = element; node?.ParentElement is not null; node = node.ParentElement)
+        {
+            var before = 0;
+            for (var sibling = node.PreviousElementSibling; sibling is not null; sibling = sibling.PreviousElementSibling)
+            {
+                before++;
+            }
+
+            steps.Add(before);
+        }
+
+        steps.Reverse();
+        return string.Join("/", steps);
     }
 
     // Corrected and then made wrong again, it is a newly typed error again,

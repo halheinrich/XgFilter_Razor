@@ -465,13 +465,15 @@ negative Max never reds a Min the user got right, while a misordered pair
 blames both and leaves the user to pick an end. The message is the panel's
 alone — the lib returns no strings by design — and covers both violations
 in one line, worded to stay true for text that is not a number yet
-(unfinished input, or a word such as `NaN`). Rendered only while it
+(unfinished input, or a word such as `NaN`). Shown only while it
 applies (the `#applyDisabledReason` idiom) rather than left in the DOM for
 Bootstrap's sibling selector, which cannot reach the inputs one level down
 inside the flex row — and since `halheinrich/backgammon#270` every
 feedback line on the panel renders that way, the pattern's included,
 because a described-by reference to a hidden element is read out
-regardless. A stored selection whose bound a rule outlaws still
+regardless; so a line's id, the one thing that reference names, exists
+exactly while the line is shown. Once shown, its box keeps its place
+(below). A stored selection whose bound a rule outlaws still
 loads, shows its values, marks the offender, and is refused a commit —
 never silently repaired, never dropped (the lib's documented posture,
 pinned).
@@ -491,18 +493,45 @@ share one line, and a misordered pair blames both. A draft change this
 panel's own typing made keeps only the reveals still true (`Edit` marks the
 panel's gestures, since the owner publishes inside the call). Any other
 draft change shows every wrong value at once. So typing never makes a
-message appear under the box. A message still leaves at the keystroke that
-corrects it, as ruled. Whether typing keeps the browser's focus and caret,
-and whether the layout holds still, is a real-browser check, carried into
-the BgQuiz_Blazor leg; bUnit cannot establish it.
+message appear under the box.
+
+**A shown message's box keeps its place** (`halheinrich/backgammon#272`,
+Hal's ruling of 2026-10-08). A message leaves at the keystroke that
+corrects it, and so does its announcement: the mark, `aria-invalid` and
+the description's reference go, and no element carries the line's id. Its
+box stays where it was, with the same words at the same size, saying
+nothing — `invisible`, `aria-hidden`, and marked
+`data-held-for="<the line's id>"` (`FilterPanel.HeldLineAttribute`) — so
+the layout below does not move while the user types. A fresh error typed
+into the box still waits for the leave, then shows in the same box. The
+space is the panel's, per mount (`_heldLines`). It is held from the moment
+a line is shown in a visible group, and kept through leaving a box, Apply,
+Clear, a staged saved filter and a restore: a blur can move the clicked
+button between press and release, and a restore can finish while the user
+is typing. It is released only when the group folds away (its row closes,
+or the More filters container over it) or the panel unmounts; the error
+range sits outside the container, so its space lasts until unmount. The
+match-score line's words differ by fault kind, so its space is per kind: a
+kind it has shown and the list no longer has keeps its place in the line,
+saying nothing (`_heldScoreFaults`). The hold is recorded at the state
+changes that can show a line (`HoldShownLines`: a snapshot, a reveal, a
+group opened by the user or by a restored preference), not after a
+render: under a server host `OnAfterRender` waits for the browser's
+acknowledgement, and a keystroke handled in between would find a line
+shown but not yet held. bUnit pins the structure — one box, in one place,
+through the ruled sequence. Whether the pixels hold still, and whether
+typing keeps the browser's focus and caret, is a real-browser check,
+carried into the BgQuiz_Blazor leg with the sequence invalid → leave →
+return → correct → invalid again; bUnit cannot establish it.
 
 **How an input wears the verdict is rendered from one place**
 (`halheinrich/backgammon#270`). The `is-invalid` class is a colour, and a
 screen reader hears nothing of it; so an invalid input also carries
 `aria-invalid="true"` and an `aria-describedby` that names, beside the hint
-it always names, the feedback line that says why — rendered exactly while
-the field is invalid, so the reference never names an element that is not
-there — and a valid input carries neither mark and keeps its hint. The
+it always names, the feedback line that says why — whose id exists exactly
+while the field's verdict is shown, so the reference never names an
+element that is not there, or a box that is only holding its place — and
+a valid input carries neither mark and keeps its hint. The
 private `FieldAttributes` on `FilterPanel` is the one place that decides
 all of it, and every box on the panel that bears a verdict splats its result
 (class, `aria-describedby`, and `aria-invalid` when it applies) rather
@@ -1831,7 +1860,13 @@ are producer-side, so neither widens what consumers can see.
   owner's verdict, continuously — and never move it into the owner, where a
   second mount would inherit the first's half-typed state. A new
   verdict-bearing box needs its `onblur` (`LeaveField`) as well as the
-  `FieldAttributes` splat, or its error never shows.
+  `FieldAttributes` splat, or its error never shows. The space a shown line
+  holds (`_heldLines`) is per-mount presentation too, and it is released
+  only by a fold or the unmount: never release it on a blur, a commit, a
+  stage or a restore, and never record it after a render instead of at the
+  state change. A new feedback line joins `FeedbackLines`, `FieldsOf` and
+  `IsGroupVisible`, and renders its box through `FeedbackLineAttributes`,
+  or a correction removes it from under the user's caret.
 - **Refusals go to the host's sink, never through a component.** A
   refusal can complete after the component that started its call is gone,
   so a component event would lose it. The sink is resolved by
