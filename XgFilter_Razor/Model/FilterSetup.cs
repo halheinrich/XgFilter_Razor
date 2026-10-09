@@ -243,13 +243,13 @@ public sealed class FilterSetup
         var revisionAtStart = _draftRevision;
         var read = await _storage.ReadAsync(FilterStorage.ConfigKey);
 
-        // The three readings are told apart here and nowhere else. A refused
+        // The four outcomes are told apart here and nowhere else. A refused
         // read and a missing item are different facts (refused / nothing
         // stored), though both leave the defaults; TryFromJson cannot draw
         // that line, since it answers false for a missing item too, which is
         // why absence is asked first. A document that reads restores whole, a
-        // field a rule outlaws included (#269); one that does not read is
-        // unreadable, and is left in storage as it is.
+        // field a rule outlaws included (halheinrich/backgammon#269); one
+        // that does not read is unreadable, and is left in storage as it is.
         FilterConfig? restored = null;
         if (read.IsRefused)
         {

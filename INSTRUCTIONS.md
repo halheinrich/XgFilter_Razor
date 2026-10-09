@@ -38,14 +38,20 @@ https://github.com/halheinrich/XgFilter_Razor — branch `main`.
   canonical order — which drive the dice-roll facet's checkbox grid; the type
   owns both the set and its order, so the panel enumerates `All` and never
   builds a local roll list.
-- **BgUiPrimitives_Razor** — `Notice`, with its selectors `NoticeKind` and
-  `NoticeAnnouncement`: the one owner of alert markup across the umbrella
-  (`halheinrich/backgammon#248`, under the umbrella's `SPEC-notices.md`).
-  This member's boxes render through it, so its `.razor` files name what
-  each box *is* and the component owns what that means in classes, roles
-  and gestures. Project reference, not a package; the namespace is imported
-  once, in `_Imports.razor`. **It passes an obligation through to hosts:**
-  the component's scoped CSS reaches a host inside the host's own
+- **BgUiPrimitives_Razor** — two primitives. `Notice`, with its selectors
+  `NoticeKind` and `NoticeAnnouncement`: the one owner of alert markup
+  across the umbrella (`halheinrich/backgammon#248`, under the umbrella's
+  `SPEC-notices.md`). This member's boxes render through it, so its
+  `.razor` files name what each box *is* and the component owns what that
+  means in classes, roles and gestures. And `BrowserStorage`, the one
+  guarded browser-storage access (`halheinrich/backgammon#374`): every
+  storage call the filter surface makes goes through it, under its ruled
+  policy — every call made, refusals as results, only the browser's
+  refusal caught. Project reference, not a package; the namespace is
+  imported once, in `_Imports.razor`. The test projects also reference its
+  `BgUiPrimitives_Razor.TestSupport`, for `BrowserStoragePlan`
+  (`halheinrich/backgammon#377`). **It passes an obligation through to
+  hosts:** the component's scoped CSS reaches a host inside the host's own
   `{HostAssembly}.styles.css` bundle, also when the host references that
   library only through this one, so a host's root document must link that
   bundle. Without it a dismissible notice's text is not a click target (its
@@ -63,37 +69,51 @@ the dependency projects), governed by repo-root `Directory.Build.props`
 Three areas:
 
 - **Components** — `Components/`: `FilterSurface`, the one consumer-facing
-  filter component, owning the panel, the saved-filters pick list and the
-  interaction wiring end to end; `FilterPanel`, the filter form it owns, in
-  the `.Internal` namespace and banned from host use; `NamedEntriesPanel`,
-  the generic pick list over any `NamedCollection` document, which a host may
-  mount directly; `FilterHelp`, the producer-owned documentation of every
-  facet, the panel chrome and what the panel persists.
-- **Model** — `Model/`, the non-visual types hosts bind: `AppliedFilter`
-  (the applied-config holder, keyed to its source), `FilterSourceToken` (the
-  opaque host-minted source identity) and `FilterRestoreNotice` (the
-  restored-selection notice's state); the named-document machinery —
-  `IDocumentStorage` (the host storage seam) and `DocumentStorageException`
-  (its one failure type), `NamedDocumentStore` (the document lifecycle over
-  the seam) and `NamedDocumentStatus` (its condition), `NamedEntriesSurface`
-  (a pick-list mount's copy and element ids); and the saved-filters
-  specialization, `SavedFiltersDocument` (the canonical and legacy file
-  names and the migration rule) and `SavedFiltersStore` (identity only).
+  filter component, mounting the panel and the saved-filters pick list and
+  wiring them to the setup's owner; `FilterPanel`, the filter form it
+  mounts, a view over the owner, in the `.Internal` namespace and banned
+  from host use; `NamedEntriesPanel`, the generic pick list over any
+  `NamedCollection` document, which a host may mount directly;
+  `FilterHelp`, the producer-owned documentation of every facet, the panel
+  chrome and what the surface persists.
+- **Model** — `Model/`, the non-visual types. The filter setup:
+  `FilterSetup` (the app-scoped setup-state owner), `FilterSetupSnapshot`
+  (what consumers see of it), `FilterRestoration` (this boot's restoration
+  outcome), `FilterDraft` (the editor's state, internal),
+  `FilterSourceToken` (the opaque host-minted source identity); the
+  surface's storage — `FilterStorage` (the one seam over `BrowserStorage`,
+  internal) and `IFilterStorageRefusalSink` (the host's owner of the
+  refusal occurrence); the named-document machinery — `IDocumentStorage`
+  (the host storage seam) and `DocumentStorageException` (its one failure
+  type), `NamedDocumentStore` (the document lifecycle over the seam) and
+  `NamedDocumentStatus` (its condition), `NamedEntriesSurface` (a pick-list
+  mount's copy and element ids); and the saved-filters specialization,
+  `SavedFiltersDocument` (the canonical and legacy file names and the
+  migration rule) and `SavedFiltersStore` (identity only).
+- **Registration** — `FilterSurfaceServiceCollectionExtensions`:
+  `AddFilterSurface<TRefusalSink>()`, the one call a host makes.
 - **Serialization** — `XgFilterRazorJsonContext`: the source-generated JSON
   metadata for the one value this project serializes itself, the panel's
   expanded facet rows.
 
 **`XgFilter_Razor.Testing/`** — producer-owned test support for host suites:
-`FilterPanelTestState` seeds the browser state the panel restores from. Not
-packable.
+`FilterSurfaceStorage` states the surface's storage calls on a host test's
+`BrowserStoragePlan` in the surface's own terms, and
+`FilterRestorationMarker` gives a host's browser tests the selectors for the
+restoration marker. Not packable.
 
 **`XgFilter_Razor.Tests/`** — bUnit over xUnit: one class per component
-(the composite's as wire tests), the applied holder, the source token and
-the saved-filters store, plus the seeding seam pinned against a real render
-and the trim-posture pins. `FakeDocumentStorage`
-is the recording fake over the storage seam the store and composite tests
-share; `OpponentBoundRuling` is the one oracle the help and panel suites
-both pin the opponent-bound statement against (see Test project).
+(the composite's as wire tests), the owner's contract (`FilterSetupTests`)
+and §4's acceptance cases through the composite
+(`FilterSetupAcceptanceTests`), the storage policy under refusal, the
+restoration marker, the draft, the source token and the saved-filters
+store, plus the test-support helpers pinned against a real render and the
+trim-posture pins. `FakeDocumentStorage` is the recording fake over the
+saved-filters storage seam the store and composite tests share;
+`RecordingRefusalSink` and `RefusalNoticeHost` play a host's refusal sink
+and the page that shows it; `OpponentBoundRuling` is the one oracle the help
+and panel suites both pin the opponent-bound statement against (see Test
+project).
 
 ## Architecture
 
@@ -103,62 +123,212 @@ Parallel to `BgDiag_Razor`'s relationship with `BackgammonDiagram_Lib`:
 this subproject lets `XgFilter_Lib` stay free of any Blazor / Razor
 dependency. All filter logic, classification, the `FilterConfig` DTO,
 the `NamedFilterCollection` document, facet activation
-(`GetActiveFacets`), and enum labels live in the core lib; this project
-only binds those primitives into Blazor components and surfaces the
-resulting `FilterConfig` via an `EventCallback`.
+(`GetActiveFacets`), field validity (`GetInvalidFields`) and enum labels
+live in the core lib; this project binds those primitives into Blazor
+components and holds the user-facing state the umbrella's
+`SPEC-filtering.md` governs — the draft, what is applied, what was
+restored — in one app-scoped owner.
+
+### The setup-state owner — `FilterSetup`
+
+`SPEC-filtering.md` §4 (halheinrich/backgammon#374) names one owner for the
+state its rules govern, because the v1.12.1 post-mortem
+(halheinrich/backgammon#373) found that state spread across lifetimes that
+end at different times: the panel held the draft, which died on navigation;
+the hosts covered the component's absence with reconcile code of their own;
+and a commit's callback ran after its storage write, so it could land in a
+setup that had already ended. `FilterSetup` is that owner. It is
+app-scoped, so it outlives every component and every page; a full reload is
+a fresh owner, which is a fresh setup and a fresh restoration (§4's last
+row).
+
+**What it holds.**
+
+- **The setup's identity:** the source the host last reported
+  (`ReportSource`), and a generation the owner advances whenever a setup
+  ends.
+- **The draft** (`FilterDraft`, below): the selection on screen as the user
+  left it, valid or not. With it, whether the draft is **resolved**: false
+  only after a failed restoration, until a valid Apply or Clear makes it
+  the user's choice. Resolution is current state, not history. It travels
+  with the draft through navigation and source changes, and only a fresh
+  boot's failed restoration unsets it.
+- **The committed baseline:** the draft last applied in this setup, or
+  none.
+- **This boot's restoration outcome** (`FilterRestoration`: `Pending`, then
+  one of `Restored`, `NothingStored`, `Refused`, `Unreadable`), and the two
+  restoration notices, whose occurrence — this boot's restore — is the
+  outcome's.
+
+Nothing is persisted but the committed selection, which is what the
+restoration reads back.
+
+**What it derives, never stores.** Whether a filter is in effect, and
+which: the baseline while the draft equals it as a config, so an edit
+undone back to the applied values is in effect again; or **the ready empty
+selection** (§1, halheinrich/backgammon#266), a resolved, valid draft that
+restricts nothing, once restoration has settled and with a source. And the
+two gates' filter terms, §2's definitions, which govern:
+
+- Apply needs a source, a settled restoration, a valid draft, and a draft
+  not already in effect.
+- Run needs a filter in effect for the current setup.
+
+`FilterSetupSnapshot` is that reading, made once per published state; no
+derived fact is kept anywhere as a copy that could change.
+
+**Transitions** (§4's table):
+
+| Event | Effect |
+| --- | --- |
+| the host reports its source, unchanged | nothing — how a remount and an unchanged-path return keep their setup |
+| the host reports a different source (`null` included) | the setup ends: a new generation, the baseline dropped, the draft and its resolution kept |
+| A → B → A, mounted or not | two endings; A's consent never returns |
+| an edit, or a saved filter staged | the draft changes; the restored notice ends |
+| Apply (gate open) | the draft becomes the baseline and is resolved |
+| Clear (restoration settled) | the draft and the baseline become the empty selection, resolved |
+| the restoration settles | its outcome is recorded; the draft is hydrated only if nobody edited it since the read began |
+| a commit's write completes | a refusal goes to the host's sink; a write that landed ends the failed-restore notice; nothing else |
+
+**Order.** Every accepted change takes effect, and is published, before any
+storage call it makes. Apply records its baseline and publishes, then
+writes; the click's task is the write's, so it completes when the browser
+has answered. Because a write's completion changes no draft, baseline or
+gate, a write that completes late — after a newer commit, after an edit,
+after the setup ended — cannot restore anything older. There is no stale
+callback left to reject. The restoration is the one read whose answer
+changes state, and it changes only a draft whose revision has not moved
+since the read began. It is boot-scoped rather than setup-scoped: a source
+change while it is pending neither strands it nor lets it overwrite a newer
+draft, and its outcome is still recorded.
+
+**Restoration** runs once per boot: `RestoreAsync` starts the one read at
+the panel's first interactive render — where interop exists, never during
+prerender — and every later call returns the same task. A restored valid
+empty selection raises no restored notice: it is ready as it stands, and
+nothing differs from a first visit (§1, Reload). A stored document that
+reads but holds a field a rule outlaws restores whole, the field shown and
+marked (halheinrich/backgammon#269); it is not unreadable. A failure that
+is not the browser's refusal — static rendering, a disconnected circuit, a
+timed-out call — is not an outcome: it propagates out of the panel's
+lifecycle and leaves restoration pending.
+
+**What consumers see.** `Attach(observer)` delivers the current snapshot
+before it returns, then each real change, in order, until the handle is
+disposed; `Current` answers on demand. A component or page mounted later
+therefore learns the existing state without any change being manufactured,
+and the owner publishes only when the state differs. A snapshot is
+immutable, and every config it hands out is new, so nothing a consumer
+holds — a snapshot, a config it read, a config it handed in to be staged —
+can reach the owner except through its operations. A host reads its gate
+source-relatively (`IsInEffectFor(token)`, `ConfigInEffectFor(token)`), so
+a host that forgot to report a changed source reads its gate dark, never
+another corpus's filter (§3: the need is ownership, not history).
+
+**Storage refusals have one route, and no lifetime stands in it.**
+`FilterStorage` (below) tells the host's `IFilterStorageRefusalSink` of
+every refusal before the result returns. The sink is the host's own
+registered holder, resolved in the owner's scope by
+`AddFilterSurface<TRefusalSink>`, so a refusal that arrives after the page
+that started the call has gone, or after its setup ended, still reaches the
+host's occurrence owner, and a page mounted later shows it with no further
+failure. Snapshot subscriptions carry state only. Disposing one stops
+snapshots to that observer and cancels nothing, so rejecting a stale state
+update can never discard a refusal: no subscription stands between a
+storage call and the sink.
+
+**Registration and lifetime.** `AddFilterSurface<TRefusalSink>()` registers
+the owner and the storage seam scoped — one per app in WebAssembly, one per
+circuit on a server — and calls `AddBrowserStorage()`, so a host cannot
+register the owner without its storage. The owner's constructor is
+internal: a host never makes one, so the instance a page injects and the
+one the surface injects are the same by construction. Not thread-safe:
+every member is called on the renderer's synchronization context, which
+every component event and lifecycle method already is.
+
+**Why this shape.**
+
+- *One owner injected by both sides, not a holder bound as a parameter.*
+  The retired `AppliedFilter` was a host-registered holder bound to the
+  composite; a host could bind a second instance, and the composite's
+  mediation was a second writer beside the host's reconcile code. Injection
+  makes one instance per scope by construction.
+- *Snapshots, not events.* Per-gesture events
+  (`OnFilterConfigChanged`/`OnAppliedStateChanged`) made each host keep its
+  own copy of "what is applied" in step. A snapshot carries the derived
+  facts, so there is nothing to keep in step.
+- *The host reports its source; the surface does not take one.* A host that
+  unmounts the surface while no source is held still has to end the setup
+  when it latches the next one (§4: A → B → A while unmounted). Only the
+  host is there to say so, so it is the one reporter.
+- *Publish before persisting, not revision checks.* §4 allows either. With
+  publication first, a write's completion has nothing to update, so the
+  ordering rule holds structurally rather than through a check each
+  completion must remember.
+- *A registered sink, not a component's event.* A component's callback
+  dies with the component, and a refusal can outlive it.
+
+### The draft — `FilterDraft`
+
+The retained draft is the editor's state, not its parsed config: an
+immutable record holding each typed box's text verbatim and every choice,
+with value equality over what is on screen. Converting to `FilterConfig`
+and rebuilding the editor used to lose input — an integer parse turned
+`1.5` in a move-number box into no bound, so the facet went quiet and the
+selection counted as the empty one. The draft keeps the text, and the
+parsed config (`ToConfig`, a new instance each call), the lib's verdicts on
+it and the active facets are derived on every ask. Nothing is cached: a
+record's `with` copies every field, and a cached verdict would ride into a
+draft it was not computed for.
+
+The draft adds one rule beside the lib's, and it is about representation,
+not the domain. A range bound that is not a number, or a move-number bound
+that is not a whole number, is an `UnrepresentableFields` member. It joins
+the lib's `GetInvalidFields` in `InvalidFields`, which the gates, the marks
+and the save refusal read, and its facet joins `GetActiveFacets`, so the
+row badges `set`: such input is a criterion the user meant, never a blank
+one, and it cannot make the selection ready-empty. `"3.0"` is three. Blank
+text is no bound and no fault. The domain rules — floors, order, `NaN` —
+stay XgFilter_Lib's. `RestrictsNothing` is the empty selection: valid, with
+no criterion by the lib's activation predicates. The sets are sorted, so one
+selection has one order and one JSON.
+
+### The surface's storage — `FilterStorage`
+
+The one seam for every storage call the surface makes, over
+`BrowserStorage`'s local area: the owner's read and writes of the
+selection, the panel's reads and writes of its display preferences. It
+names the three keys (`ConfigKey`, `DisclosureKey`, `MoreFiltersKey`) and
+reports each refusal to the host's sink before returning the result. There
+is no latch: a refused call disables nothing, and the next call is simply
+made. A refused read is "nothing stored" to its reader, and a refused write
+leaves the in-memory choice standing. Parsing and defaults stay with each
+reader, and a failure that is not the browser's refusal is not caught here
+or below. Internal: no consumer sees the keys.
 
 ### `FilterSurface` component — the consumer surface
 
 The one component hosts embed (umbrella arc halheinrich/backgammon#63 /
-halheinrich/backgammon#78 Step 2): it owns `FilterPanel` + the saved-filters
-mount of `NamedEntriesPanel`, the `NamedEntriesSurface` preset that mount
-renders, and the interaction wiring end to end —
-load→stage, save/save-as→snapshot-or-refuse, delete, applied-state
-mediation onto the host's `AppliedFilter` holder, the saved-filters degrade
-notices, and the source-change rule. Hosts bind the holder (host-registered,
-at whatever lifetime their start-gate must survive — a *parameter* by
-necessity, since the composite dies with its page while BgQuiz's gates must
-survive navigation), the `FilterRestoreNotice` (host-registered, app-scoped
-— the restored-selection notice's state; see the panel section and
-Pitfalls), a `FilterSourceToken?` for the current source, an
-`IDocumentStorage?` adapter (null = no saved-filters context), the
-host's `CanPersist` capability ruling with its host-specific
-`PersistDisabledReason` wording, and the two panel-shaped events
-(`OnFilterConfigChanged` / `OnAppliedStateChanged`), re-raised after
-mediation with the panel's exact names, payloads, and per-gesture contract;
-optionally, the panel's storage-unavailable report (`OnStorageUnavailable`,
-halheinrich/backgammon#102), forwarded as-is — the panel discovers the
-condition and the host owns the page's notice about it.
+halheinrich/backgammon#78 Step 2): it mounts `FilterPanel` and the
+saved-filters mount of `NamedEntriesPanel`, owns the `NamedEntriesSurface`
+preset that mount renders, and wires them to the owner. Saved filters load
+by staging into the owner, save from the owner's draft or refuse, and
+delete through the store; the composite also carries the saved-filters
+degrade notices. It injects `FilterSetup` and holds no filter state. A host
+binds only what is the host's to say here: an `IDocumentStorage?` adapter
+(null = no saved-filters context), and its `CanPersist` capability ruling
+with its host-specific `PersistDisabledReason` wording. Storage refusals
+reach the host through its registered sink, not through this component.
 
-**The source-change rule is composite-owned — "told, never asks."** The
-composite never sees pickers, paths, or capabilities; the host mints tokens
-and the composite only compares them. When the bound token changes, the
-setup ends: the holder is cleared (the applied state drops entirely — no
-residue survives), the panel forget-commits (Apply re-arms; the host is told
-through the normal event path), the save-refusal notice clears, and the
-saved-filters context reloads through the seam — or resets, on a change to
-null. **The first parameters-set initializes the comparison token and loads
-the context — nothing else** (ruled pin): a remount over an unchanged
-source leaves an already-applied holder untouched and the host's gate
-armed, which is the holder's whole purpose.
-
-**The first-mount reconcile** (halheinrich/backgammon#82) is the other
-half of that survival. The panel's committed config dies each mount while
-the holder does not, so a remount over an already-filtered source would
-restore a selection from storage as merely *staged* and re-arm Apply with
-nothing to do. At its first render the composite resumes the applied
-selection from the holder — `ResumeApplied`, the mirror of the
-source-change rule's `ForgetCommitted`: the panel's buffers and its
-committed config both — via the keyed lookup `ConfigFor(Source)`, which
-yields a config exactly when one is applied *and* it belongs to the
-current `Source`. It runs from `OnAfterRenderAsync(firstRender: true)`,
-not the first parameters-set, because `@ref` is null until after the first
-render. The resume is **silent** (no `OnAppliedStateChanged`) and comes
-**from the holder, never from `localStorage`** — both non-negotiable; see
-Pitfalls for the lock-out that a storage-seeded reference point produces,
-the stale screen that storage-hydrated buffers produce once a write has
-been refused (halheinrich/backgammon#102), and why the asymmetry with
-`ForgetCommitted` is deliberate.
+**The setup-change rule for the saved-filters context.** The composite
+attaches to the owner. The first snapshot, delivered inside `Attach`, is
+the existing setup learned, and ends nothing: a remount over an unchanged
+source keeps everything, which is what the owner is for. A later snapshot
+with a new generation is the end of a setup. The refusal posed against the
+outgoing context drops, and the saved-filters context reloads through the
+seam — or resets, when there is no source. A change to the draft or the
+baseline moots a stale save refusal, as any gesture on the panel always
+has.
 
 The composite owns its `SavedFiltersStore` over the bound adapter (rebuilt
 on an adapter reference change), so a remount re-reads the document — a
@@ -186,19 +356,18 @@ the page:
 
 | Box | What it is | Occurrence | Holder of the dismissal |
 | --- | --- | --- | --- |
-| `#filterRestoredNotice` | event notice, polite | this boot's restore of a stored selection | the app-scoped `FilterRestoreNotice` — the occurrence outlives every mount of the panel, so the panel binds the component's dismissed state to it and keeps no copy |
-| `#filterRestoreFailedNotice` | event notice, polite | this boot's restore of a stored selection it could not read (`halheinrich/backgammon#367`: a failed restore is never silent) | the same `FilterRestoreNotice`, its second fact — the unreadable document outlives every mount too, and a remount reads it again; one holder for the two outcomes of one restore, each with its own one-way dismissal. It also ends at a commit whose write lands, replacing the unreadable document; an edit leaves it, and so does a commit whose write the browser refused |
+| `#filterRestoredNotice` | event notice, polite | this boot's restore of a stored selection | the app-scoped `FilterSetup` — the occurrence outlives every mount of the panel, so the panel binds the component's dismissed state to the owner's snapshot and keeps no copy |
+| `#filterRestoreFailedNotice` | event notice, polite | this boot's restore of a stored selection it could not read (`halheinrich/backgammon#367`: a failed restore is never silent) | the same `FilterSetup`, its second notice — the unreadable document outlives every mount too; one holder for the two outcomes of one restore. It also ends at a commit whose write lands, replacing the unreadable document; an edit leaves it, and so does a commit whose write the browser refused |
 | `#filterSaveError` | error, assertive | one refused save | the composite, *as the refusal itself*: `_saveRefusalNotice` is non-null exactly while a refusal stands, so closing the box clears the field and no dismissed bit exists anywhere |
 | `#savedFiltersWriteFailed` | condition notice, assertive | one failed write | the `Notice` instance, keyed by `NamedDocumentStore.LastWriteFailure` — the store names the occurrence because only it knows a write failed; store and notice both die with the composite, so the component may hold the bit |
 | `#savedFiltersLoadFailed` | gate reason, polite | — | none: it cannot be closed. It stands where the saved-filters panel would and is the only thing saying why saving is off; it leaves when its cause does |
 
 In the restore notice the user's close gesture and the owning gesture are
-**one state change, not two** — `FilterRestoreNotice.Dismiss()` either way —
-because both mean the notice is over for this app lifetime and nothing reads
-the difference; a second bit would be a second holder for `Arm()` to
-resurrect around. Closing a notice is never an edit: it reports nothing and
-moves no gate. `NamedEntriesPanel`'s load confirmation is the same model in
-the generic panel — see that component's section for its holder.
+**one state change, not two** — the notice ends either way — because both
+mean the notice is over for this boot and nothing reads the difference.
+Closing a notice is never an edit: it moves no draft and no gate.
+`NamedEntriesPanel`'s load confirmation is the same model in the generic
+panel — see that component's section for its holder.
 
 ### `FilterPanel` component
 
@@ -230,18 +399,25 @@ members (`IncludeEvaluations`+`EvaluationLevels`, `IncludeRollouts`+
 Position type and play type are shelved for later reintroduction — their UI
 groups have been hidden since the FilterPanel hide pass, while the
 `XgFilter_Lib` machinery behind them (`FilterConfig.PositionTypes` /
-`PlayTypes`, the filters, the enums) stays intact. State is held in private
-fields on the component instance.
+`PlayTypes`, the filters, the enums) stays intact. The panel holds no
+filter state and declares no parameter: it renders the owner's snapshot,
+turns each gesture into one of the owner's operations (`Edit`, `ApplyAsync`,
+`ClearAsync`), and re-renders on each snapshot the owner publishes, so a
+remount shows exactly what was on screen before, unapplied edits and
+invalid input included. What it keeps of its own is display state: its two
+persisted preferences, the level groups' open state, and which wrong fields
+it shows (below).
 
 **Validity is the lib's ruling; the panel marks it and words it.** One
-rule is the whole of the `IsCommittable` member:
-`FilterConfig.GetInvalidFields()` must name no field (non-negative error
-bounds, `min ≤ max`, `NaN` rejected, a score token the grammar faults, and
-— since `halheinrich/backgammon#269` — pattern text `BoardPattern.TryParse`
-refuses; the lib's rule throughout, asked through the same `BuildConfig()`
-path Apply commits through, so what the panel reds and what `Build()` would
-throw on are one answer). The panel keeps no validity rule of its own
-beside it, the position-pattern field's included. The error-range inputs style
+verdict is the whole of it — the draft's `InvalidFields`:
+`FilterConfig.GetInvalidFields()` on the draft's parsed config must name no
+field (non-negative error bounds, `min ≤ max`, `NaN` rejected, a score token
+the grammar faults, and — since `halheinrich/backgammon#269` — pattern text
+`BoardPattern.TryParse` refuses; the lib's rule throughout, asked of the
+same parsed config Apply commits, so what the panel reds and what `Build()`
+would throw on are one answer), and no box may hold text its field cannot
+be at all (the draft's representation rule, above). The panel keeps no
+validity rule of its own beside it, the position-pattern field's included. The error-range inputs style
 themselves independently off `FilterField.ErrorMin` / `ErrorMax`
 membership, so the lib's attribution rules carry straight to the screen: a
 negative Max never reds a Min the user got right, while a misordered pair
@@ -258,6 +434,26 @@ regardless. A stored selection whose bound a rule outlaws still
 loads, shows its values, marks the offender, and is refused a commit —
 never silently repaired, never dropped (the lib's documented posture,
 pinned).
+
+**What a box shows of its verdict is a second fact**
+(`halheinrich/backgammon#272`, `SPEC-filtering.md` §1). Validity is
+continuous, because the gates read it: Apply goes dark on the keystroke that
+makes a value wrong. The mark and the message for a newly typed error appear
+when the user leaves the box, and clear as soon as the value is corrected; a
+wrong value that was not typed here — restored, staged from a saved filter,
+or on screen when this panel mounts — shows at once. The panel holds which
+wrong fields it shows (`_revealed`, per mount), and `ShownFields` — the
+verdict as far as it is revealed, never wider — is what `FieldAttributes`
+and every feedback line read. Each verdict-bearing box's `onblur` reveals
+what is wrong in the group its message speaks for: a range's two bounds
+share one line, and a misordered pair blames both. A draft change this
+panel's own typing made keeps only the reveals still true (`Edit` marks the
+panel's gestures, since the owner publishes inside the call). Any other
+draft change shows every wrong value at once. So typing never makes a
+message appear under the box. A message still leaves at the keystroke that
+corrects it, as ruled. Whether typing keeps the browser's focus and caret,
+and whether the layout holds still, is a real-browser check, carried into
+the BgQuiz_Blazor leg; bUnit cannot establish it.
 
 **How an input wears the verdict is rendered from one place**
 (`halheinrich/backgammon#270`). The `is-invalid` class is a colour, and a
@@ -279,9 +475,9 @@ shows. Attribution stays the lib's — the field asked for is the one
 field table when the money token split by the Jacoby rule, so this field
 is the second to red itself off `GetInvalidFields()` membership
 (`FilterField.MatchScores`) and the second to close Apply through the
-same `IsCommittable` member — Apply-gating parity with the
-position-pattern field comes for free from that one member, and is
-pinned. The seam has a second tier the error bounds do not need: the
+same verdict — the draft's `InvalidFields`, which the owner's `CanApply`
+reads — so Apply-gating parity with the position-pattern field comes for
+free from that one verdict, and is pinned. The seam has a second tier the error bounds do not need: the
 field names the *list*, not what is wrong in it, so the panel asks
 `MatchScoreToken.GetFault` per token and reads back a
 `MatchScoreTokenFault`. It renders **one voice per distinct fault kind**
@@ -289,7 +485,7 @@ into `#matchScoreFeedback` — `Malformed` states the vocabulary and is
 answered by retyping; `Retired` says the bare money token is retired and
 names its replacements from `MatchScoreToken.RetiredMoneyReplacements`,
 because that mistake was correct spelling under an earlier grammar and
-retyping is not the remedy. A buffer holding both kinds gets both lines;
+retyping is not the remedy. A list holding both kinds gets both lines;
 many tokens of one kind still get one. The lib returns no strings — the
 fault is typed and wordless, the wording is the panel's, the same
 division of labour as `BoardPattern.TryParse`.
@@ -312,10 +508,10 @@ verdict, and in `FilterHelp`'s match-scores prose.
 **The position-pattern field presents a grammar it does not own.**
 `XgFilter_Lib`'s `BoardPattern` (and its constraint types) owns the
 bracket list; see that repo's Patterns section. The text is the config's
-text, both ways (`halheinrich/backgammon#269`): the buffer rides into
-`FilterConfig.PositionPattern` as typed (a blank buffer as `null`, the
+text, both ways (`halheinrich/backgammon#269`): the draft's text rides
+into `FilterConfig.PositionPattern` as typed (a blank box as `null`, the
 lib's "no pattern") and a restored or loaded config's text lands back in
-the buffer as stored, so the panel builds no `BoardPattern` for the
+the draft as stored, so the panel builds no `BoardPattern` for the
 config's sake and a stored pattern a newer grammar rule refuses shows the
 user what they wrote — marked by the lib's verdict, with Apply withheld,
 never repaired and never dropped. The field's copy states
@@ -423,8 +619,8 @@ to the buttons below.
 
 Which rows are open is the user's, persisted under its own localStorage key
 (`xg_expandedFilters`, a JSON array of `FilterFacet` member names written in
-row order) — never inside the config blob, and never moved by `LoadConfig`
-or Clear filters. Restore is **all-or-nothing**: anything that is not an
+row order) — never inside the config blob, and never moved by staging a
+saved filter or by Clear filters. Restore is **all-or-nothing**: anything that is not an
 array of names a row answers to — an unknown name, a `FilterFacet` with no
 row, a numeric token, malformed JSON — restores every row collapsed rather
 than salvaging part of it. The panel only ever writes row names, so anything
@@ -440,8 +636,8 @@ corruption its all-or-nothing restore exists to refuse. The value is the
 literal `true` or `false` — one bit needs no serializer, which leaves the
 rows' key the only value this panel serializes itself — and anything
 unreadable leaves the container folded, the posture a fresh visit gets.
-`LoadConfig` and Clear filters never move it, and toggling it is navigation,
-not an edit (no `OnAppliedStateChanged`). A row the user left open is still
+Staging a saved filter and Clear filters never move it, and toggling it is
+navigation, not an edit: the owner hears nothing. A row the user left open is still
 open when the container is next opened, whether or not the container was
 folded over it in between — which is the whole reason the two preferences are
 two keys.
@@ -449,12 +645,14 @@ two keys.
 **Row badges**: while collapsed, a row carries a badge
 (`#facetBadge_<Facet>`) exactly when its facet holds an active filter. The
 badge divides in two. Its **presence** is the lib's ruling, computed from the
-live edit buffers through the same build path Apply uses —
-`BuildConfig().GetActiveFacets()` — never by re-inspecting config fields or
-the buffer behind the controls, which would be a second encoding of an
-activation predicate. Feeding from the live buffers makes it honest at rest
-after restore, Apply, Clear filters and `LoadConfig` staging — and live
-mid-edit: it tracks staged values the moment they are typed, not on Apply.
+live draft's parsed config — the config Apply commits — through
+`GetActiveFacets()`, never by re-inspecting config fields or the text behind
+the controls, which would be a second encoding of an activation predicate;
+the draft's `ActiveFacets` adds the facet of a box whose text its field
+cannot be, a criterion the user meant rather than none. Feeding from the
+live draft makes it honest at rest after restore, Apply, Clear filters and a
+saved filter's staging — and live mid-edit: it tracks staged values the
+moment they are typed, not on Apply.
 Its **words** are the panel's display concern: `set` for the facets chosen by
 typing into them (player names, match scores, move number range, position
 pattern), where a count of boxes filled would say nothing, and `N selected`
@@ -463,135 +661,92 @@ construction — contact type, analysis depth's checked modes, dice rolls).
 Expanded, no badge renders: the controls themselves say everything it
 could — the level groups' ruling one tier down.
 
-The component emits filter results only on **Apply** (or **Clear
-filters**) — not on every keystroke. On Apply, the component:
+**Apply and Clear filters are the owner's commits** — never per
+keystroke. Apply makes the draft this setup's baseline (resolving it),
+publishes, then writes the selection for the next visit. **Clear filters**
+(the old Reset, renamed to say what it does) is the full-clear gesture: the
+draft and the baseline become the empty selection, published, then
+written. It touches filter values only — no host state (the panel has no
+path to any) and no disclosure movement. Both are guarded in the owner on
+the gate the buttons render from, so a dispatch that ignores the disabled
+attribute cannot re-commit an unchanged selection, and Clear waits for
+restoration to settle. A refused write never undoes either.
 
-1. Builds a `XgFilter_Lib.Filtering.FilterConfig` from the edit buffers
-   and records it as the **last-committed config**.
-2. Persists the whole selection to `localStorage` via `IJSRuntime`.
-3. Raises `OnFilterConfigChanged` with that config.
-4. Raises `OnAppliedStateChanged` with it too — the buffers now equal it.
+**What is in effect is derived, never latched.** The owner holds the draft
+and the baseline, so it answers whether the selection on screen is the one
+in effect, and the Apply gate is the same answer's other face; the panel
+reads both from one snapshot, so they can never disagree. The baseline
+compares as a config (`FilterConfig`'s value equality), which is what makes
+an edit-then-undo recoverable: typing a change and typing it back lands on
+the applied values, so the selection is in effect again. A one-way dirty
+flag would leave a host's gate stuck with no recovery gesture, because
+Apply — the only control that could clear it — is itself disabled on an
+unchanged selection. Only a valid draft can match the baseline: a box the
+config cannot represent parses as no criterion and would otherwise match a
+baseline without one.
 
-**Clear filters** (the old Reset, renamed to say what it does) is the
-full-clear gesture: it hydrates every edit buffer back to defaults, then
-persists + raises the empty config, which consumers treat as applied. It
-touches filter values only — no host state (the panel has no path to
-any; the raised config is its only channel) and no disclosure movement.
-It runs the same commit path as Apply, so it moves the last-committed
-config too.
+**The empty selection is ready without Apply** (`halheinrich/backgammon#266`,
+§1): a resolved, valid draft that restricts nothing is in effect once
+restoration has settled, whether nothing was ever chosen, every criterion
+was cleared, or an applied filter was edited back to nothing. A pending
+restoration, a failed one, an invalid draft and no source are not evidence
+that the user chose no filter, and none is ready. While Apply has nothing to
+do, the panel says why — a `title` plus a muted hint line, the
+`NamedEntriesPanel` disabled-reason idiom, except that here the panel knows
+its own reason: "no filter is set" over the empty selection, "already
+applied" over a non-empty one. Neither invalid-value case gets a hint line:
+the offending field's own feedback already explains it, once shown.
 
-**Cleanliness is derived, never latched.** The panel is the only party
-holding both the live edit buffers and the config it last committed, so
-it — not the consumer — owns the answer to "is this selection still the
-applied one?". That answer is one computed member: the committed config
-the buffers currently equal (`FilterConfig`'s value equality), or `null`
-when they equal none. Two surfaces consume that one computation and can
-therefore never disagree:
+**Restoring at mount.** `OnAfterRenderAsync(firstRender: true)` starts the
+owner's restoration (once per boot; a later mount finds it settled or in
+flight) and restores this mount's two display preferences — the container's
+bit and the open-row set — through `FilterStorage`. A refused or absent
+read leaves each preference's default. Each preference restore re-checks its
+own touched flag after its await (`_moreFiltersTouched` /
+`_disclosureTouched`), so a user toggle landing mid-read wins. The
+restoration is awaited last, so a failure that is not a refusal surfaces in
+the lifecycle. `MountRestored` completes when all of it has settled — the
+observation the pending-restore pins wait on, since a late restore that
+rightly yields renders nothing.
 
-- **The Apply gate.** Apply is offered only when the selection differs
-  from the last-committed config *and* the selection is **committable** —
-  `FilterConfig.GetInvalidFields()` names no field, the pattern text
-  included. `ApplyAsync` guards on the same condition it renders
-  `disabled` from, so programmatic dispatch cannot re-commit either.
-  While Apply is disabled *because nothing changed*, the panel says so —
-  a `title` plus a muted hint line, the `NamedEntriesPanel`
-  disabled-reason idiom, except that here the panel knows its own reason
-  rather than being told it by the host. Neither invalid-value case gets a
-  hint line: the offending field's own `invalid-feedback` already explains
-  it.
-- **`OnAppliedStateChanged`**, raised after every buffer-affecting
-  gesture — a control edit, `LoadConfig` staging, Apply, Clear filters —
-  carrying that same value. Toggling either disclosure tier is
-  navigation, not an edit, and raises nothing.
-
-Deriving from equality rather than latching a dirty flag is what makes
-an edit-then-undo recoverable: typing a change and typing it back lands
-on the committed values, so the panel goes clean again and re-reports.
-A one-way flag would leave the consumer's gate stuck with no recovery
-gesture, because Apply — the only control that could clear it — is
-itself disabled on an unchanged selection.
-
-The last-committed config is plain component-instance state that dies on
-unmount, and is deliberately **never persisted**: the first-render
-`localStorage` restore *stages* a selection, it does not commit one, so a
-fresh panel has committed nothing, raises neither event, and starts with
-Apply enabled. A host that remounts the panel (BgQuiz on a new folder
-pick) therefore gets a re-enabled Apply for free, with no host-side reset
-call.
-
-Two `internal` methods move that reference point programmatically, and
-they are exact mirrors:
-
-- `void ForgetCommitted()` — for a panel kept mounted across a source
-  change: it drops the last-committed config (buffers, persisted state,
-  and open rows all untouched) so Apply re-arms and
-  `OnAppliedStateChanged` re-reports (necessarily `null`) through the
-  normal path.
-- `void ResumeApplied(FilterConfig)` — for a fresh mount resuming an
-  earlier mount's commit: it stages the given config into the buffers and
-  adopts it as last-committed, so the screen shows the applied selection
-  and Apply does not re-arm over it; the first-render storage restore is
-  suppressed, or overwritten if it already ran, since storage and the
-  holder agree only while remembering works (halheinrich/backgammon#102).
-  Nothing written, open rows untouched. **Silent**, unlike its mirror:
-  forgetting is news the consumer can only hear through the event, while a
-  resume derives from applied state the caller already holds. That
-  asymmetry is contract, not oversight.
-
-Both are internal by design — the composite is their only intended caller
-(see Pitfalls). Because of `ResumeApplied`, "a fresh mount starts with
-Apply enabled" is the *panel's* posture in isolation; under the composite
-a remount over an already-filtered source starts with Apply disabled, the
-mount having reconciled from the holder.
-
-Consumers that want a `DecisionFilterSet` for in-memory filtering call
-`cfg.Build()` themselves; consumers that want to POST the configuration
-to a server send `cfg` as JSON. Single callback by design — see Pitfalls
-for the encapsulation rationale.
-
-`OnAfterRenderAsync(firstRender: true)` rehydrates the three localStorage
-keys once on first render — the container's bit, the open-row set, then
-the config — through the panel's guarded seam (a refused read is nothing
-stored; see Pitfalls) and calls `StateHasChanged`. Each restore double-checks its guard
-(`_disclosureTouched` / `_externalConfigLoaded`) after its await, so a
-user toggle or a host `LoadConfig` landing mid-interop is never
-clobbered.
+**The restoration marker** (`halheinrich/backgammon#346`). The panel's root
+carries `data-filter-restoration` (`FilterPanel.RestorationAttribute`,
+internal): `Pending` until this mount has applied everything it restores,
+then the selection's `FilterRestoration` outcome by name, failures
+included. Each mount settles its own marker, so a navigate-back reports
+`Pending` until its preferences are back — the restore a click on the
+container's toggle could otherwise race. It is the outcome alone and says
+nothing about the gates. A host's browser test waits on it through
+`XgFilter_Razor.Testing.FilterRestorationMarker`; host code reads
+`FilterSetupSnapshot.Restoration` instead.
 
 **The restored-selection notice (§4's legibility law).** A reload ends the
-setup: the config restore stages the previous session's selection with
+setup: the restoration puts the previous session's selection on screen with
 nothing applied and Apply re-armed — correct by rule, and exactly what a
 defect would look like, so the panel says what happened
 (`#filterRestoredNotice`: restored from a previous session, not in effect
-until Apply). The state behind it is the app-scoped `FilterRestoreNotice`
-(host-registered, forwarded through the composite): the panel *arms* it
-when the first-render restore genuinely parses a stored config (nothing
-stored or unreadable = nothing restored = no claim; an *empty* stored
-config does arm it — the empty filter is still a choice), and *dismisses*
-it at the first gesture that makes the selection the user's own — any
-buffer-affecting gesture (edit, `LoadConfig` staging, Clear filters) or a
-commit — or when the user closes it, which is the same transition on the
-same holder (see the composite's notices table). Dismissal is one-way for the app lifetime, which is what makes a
-remount within a setup quiet after an edit while an untouched remount
-re-shows the same notice (navigation changes nothing, in both directions).
-Row and level-group toggles are navigation and keep it; `ForgetCommitted`
-is choreography and keeps it (see Pitfalls).
+until Apply). The owner shows it when the restoration hydrated the draft
+with a selection that is not the ready empty one; a restored valid empty
+selection raises nothing, since it is already in effect and nothing differs
+from a first visit. Nothing stored, unreadable, refused, or a read
+superseded by an edit made while it was pending: nothing was put on screen,
+so no claim. The notice ends at the first gesture that makes the selection
+the user's own — an edit, a saved filter staged, a commit — or when the user
+closes it, the same end. A source change is not a gesture and leaves it.
+Because the owner holds it, a remount within a setup shows exactly what was
+showing, and a closed notice stays closed (navigation changes nothing, in
+both directions).
 
 **The restore's other outcome is said too** (`halheinrich/backgammon#367`:
-a failed restore is never silent). The first-render restore tells three
-states apart, and only there: nothing stored (`getItem` returned null) is
-an ordinary first visit and restores defaults with no word; a document that
-is present but `TryFromJson` refuses restores defaults and says so
-(`#filterRestoreFailedNotice`); a document that reads restores whole, a
-refused pattern included — that is the first case above, not this one.
-`TryFromJson` alone cannot draw the first line, since it answers false for
-a missing key too, which is why the null check precedes it. The notice's
-state is the same app-scoped `FilterRestoreNotice`, its second fact: the
-unreadable document outlives the mount exactly as a restored selection
-does, so a dismissal held in the panel would let a navigate-back say it
-again. It ends when the user closes it or a commit's write lands, replacing
-the unreadable document; an edit leaves it, and so does a commit whose
-write the browser refused (the guarded write reports whether it landed,
-and the commit dismisses only on true), since neither changes what is
+a failed restore is never silent). A stored document `TryFromJson` refuses
+restores the defaults and says so (`#filterRestoreFailedNotice`). Nothing
+stored is an ordinary first visit and gets no word, and a read the browser
+refused is the storage condition, reported to the host's sink rather than
+by a notice of the panel's. A document that reads restores whole, a refused
+pattern included, which is the restored case above. The failure notice ends
+when the user closes it or a commit's write lands, replacing the unreadable
+document — whichever commit's write it was. An edit leaves it, and so does a
+commit whose write the browser refused, since neither changes what is
 stored. The unreadable document itself is left as it is.
 
 ### `NamedEntriesPanel` component
@@ -610,7 +765,7 @@ collection instance back down through `Document`; the reference change is
 also the panel's confirmation channel (it cancels pending inline confirms
 and clears the typed save-as name). Selection is deliberately stateless —
 the "current" value lives in whatever editor the host wires up (for
-filters, `FilterPanel`'s edit buffers), so a highlighted row would be a
+filters, the filter setup's draft), so a highlighted row would be a
 second source of truth that lies. Every destructive gesture runs through
 an inline confirm in the panel — a row's Save, a save-as under an
 existing name, and delete; `Contains` keeps the case-insensitive name
@@ -639,9 +794,9 @@ is `internal` so this repo's panel suite mounts the one true instance
 rather than retyping it.
 
 The saved-filters wiring: `OnLoadRequested` → resolve via `TryGet` →
-`FilterPanel.LoadConfig` (a miss throws — see Pitfalls);
-`OnSaveRequested` / `OnSaveAsRequested` → `FilterPanel.TryGetEditedConfig`
-→ `With` → persist.
+`FilterSetup.Stage` (a miss throws — see Pitfalls);
+`OnSaveRequested` / `OnSaveAsRequested` →
+`FilterSetupSnapshot.TryGetSavable` → `With` → persist.
 
 **The load confirmation is the panel's one box, and the panel holds its
 dismissal as the confirmation itself** (`halheinrich/backgammon#248`).
@@ -758,41 +913,15 @@ renders from the same pair the host links with (see Host surface).
 ### Non-visual interaction model (`Model/`)
 
 Plain C# beside the components — namespace `XgFilter_Razor` (root), while
-components stay in `XgFilter_Razor.Components`. Hoisted from BgQuiz's
-app-side originals (its `AppliedFilter` / `SavedFiltersStore`) so both
-consumer apps share one encoding of the filter interaction lifecycle
-(umbrella arc halheinrich/backgammon#63 / halheinrich/backgammon#78 /
-halheinrich/backgammon#38); hosts register these at whatever lifetime their
-gates must survive (BgQuiz: Scoped), and `FilterSurface` drives them.
+components stay in `XgFilter_Razor.Components`. The filter setup's types
+(`FilterSetup`, `FilterSetupSnapshot`, `FilterRestoration`, `FilterDraft`,
+`FilterStorage`, `IFilterStorageRefusalSink`) are described in their own
+sections above. The rest:
 
-- **`AppliedFilter`** — holder for the config the user deliberately
-  applied, **keyed to the source it was applied against**: one nullable
-  (config, source) pair with one lifetime, read only through the
-  source-relative lookup `ConfigFor(token)` — there is deliberately no
-  bare "what is applied?" accessor, so a config applied against some
-  other source can never read as applied (spec §3: the need is
-  ownership, not history; nothing anywhere answers "has this source ever
-  been filtered"). Edit-coupled: the panel reporting uncommitted edits
-  must `Clear()` it, re-gating Start-like actions, and `Clear()` drops
-  the pair entirely — no residue survives. In-memory only, never
-  persisted.
-- **`FilterRestoreNotice`** — app-scoped state for the restored-selection
-  notice (§4): armed by the panel's first-render restore of a stored
-  selection, dismissed one-way at the first buffer-affecting gesture or
-  commit, or by the user closing the notice — one dismissal, held here
-  because the occurrence outlives the panel. The *instance lifetime* is the trigger fact: a reload constructs
-  a fresh one, a remount within a setup reuses the boot's — which is what
-  the mount-time condition alone cannot distinguish (see Pitfalls). Hosts
-  register and bind it, nothing more: the movers (`Arm`/`Dismiss`) and the
-  read (`IsVisible`) are producer-internal. Since
-  `halheinrich/backgammon#367` it carries the restore's other outcome as a
-  second fact with the same shape (`ArmFailure`/`DismissFailure`/
-  `IsFailureVisible`): the failed-restore notice, whose occurrence — this
-  boot's restore — is the same, so one registered instance serves both and
-  a host binds nothing new. In-memory only, never persisted.
 - **`FilterSourceToken`** — opaque, equatable identity of "which source",
-  minted by the host via `FromGeneration(int)` / `FromPath(string)` and
-  only ever *compared* by the producer. Value equality over the wrapped
+  minted by the host via `FromGeneration(int)` / `FromPath(string)`,
+  reported to the owner, and only ever *compared* by the producer. Value
+  equality over the wrapped
   string, so each factory owns identity in its domain by owning what it
   wraps: `FromPath` **normalizes the path itself** — upper-invariant
   case-fold, trailing `\` / `/` insignificant — so a host passes the
@@ -864,10 +993,31 @@ contract lives with the enum, not with the UI.
 
 ### Test project
 
-bUnit + xUnit, targets .NET 10. `BunitContext` with
-`JSInterop.Mode = JSRuntimeMode.Loose` so `OnAfterRenderAsync`'s
-`localStorage.getItem` calls return `default` (treated as "no persisted
-state").
+bUnit + xUnit, targets .NET 10. Each suite registers the surface as a host
+does — `Services.AddFilterSurface<RecordingRefusalSink>()` with the sink
+registered beside it — and a `BunitContext` is one app boot, so one owner
+and one restoration per test. **Storage is planned where it is the
+subject, and incidental elsewhere.** A suite whose subject is storage, the
+gates or the acceptance cases puts a `BrowserStoragePlan` on the test's
+runtime (`halheinrich/backgammon#377`), declares every call in the
+surface's own terms (`XgFilter_Razor.Testing`'s `FilterSurfaceStorage`, or
+the keys directly where a key's spelling is the subject), and ends with
+`Verify`. The pending and ordering cases hold the calls they are about and
+wait, bounded by `DefaultWaitTimeout`, on the operation itself — the
+click's task, `RestoreAsync`, or the panel's `MountRestored` — never on a
+render or a timing sleep. A suite where storage is incidental runs
+`JSRuntimeMode.Loose`, which answers every read "nothing stored" and every
+write "landed" through the real `BrowserStorage`. No test here spells an
+interop identifier.
+
+**The acceptance cases** `SPEC-filtering.md` §4 lists are
+`FilterSetupAcceptanceTests`, each through the composite with the host's
+side played as a host plays it: report the source, read the gate from the
+owner's snapshot. `FilterSetupTests` pins the owner's own contract,
+`FilterSurfaceStorageUnavailableTests` the storage policy under refusal,
+and `FilterRestorationMarkerTests` the marker. A navigation is
+`DisposeComponentsAsync()` followed by a fresh render in the same context;
+a reload is a fresh context.
 
 **Pin posture: structure and wiring, and copy only where it was ruled.** These suites assert
 that a component renders the identity, value, or spelling its source of
@@ -889,60 +1039,123 @@ that each of the ruling's examples still reads as the ruling says.
 
 ### Test-support assembly (`XgFilter_Razor.Testing`)
 
-Producer-owned arrangement helpers for **host** test suites, referenced by
-their test projects only — `IsPackable=false`, and no app-graph project
-may reference it. Today it holds one member:
-`FilterPanelTestState.SeedStoredSelection(BunitJSInterop, FilterConfig)`,
-which arranges "a previous visit left a stored selection behind".
+Producer-owned helpers for **host** test suites, referenced by their test
+projects only — `IsPackable=false`, and no app-graph project may reference
+it. Two members:
 
-Why it exists: the panel's `localStorage` keys are deliberately not
-consumer surface, but a host test arranging navigate-back or reload
-genuinely needs that state, and the only way to get it was to repeat the
-key as a literal in the host's suite. Keeping the constant `internal`
-never prevented that dependency — it only made it untyped, so a
-producer-side rename would leave the literal behind and the host's test
-would keep passing for the wrong reason, arranging nothing and asserting
-the "no stored selection" path. The fact therefore moves to where it can
-be kept true: hosts state intent, the producer supplies mechanism, and
-the key never leaves this repo. This repo's own
-`FilterPanelTestStateTests` uses the seam exactly as a host does — never
-naming a key — so a rename that missed the seeder fails here.
+- **`FilterSurfaceStorage`** — the surface's storage calls, stated on a
+  host test's `BrowserStoragePlan` in the surface's own terms: this boot's
+  restoration (`ExpectFilterRestore` with a stored selection or an outcome,
+  `ExpectHeldFilterRestore` and `RestoreAnswer` to hold and release it),
+  each mount's two display-preference reads (`ExpectFilterPanelMount`,
+  `ExpectFilterPanelMountRefused`), each commit's write
+  (`ExpectFilterCommit`, `ExpectHeldFilterCommit`), and the toggles'
+  writes (`ExpectFilterFoldToggle`, `ExpectFilterRowsToggle`).
+- **`FilterRestorationMarker`** — the restoration marker's selectors and
+  reading for a host's browser tests: `SettledSelector` to wait on,
+  `Selector(outcome)`, `AttributeName` and `Parse`.
 
-The bUnit dependency is first-class, not incidental: the thing being
-seeded *is* a bUnit JSInterop fake, and any seam avoiding the reference
-would have to hand the key back to the caller — the coupling the assembly
-exists to remove.
+Why it exists: the surface's keys, and the marker's attribute, are
+deliberately not consumer surface, yet a host's test needs both. Under the
+strict planner it must declare every storage call the surface makes, and a
+browser test must wait for the restoration it would otherwise race. Spelled
+in the host's suite, either would be a literal a producer-side rename leaves
+behind while the host's test goes on passing for the wrong reason. So hosts
+state intent and the producer supplies the mechanism. The calls come from
+`FilterStorage`'s keys and the panel's own serializers, the committed
+selection is normalized the way the owner writes it, and nothing here spells
+an interop identifier: the planner owns that representation. This repo's
+`FilterSurfaceStorageTests` and `FilterRestorationMarkerTests` use the
+helpers exactly as a host does, against real renders, so a change the
+helpers missed fails here.
+
+Dependencies: bunit, and `BgUiPrimitives_Razor.TestSupport` for the planner
+whose expectations these are; its bunit and AngleSharp versions are the
+floor for this repo's, and both repositories pin the same.
 
 ## Public API
 
 The consumer surface is `FilterSurface` + `FilterHelp` +
-`NamedEntriesPanel` (namespace `XgFilter_Razor.Components`) and the
-non-visual model types (root `XgFilter_Razor` namespace). `FilterPanel`
-alone lives in `XgFilter_Razor.Components.Internal` with
-`[EditorBrowsable(Never)]` and is **not consumer surface** — consuming it
-from a host is banned outright, host tests included (see Pitfalls for the
-narrowing record). Its contract below remains documented because
-`FilterSurface` builds on it and this repo's tests pin it.
-`NamedEntriesPanel` left that narrowing behind in
-halheinrich/backgammon#190 leg (D): it is the reusable piece the arc
-exists for, and the queued mix-saves document mounts it from BgQuiz.
+`NamedEntriesPanel` (namespace `XgFilter_Razor.Components`), the filter
+setup's owner and its types, the registration, and the other non-visual
+model types (root `XgFilter_Razor` namespace). `FilterPanel` alone lives
+in `XgFilter_Razor.Components.Internal` with `[EditorBrowsable(Never)]` and
+is **not consumer surface** — consuming it from a host is banned outright,
+host tests included (see Pitfalls for the narrowing record). Its contract
+below remains documented because `FilterSurface` builds on it and this
+repo's tests pin it. `NamedEntriesPanel` left that narrowing behind in
+halheinrich/backgammon#190 leg (D): it is the reusable piece the arc exists
+for, and the queued mix-saves document mounts it from BgQuiz.
+
+### The filter setup
+
+```csharp
+public sealed class FilterSetup                       // app-scoped; registered by AddFilterSurface
+{
+    public FilterSetupSnapshot Current { get; }
+    public IDisposable Attach(Action<FilterSetupSnapshot> observer);
+    public void ReportSource(FilterSourceToken? source);
+}
+
+public sealed class FilterSetupSnapshot               // immutable
+{
+    public FilterSourceToken? Source { get; }
+    public int Generation { get; }
+    public FilterRestoration Restoration { get; }
+    public bool IsInEffectFor(FilterSourceToken source);
+    public FilterConfig? ConfigInEffectFor(FilterSourceToken source);   // a new config each call
+}
+
+public enum FilterRestoration { Pending, Restored, NothingStored, Refused, Unreadable }
+
+public interface IFilterStorageRefusalSink
+{
+    void ReportRefused(JSException refusal);
+}
+
+public static class FilterSurfaceServiceCollectionExtensions
+{
+    public static IServiceCollection AddFilterSurface<TRefusalSink>(this IServiceCollection services)
+        where TRefusalSink : class, IFilterStorageRefusalSink;
+}
+```
+
+Contracts:
+
+- **`Attach`** calls the observer with `Current` before it returns, then
+  with each real change, synchronously and in order, until the handle is
+  disposed (twice is harmless). Disposing stops snapshots and cancels
+  nothing. An observer records what it is given and schedules its own
+  render; it must not throw or call the owner's operations.
+- **`ReportSource`**: a different source — `null` included — ends the
+  setup (a new `Generation`, the applied baseline dropped, the draft kept);
+  the same source again does nothing.
+- **`IsInEffectFor(token)`** is the filter half of a Run gate: true when
+  `token` is the setup's source and a filter is in effect — the applied
+  selection, or the ready empty selection, which needs no Apply. The host
+  adds no exception of its own. **`ConfigInEffectFor(token)`** is that
+  filter, a new instance each call, or `null`.
+- **`Restoration`** is `Pending` until the boot's one restoration read
+  settles, then exactly one outcome. It is a diagnostic, not a gate.
+- **`ReportRefused`** is called on the renderer's synchronization context
+  once per refused storage call — every refusal, no deduplication, also
+  after the page that started the call is gone. A page showing the
+  condition re-renders off the sink's own notification.
+- **`AddFilterSurface<TRefusalSink>`** registers the owner and the
+  surface's storage scoped and calls `AddBrowserStorage()`; the host
+  registers `TRefusalSink` itself, at app scope. A second call adds
+  nothing, and the first call's sink stands. A missing sink registration
+  fails when the owner is first created.
+- **Everything else on these types is internal**: the operations the
+  surface's components drive (`Edit`, `Stage`, `ApplyAsync`, `ClearAsync`,
+  `RestoreAsync`, the notice dismissals) and the snapshot's reading for
+  them (the draft, the baseline, `CanApply`, the notices). No host moves
+  the setup but by reporting its source.
 
 ### `FilterSurface`
 
-Parameters:
+Parameters, none required:
 
-- `AppliedFilter AppliedFilter` `[EditorRequired]` — the host's holder
-  instance, mediated by the composite: commits `Set` it keyed to
-  `Source`, uncommitted-edit reports `Clear` it, clean re-affirms re-`Set`
-  it. Hosts read their gates from the holder (`ConfigFor` against their
-  own current token) and re-render off the events below.
-- `FilterRestoreNotice RestoreNotice` `[EditorRequired]` — the host's
-  app-scoped notice-state instance, forwarded to the inner panel, which
-  owns arming and dismissal. Hosts register and bind it only — its members
-  are producer-internal, so no host can move or read it.
-- `FilterSourceToken? Source` — the current source's token; null = none
-  (applies are not recorded). Changing it triggers the composite-owned
-  source-change rule; the first parameters-set only initializes and loads.
 - `IDocumentStorage? Storage` — the saved-filters seam; null = no
   saved-filters section at all. The composite owns the store over it.
 - `bool CanPersist` (default true) + `string? PersistDisabledReason` — the
@@ -950,78 +1163,105 @@ Parameters:
   the store's `Ready` before reaching the panel. The reason is forwarded
   only while the host's half is false (WriteFailed explains itself with
   its own notice).
-- `EventCallback<FilterConfig> OnFilterConfigChanged` +
-  `EventCallback<FilterConfig?> OnAppliedStateChanged`, both
-  `[EditorRequired]` — the inner panel's events re-raised after mediation,
-  with identical names, payloads, and contracts (per-gesture, stateless,
-  idempotent — see the `FilterPanel` section below and Pitfalls).
-- `EventCallback OnStorageUnavailable` — optional; the inner panel's
-  storage-unavailable report forwarded as-is (halheinrich/backgammon#102):
-  raised once per mount of the panel, at the first `localStorage` call the
-  browser refuses, with no payload. The panel has already degraded by
-  then; the host owns what the page says (a condition notice under
-  `SPEC-notices.md`) and whether this is one page-level fact shared with
-  its own keys. A host that binds nothing behaves as before.
+
+It injects `FilterSetup`. Everything about the selection is the owner's,
+read by the host from the owner, and storage refusals reach the host's
+sink; nothing comes back through a parameter.
+
+### Host contract
+
+1. **Register** `services.AddScoped<YourRefusalHolder>()` (implementing
+   `IFilterStorageRefusalSink`) and `services.AddFilterSurface<YourRefusalHolder>()`
+   in every project that renders the surface or injects the owner — the
+   WebAssembly client, and a server that prerenders it.
+2. **Report the source** with `FilterSetup.ReportSource(token)` at the
+   moment you latch it — a pick, a typed path settled, a selection
+   cleared — whether or not the surface is mounted, and at page
+   initialization (an unchanged source costs nothing). Mint the token once,
+   in one property, and use it for reports and reads alike. Report `null`
+   only for "no source", never for "not yet known".
+3. **Read the gate** from `Current.IsInEffectFor(token)` (or attach and keep
+   the snapshot), and the filter to run from `ConfigInEffectFor(token)`.
+   Re-render off `Attach`, not off component events.
+4. **Key derived facts** (a match count) by your selection, the in-effect
+   config and anything else they depend on, recomputing on a snapshot that
+   changes those inputs. Discard a result computed for superseded inputs.
+5. **Show the storage condition** from your sink's own state; the surface
+   has no notice for it.
+6. **Browser tests** wait on `FilterRestorationMarker.SettledSelector`
+   before acting on the panel, and read the outcome with `Parse`. **bUnit
+   tests** plan the surface's storage with `FilterSurfaceStorage` on a
+   `BrowserStoragePlan`.
+
+### Migrating a host from the `AppliedFilter` surface (v1.12.2)
+
+For BgQuiz_Blazor's and ExtractFromXgToCsv's legs; this subsection goes
+when both have migrated.
+
+- **Removed types:** `AppliedFilter` (read the snapshot instead) and
+  `FilterRestoreNotice` (the owner holds both restore notices; delete its
+  registration and binding).
+- **Removed `FilterSurface` parameters:** `AppliedFilter`, `RestoreNotice`,
+  `Source`, `OnFilterConfigChanged`, `OnAppliedStateChanged`,
+  `OnStorageUnavailable`. A host's build fails first wherever it declared
+  one of the removed types. A binding to a removed parameter that survives
+  that compiles, and throws `InvalidOperationException` at first render,
+  because the composite declares no catch-all: adapt every mount site, not
+  only the ones the compiler names.
+- **Source:** where you bound `Source="token"`, call `ReportSource(token)`
+  where the token changes instead. Delete end-of-setup choreography that
+  existed to cover an unmounted surface (`AppliedFilter.Clear()` at a pick,
+  the mount gate that withheld the surface until a restored path settled,
+  any copy-back of a resumed selection): reporting the source is the whole
+  of it.
+- **Gates:** `AppliedFilter.ConfigFor(token)` becomes
+  `Current.ConfigInEffectFor(token)`. The empty selection is now in effect
+  without Apply (halheinrich/backgammon#266), so delete any host-side
+  "Apply required" or empty-filter exception, and any copy that says Apply
+  is needed for the empty filter.
+- **Events:** `OnFilterConfigChanged` / `OnAppliedStateChanged` handlers
+  become a snapshot observer. A count started on commit starts on the
+  in-effect config changing instead, and is reused on a remount when its
+  inputs match.
+- **Storage refusals:** `OnStorageUnavailable` becomes the registered
+  sink; it is told of every refusal, including ones after the page has
+  gone.
+- **Tests:** `FilterPanelTestState.SeedStoredSelection` becomes
+  `plan.ExpectFilterRestore(config)` on a `BrowserStoragePlan`, beside
+  `ExpectFilterPanelMount()` per mount and `ExpectFilterCommit(...)` per
+  commit. Delete any mirrored storage key, and wait on the restoration
+  marker in browser tests.
+- **Copy:** FilterHelp's storage section is conditional now
+  (halheinrich/backgammon#371); a host's own data-ownership copy that
+  promised remembering should say the same.
 
 ### `FilterPanel` (`.Internal` — via `FilterSurface` only)
 
-Two `EventCallback` parameters, both `[EditorRequired]`:
+No parameters: it injects `FilterSetup` and `FilterStorage`, renders the
+owner's snapshot, and sends each gesture to the owner. A host never mounts
+it. Its internal members:
 
-- `EventCallback<FilterConfig> OnFilterConfigChanged` — raised on Apply /
-  Clear filters with the configured
-  `XgFilter_Lib.Filtering.FilterConfig`. Consumers that want a
-  `DecisionFilterSet` call `cfg.Build()`; consumers that want to ship the
-  configuration over the wire serialize `cfg` with `System.Text.Json`.
-- `EventCallback<FilterConfig?> OnAppliedStateChanged` — raised after
-  every gesture that touches the edit buffers (control edit, `LoadConfig`
-  staging, Apply, Clear filters), carrying **the committed config the
-  buffers now equal, or `null` when they equal none**. A consumer gating
-  a downstream action on "is the panel's selection still the one I acted
-  on?" compares the payload against the config it last received from
-  `OnFilterConfigChanged`; `null` always means uncommitted edits are
-  pending. Not raised by either disclosure toggle (navigation, not an
-  edit), and not raised at all by the first-render restore. **Per-gesture,
-  not transition-only** — see Pitfalls for why, and handle it statelessly
-  and idempotently.
-
-Two host-facing methods, typically reached via `@ref` (added in the
-saved-filters arc):
-
-- `void LoadConfig(FilterConfig)` — stages a config into the edit
-  buffers as a bulk edit: no Apply-side effects (no persist, no
-  `OnFilterConfigChanged`, no move of the last-committed config),
-  `OnAppliedStateChanged` fires once — `null` normally, or the committed
-  config when the load stages exactly it — and the first-render
-  localStorage restore is suppressed so a host-startup load can't be
-  clobbered. Never opens or closes a row.
-- `bool TryGetEditedConfig(out FilterConfig?)` — snapshots the live
-  buffers (including unapplied edits) for host-driven save-as. Gate is
-  exactly Apply's validity gate (`IsCommittable`): fails on any field
-  `FilterConfig.GetInvalidFields()` names, pattern text the grammar refuses
-  included. No stricter either — match-score tokens and pattern text ride
-  raw through both paths — so a saved document is never minted from a
-  selection Apply would itself have refused.
-
-Two further methods, `ForgetCommitted()` and `ResumeApplied(FilterConfig)`,
-are deliberately `internal` — `FilterSurface` is their only intended
-caller (its source-change rule and its first-mount reconcile
-respectively), so neither is host-facing surface (see Architecture and
-Pitfalls).
-
-Its `internal const string`s, listed below, and **`internal` is the whole
-point of them**: `FilterHelp` is their only reader, so the copy it renders and the
-thing the panel actually does have one source. Not `public` — no consumer
-may see, let alone depend on, this panel's storage keys or name its chrome.
-
-- `ConfigKey` (`xg_filter_config`) / `DisclosureKey`
-  (`xg_expandedFilters`) / `MoreFiltersKey` (`xg_moreFiltersOpen`) — the
-  panel's `localStorage` entries, rendered into the help's storage section
-  as the names a reader verifies in devtools.
+- `MountRestored` — completes when this mount's restores (its two
+  preferences and the boot's restoration) have settled.
+- `RestorationAttribute` (`data-filter-restoration`) — the marker's
+  attribute, read through `XgFilter_Razor.Testing.FilterRestorationMarker`.
+- `SerializeFold(bool)` / `SerializeOpenRows(IEnumerable<FilterFacet>)` —
+  the two preferences' stored spellings, for the test support's toggle
+  expectations.
 - `MoreFiltersFoldedLabel` (*More filters*) / `MoreFiltersExpandedLabel`
   (*Fewer filters*) — the container toggle's two names, rendered into the
   markup through the private `MoreFiltersLabel` rule and into the help's
   one naming sentence. The rule stays `private`: only the panel renders
   *a* label, and the help names both and leaves the choosing alone.
+
+The storage keys are `FilterStorage`'s `internal const string`s —
+`ConfigKey` (`xg_filter_config`), `DisclosureKey` (`xg_expandedFilters`),
+`MoreFiltersKey` (`xg_moreFiltersOpen`) — and **`internal` is the whole
+point of them**: `FilterHelp` renders them as the names a reader verifies in
+devtools, and the test support arranges them, so the copy, the arrangement
+and what the surface writes have one source. Not `public` — no consumer may
+see, let alone depend on, the surface's storage keys or name the panel's
+chrome.
 
 ### `NamedEntriesPanel<TValue, TSelf>`
 
@@ -1043,7 +1283,7 @@ Parameters (all callbacks `[EditorRequired]`, as are `Document` and
   carrying the entry name; the panel mutates nothing. `OnSaveRequested`
   is the per-row Save (halheinrich/backgammon#38): overwrite that entry
   with the host editor's current live state — the host mediates it
-  exactly as save-as (for filters, `TryGetEditedConfig` → `With` →
+  exactly as save-as (for filters, `TryGetSavable` → `With` →
   persist), the name coming from the row.
 - `bool CanPersist` (default `true`) + `string? PersistDisabledReason` —
   gate Save/Save-as/Delete as one switch when the host cannot persist;
@@ -1051,15 +1291,6 @@ Parameters (all callbacks `[EditorRequired]`, as are `Document` and
 
 ### Non-visual model types
 
-- `AppliedFilter` — `FilterConfig? ConfigFor(FilterSourceToken)`,
-  `void Set(FilterConfig, FilterSourceToken)`, `void Clear()`. The
-  surface is source-relative only — no bare `Config` / `IsApplied` — and
-  `Clear()` drops the applied state entirely.
-- `FilterRestoreNotice` — public type, deliberately opaque to hosts: a
-  public parameterless ctor for DI registration and nothing else callable
-  from outside the producer (`Arm` / `Dismiss` / `IsVisible` are
-  `internal`; tests reach them via `InternalsVisibleTo`). A host's whole
-  contract is register at app scope, bind to `FilterSurface`.
 - `FilterSourceToken` — `readonly record struct`; factories
   `FromGeneration(int)` / `FromPath(string)`; value-equal, with
   `FromPath` normalizing path identity itself (case, trailing separator).
@@ -1121,37 +1352,30 @@ host's help lives and add app-level framing around it.
   rest — including why the other eleven `fh-*` ids are constants too but
   `internal`.
 
-`FilterPanel`'s two `localStorage` key constants are `internal`, not
-public: the copy naming them lives here, in the producer, so a consumer
-never sees or depends on this panel's key names. Test-only
-`InternalsVisibleTo("XgFilter_Razor.Tests")` lets the wiring test pin
-the rendered names to those constants, and
+`FilterStorage`'s key constants are `internal`, not public: the copy
+naming them lives here, in the producer, so a consumer never sees or
+depends on the surface's key names. Test-only
+`InternalsVisibleTo("XgFilter_Razor.Tests")` lets the wiring test pin the
+rendered names to those constants, and
 `InternalsVisibleTo("XgFilter_Razor.Testing")` lets the test-support
-assembly seed the config key on a host suite's behalf — both grants are
-producer-side, so neither widens what consumers can see.
+assembly state the surface's calls on a host suite's behalf — both grants
+are producer-side, so neither widens what consumers can see.
 
 ## Pitfalls
 
-- **`IJSRuntime` / localStorage coupling.** `FilterPanel` depends on
-  `Microsoft.JSInterop.IJSRuntime` and assumes the host provides a
-  browser-style `localStorage` global (Blazor WebAssembly, Blazor
-  Server, MAUI Blazor Hybrid all qualify). Real-host consumers must
-  register `IJSRuntime` in DI (Blazor's defaults do); a host without one
-  fails at injection. A browser that *refuses* storage is a different
-  case and is handled (halheinrich/backgammon#102): every `localStorage`
-  call goes through the panel's guarded seam, a refused read is "nothing
-  stored" and the read site's own default applies, a refused write keeps
-  the in-memory state, Apply still delivers the applied selection through
-  both events, and the host is told once per mount through
-  `OnStorageUnavailable`. The catch is `JSException` only, the ruled
-  precedent (ExtractFromXgToCsv's `BrowserStorage`,
-  halheinrich/backgammon#91): a serialization bug or a host callback that
-  throws is never relabelled as unavailable storage. The latch is per
-  mount — the panel holds no app-scoped state — so a remount rediscovers
-  the condition at one refused call and reports again; a host's
-  page-level fact absorbs that idempotently. Tests in this subproject use
-  `JSInterop.Mode = JSRuntimeMode.Loose` on `BunitContext` for the working
-  case and a throwing setup for the refused one.
+- **Storage goes through `FilterStorage`, over `BrowserStorage` — never
+  around it, and never with a latch.** Every call the surface makes — the
+  owner's selection, the panel's preferences — is a `FilterStorage` call,
+  which makes the call and tells the host's sink of a refusal before
+  returning. Don't call `IJSRuntime` or `BrowserStorage` directly, and
+  don't skip a call because an earlier one was refused, or report only the
+  first refusal: the ruled policy is every requested call made and every
+  refusal told, with the deduplicating done by the host's occurrence owner
+  (halheinrich/backgammon#374). A refused read is "nothing stored" to its
+  reader, and a refused write leaves the in-memory choice standing. Only
+  the browser's refusal is caught, below in `BrowserStorage`: a
+  serialization bug, static rendering's interop failure, or a sink that
+  throws is never relabelled as unavailable storage.
 - **JSON round-trip needs `JsonStringEnumConverter`.** Consumers that
   serialize `FilterConfig` for HTTP transport must register
   `JsonStringEnumConverter` (e.g. on `JsonSerializerOptions.Converters`
@@ -1159,48 +1383,49 @@ producer-side, so neither widens what consumers can see.
   and `PlayTypes` serialize as their string member names rather than
   underlying integer values. This is the lib's stated contract — see
   `FilterConfig`'s type-level remarks. The Razor side itself never
-  serializes; it hands typed C# objects via `EventCallback`. The
-  converter requirement applies to the consumer's HTTP plumbing.
-- **Apply, not on-change.** The component does not raise filter-change
-  events as the user types — only `OnAppliedStateChanged`. The contract
-  is "user thinks, then commits via Apply." Don't wire a downstream
-  consumer to assume `OnFilterConfigChanged` fires per keystroke.
-- **`OnAppliedStateChanged` is per-gesture, not transition-only — don't
-  "optimize" it.** The obvious-looking cleanup is to fire only when the
-  reported value changes. It is wrong, and the failure is silent. The
-  last-committed config is component-instance state that dies on unmount,
-  so a freshly mounted panel has committed nothing; the user's first edit
-  is not a transition from anything *this* panel knows about, and a
-  transition-only event would say nothing. Meanwhile a consumer whose own
-  applied state survived the navigation (BgQuiz's `AppliedFilter`) is
-  still holding a config from the previous mount and gating on it — a
-  stale "clean" belief that only this event can correct. Silent in exactly
-  the state where the consumer is most wrong. Consumers must therefore
-  handle it statelessly and idempotently: assign from the payload, never
-  diff it against a remembered previous one.
-- **Cleanliness is derived from equality, never latched.** The Apply gate
-  and the event payload both read one computed member — the committed
-  config the buffers currently equal. Don't add a `_isDirty` flag beside
-  it: a one-way flag never clears on edit-then-undo, and since Apply is
-  itself disabled on an unchanged selection, the consumer's gate would be
-  stranded with no recovery gesture. (That wedge is why the old
-  payload-less `OnFilterDirty` had to go: both consumers used re-clicking
-  Apply as their implicit recovery, which an equality-derived gate
-  removes.) Equally, don't compare in two places — the gate and the
-  payload disagreeing is the defect the single member exists to prevent.
-- **The last-committed config is never persisted.** The first-render
-  `localStorage` restore *stages* a selection; it does not commit one. So
-  a fresh panel raises neither event and would start with Apply enabled
-  even with every control populated — which is what makes "a new folder
-  re-enables Apply" fall out of a host remount for free. Persisting it, or
-  hoisting it into a holder, would break both properties at once. The
-  composite's first-mount reconcile narrows *when* that re-arm is offered
-  without touching either property: it resumes the panel in memory from
-  the applied holder, writing nothing (next entry).
+  serializes for transport; it hands typed C# objects out of the snapshot.
+  The converter requirement applies to the consumer's HTTP plumbing.
+- **Apply and Clear are the only commits.** Edits change the draft, which
+  the owner publishes on every keystroke — that is how the gates follow —
+  but nothing is applied as the user types: the contract is "user thinks,
+  then commits via Apply". A host acting on "the filter changed" acts on
+  the in-effect config changing, which edits move only by leaving or
+  returning to an applied or empty selection.
+- **Publish before persisting — never move state after an await.** Every
+  owner operation that changes state does so, and publishes, before its
+  storage call; a write's completion may only end the failed-restore
+  notice. The obvious-looking alternative — record the commit when its
+  write returns — is the v1.12.1 defect (halheinrich/backgammon#373): the
+  completion can arrive after a newer commit, an edit, or the end of the
+  setup, and would put an older state back. The restoration is the one
+  read whose answer changes state, and it is guarded by the draft's
+  revision; a new async read that changes state needs the same guard.
+- **What is in effect is derived from equality, never latched.** The Apply
+  gate and the host's gate are one snapshot's reading of the draft against
+  the baseline (and of the ready empty selection). Don't add a dirty flag
+  beside it: a one-way flag never clears on edit-then-undo, and since Apply
+  is itself disabled on an unchanged selection, the host's gate would be
+  stranded with no recovery gesture. Equally, don't compare in two places
+  — the two gates disagreeing is the defect the one reading exists to
+  prevent.
+- **The baseline is never persisted, and a restoration never sets it.**
+  What is stored is the committed selection, and it comes back as a
+  *choice*: the restoration puts it in the draft, never in the baseline,
+  so a reload re-arms Apply over a non-empty restored selection (§4: your
+  choices outlive the setup, your consent does not). Persisting applied-ness
+  was considered and rejected in §4.
+- **Readiness is the producer's — don't add an empty-filter exception
+  anywhere else.** The ready empty selection is in effect without Apply
+  (halheinrich/backgammon#266), and `IsInEffectFor` already says so. A host
+  or a component that special-cases "no filter set" is a second encoding
+  of §1's rule, and it would also have to know that a pending or failed
+  restoration, an invalid draft, and no source are not that selection.
+  Resolution belongs to the owner too; never rewrite the restoration
+  outcome to make Run possible.
 - **The depth facet's clause union is derived in `Build()`, not the panel.**
   The Analysis-depth control writes only raw intent — three per-mode pairs,
-  each a toggle plus its own checked-level set — and calls
-  `ReportAppliedState()`. The mapping to
+  each a toggle plus its own checked-level set — held in the draft. The
+  mapping to
   `AnalysisDepthFilter` clauses (one clause per enabled toggle
   carrying its own level list, empty list = any level, all toggles off =
   facet off, inert level lists) lives **only** in `FilterConfig.Build()` — it
@@ -1217,44 +1442,44 @@ producer-side, so neither widens what consumers can see.
   "N selected") already carries that in full, so remembering the open state
   would buy no information at the cost of three more localStorage keys and
   their interop. Each group therefore mounts
-  collapsed, and toggling it is navigation: no `OnAppliedStateChanged`, no
-  write.
-- **Unchecking a mode keeps its checked levels.** The buffer (and the
-  emitted config) retain a group's level selections when its toggle goes
+  collapsed, and toggling it is navigation: the owner hears nothing, and
+  nothing is written.
+- **Unchecking a mode keeps its checked levels.** The draft (and the
+  config it parses to) retain a group's level selections when its toggle goes
   off: the lib guarantees a level list whose toggle is off is inert — no
   activation, no constraint, no validation — so re-toggling the mode
   restores the user's selection instead of punishing an exploratory
   untoggle. Only Clear filters (or a hydrating restore/load) resets the
   level lists.
-- **Single callback by design.** `FilterConfig.Build()` is the canonical
-  `FilterConfig` → `DecisionFilterSet` adapter; a parallel callback
-  raising `DecisionFilterSet` would be a redundant encapsulation leak.
-  Consumers needing a `DecisionFilterSet` call `cfg.Build()` themselves.
+- **One config out, never a filter set.** `FilterConfig.Build()` is the
+  canonical `FilterConfig` → `DecisionFilterSet` adapter; handing hosts a
+  `DecisionFilterSet` beside the config would be a redundant
+  encapsulation leak. Hosts take `ConfigInEffectFor(token)` and call
+  `cfg.Build()` themselves.
 - **Razor silent-splat, and where it does and doesn't bite here.** Razor
   doesn't error or warn at *build* time on an unrecognized component
   attribute — it emits it like any other, so a consumer retaining a stale
-  binding for a removed `EventCallback` parameter compiles clean while its
-  now-dead handler still looks wired. Where it lands after that depends on
-  the component. `FilterPanel` declares no
+  binding for a removed parameter compiles clean while its now-dead
+  handler still looks wired. Where it lands after that depends on the
+  component. Neither `FilterPanel` nor `FilterSurface` declares a
   `[Parameter(CaptureUnmatchedValues = true)]` catch-all, so the renderer
   rejects the unmatched attribute on the first render —
-  `InvalidOperationException: Object of type '…FilterPanel' does not have
-  a property matching the name '…'` (pinned by
-  `StaleParameterBinding_ThrowsAtRender`). Loud, but only once the page
-  actually renders: a consumer's *build* stays green, which is exactly why
-  a producer-side parameter removal needs each consumer adapted in its own
-  leg before any umbrella pointer bump. Never add a `CaptureUnmatchedValues`
-  catch-all to this panel — it would convert that render-time exception
-  back into the silent splat the whole discipline exists to avoid.
-  For the opposite failure — a binding *missing* rather than stale —
-  `[EditorRequired]` yields `RZ2012` at build. Every `FilterPanel` callback
-  carries it, including `OnAppliedStateChanged`, whose predecessor
-  `OnFilterDirty` was deliberately optional. It is not optional now: it is
-  the only channel telling a consumer its applied state went stale, and an
-  unbound one fails silently at runtime as a gate that never re-opens.
-  Neither attribute nor exception proves the wiring is *right*, so
-  supplement both with bUnit integration tests that fire Apply and assert
-  the consumer's downstream state actually flips.
+  `InvalidOperationException: Object of type '…' does not have a property
+  matching the name '…'` (pinned for the panel by
+  `StaleParameterBinding_ThrowsAtRender`, with `OnAppliedStateChanged`,
+  retired with the owner). Loud, but only once the page actually renders:
+  a consumer's *build* stays green, which is exactly why a producer-side
+  parameter removal needs each consumer adapted in its own leg before any
+  umbrella pointer bump. Never add a `CaptureUnmatchedValues` catch-all to
+  either — it would convert that render-time exception back into the
+  silent splat the whole discipline exists to avoid. The panel declares no
+  parameter at all, and the composite none it requires, which
+  `ThePanel_DeclaresNoParameters` and
+  `TheSurface_BindsOnlyTheHostsSavedFiltersFacts` hold: a parameter added
+  for the selection would be a second channel beside the owner. Neither the
+  exception nor those pins proves a host's wiring is *right*, so a host
+  supplements them with bUnit tests that apply a filter and assert its own
+  gate actually flips.
 - **`FilterHelp.HeadingLevel` is `[EditorRequired]` and breaks host
   builds on purpose** — the `OnSaveRequested` precedent, for the same
   reason. A default would be a level the component cannot know is right:
@@ -1290,18 +1515,19 @@ producer-side, so neither widens what consumers can see.
   unlocks here*, never what the controls do.
 - **The storage keys are a documented surface now — `internal`, and no
   wider.** `ConfigKey` / `DisclosureKey` / `MoreFiltersKey` on
-  `FilterPanel` are `internal`
-  solely so `FilterHelp` can render the names it tells users to look for
-  in devtools from the one constant. Two consequences. (1) Renaming a
+  `FilterStorage` are `internal` so `FilterHelp` can render the names it
+  tells users to look for in devtools from the one constant, and so the
+  test support can state the surface's calls for a host's test. Two
+  consequences. (1) Renaming a
   key is a user-facing copy change as well as a storage-format change:
   the name in the help text follows automatically, but a reader's
   existing entry silently stops being found, so treat a rename as a
   migration question, not a refactor. (2) They must never become
-  `public`. A consumer that can see this panel's key names will
-  eventually hardcode one, and the point of siting the copy here is that
-  no consumer needs to know them. The test project reaches them through
-  test-only `InternalsVisibleTo` in the csproj — that grant is the whole
-  intended audience.
+  `public`. A consumer that can see the surface's key names will
+  eventually hardcode one, and the point of siting the copy and the test
+  support here is that no consumer needs to know them. The test project
+  and the test-support assembly reach them through `InternalsVisibleTo` in
+  the csproj — those grants are the whole intended audience.
 - **Host-app-specific wrappers stay with the host.** A consumer that
   needs to wrap `FilterConfig` with output-format options (CSV / PPTX
   selection, output paths, etc.) defines that wrapper in the consumer,
@@ -1328,41 +1554,46 @@ producer-side, so neither widens what consumers can see.
   `IsTrimmable`) and a `JsonTypeInfo` overload at the call site. Types whose shape the lib owns
   still go through the lib's own document trio, never through this context.
 - **A row badge's presence is computed from `GetActiveFacets()`, never by
-  re-inspecting config fields or the edit buffer behind the controls.** The
+  re-inspecting config fields or the draft text behind the controls.** The
   activation predicates are the lib's SSOT (the `FacetRules` table behind
   both `Build()` and `GetActiveFacets()` — the `DecisionFilterSet.IsEmpty`
-  ruling), and a badge that read its own buffer would be a second encoding
+  ruling), and a badge that read its own box would be a second encoding
   of one of them. The states where the two answers differ are real and
   reachable by typing, which is what makes this a live hazard rather than a
   style rule: whitespace-only position-pattern text is no pattern, a depth
   level list whose mode toggle is off is inert by the lib's guarantee, and
   a player list of nothing but separators splits to no tokens — in each the
-  buffer is non-empty and the facet is off. The opposite state is the lib's
+  box is non-empty and the facet is off. The opposite state is the lib's
   ruling too (`halheinrich/backgammon#269`): a facet is active on
   *presence*, so pattern text the grammar refuses badges `set` exactly as a
   malformed score token does — what is there is a filter the user meant,
   refused at Apply by the lib's field verdict, not nothing. A badge that
   re-parsed the text to decide would be the second encoding again. The badge
-  reads the live buffers via `BuildConfig()`, so it is honest for everything
-  the panel holds. `ErrorRange` needs no exclusion any more: it has no
+  reads the draft's `ActiveFacets` — the lib's answer over the draft's
+  config, plus the facet of any bound whose text its field cannot hold
+  (`1.5` in a move-number box is present and refused, the same presence
+  ruling) — so it is honest for everything the panel holds. `ErrorRange`
+  needs no exclusion any more: it has no
   row, so nothing it does can badge one. The shelved facets
   (`PositionTypes` / `PlayTypes`) have no row either and are outside scope by
-  pre-existing panel behavior — `HydrateFrom` / `BuildConfig` ignore them —
+  pre-existing panel behavior — the draft has no field for them, so
+  `FilterDraft.From` drops them and `ToConfig` emits none —
   so a stale `xg_filter_config` blob carrying them badges nothing; since the
   panel is the only apply path, they also can never become active through
   it. The badge's *words* are the opposite kind of fact — panel-owned
   display copy, chosen per facet — and live in `FacetBadgeText`.
-- **Clear filters touches filter values only.** It hydrates the buffers
-  to defaults and persists + raises the empty config — nothing else. No
+- **Clear filters touches filter values only.** It makes the draft and
+  the baseline the empty selection and remembers it — nothing else. No
   host state (the panel has no parameter or interop path to any — e.g.
   BgQuiz's picked folder is out of reach by construction; keep it that
-  way) and no row movement. `LoadConfig` likewise stages values without
-  opening or closing a row; which rows are open changes only on the user's
-  toggle.
+  way) and no row movement. Staging a saved filter likewise sets values
+  without opening or closing a row; which rows are open changes only on
+  the user's toggle. Clear commits the empty baseline on purpose (§4):
+  editing back to a selection applied before the Clear needs Apply again.
 - **The saved-filters file names are `public` — deliberately opposite to
-  the internal storage-key rule.** `FilterPanel.ConfigKey` /
+  the internal storage-key rule.** `FilterStorage.ConfigKey` /
   `DisclosureKey` / `MoreFiltersKey` stay `internal` because no consumer
-  may know or depend on this panel's localStorage keys. `SavedFiltersDocument.FileName` /
+  may know or depend on the surface's localStorage keys. `SavedFiltersDocument.FileName` /
   `LegacyFileName` are the opposite kind of fact: the shared file name is
   user-facing copy every host must render — help pages, the composite's
   degrade notices — so one public source is the SSOT move, and each host
@@ -1392,7 +1623,8 @@ producer-side, so neither widens what consumers can see.
 - **Never restate a lib validity rule in the panel — ask it.** The error
   bounds' rule (non-negative, `min ≤ max`, `NaN` rejected) lives in
   `XgFilter_Lib` and is asked through `FilterConfig.GetInvalidFields()` on
-  the same `BuildConfig()` output Apply commits. A local
+  the same config Apply commits (the draft's `ToConfig()`, inside its
+  `InvalidFields`). A local
   `if (min < 0)` here would be a second encoding of a rule `Build()` also
   enforces, and the two would drift the day the lib's rule moves — the
   depth-facet scenario again, one tier down. The same applies to
@@ -1435,19 +1667,20 @@ producer-side, so neither widens what consumers can see.
   and a substring check cannot serve — the retired spelling is a prefix of
   both live ones — ask the grammar word by word (`GetFault`) rather than
   reaching for a literal.
-- **`TryGetEditedConfig` is Apply's validity gate, and must stay exactly
-  that.** Both directions matter. Stricter, and save-as refuses a
-  selection the user could apply; looser, and a saved document is minted
-  from a selection Apply refuses — a permanent trap, since loading it
-  reproduces the invalid state with Apply disabled. When a validity rule is
-  added, it goes into the one `IsCommittable` member both read; the
-  composite's refusal copy stays field-agnostic for the same reason (the
-  offending field is already marked, with its own explanation, in the
-  panel).
-- **Per-row Save snapshots the live edit buffers — exactly as Save-as
-  does.** Both save gestures capture what `TryGetEditedConfig` hands
-  over, unapplied edits included; a row Save differs only in taking its
-  name from the row. Don't "fix" it to save the last-committed config —
+- **The save snapshot is Apply's validity gate, and must stay exactly
+  that.** `FilterSetupSnapshot.TryGetSavable` refuses exactly the drafts
+  whose values Apply refuses. Both directions matter. Stricter, and
+  save-as refuses a selection the user could apply; looser, and a saved
+  document is minted from a selection Apply refuses — a permanent trap,
+  since loading it reproduces the invalid state with Apply disabled. When a
+  validity rule is added, it goes into the one verdict both read (the
+  draft's `InvalidFields`); the composite's refusal copy stays
+  field-agnostic for the same reason (the offending field is already
+  marked, with its own explanation, in the panel).
+- **Per-row Save snapshots the live draft — exactly as Save-as does.**
+  Both save gestures capture what `TryGetSavable` hands over, unapplied
+  edits included; a row Save differs only in taking its name from the
+  row. Don't "fix" it to save the last-committed config —
   saving what the user sees staged is the contract, and the confirm copy
   ("…with the current filters") says so.
 - **`OnSaveRequested` is `[EditorRequired]` and breaks host builds on
@@ -1455,14 +1688,14 @@ producer-side, so neither widens what consumers can see.
   migration legs bind the per-row Save — the deliberate alternative to a
   silently splatted, dead affordance (see the Razor silent-splat entry
   above).
-- **`ForgetCommitted` and `ResumeApplied` stay `internal`.**
-  `FilterSurface` is their only intended caller — its source-change rule
-  and its first-mount reconcile; a host either remounts the panel (getting
-  the re-arm for free) or hosts the composite, which owns both rules. And
-  only the composite mediates the applied holder, so only it can say what
-  a fresh panel was committed to. Widening either public would hand hosts a
-  second, uncoordinated way to move the committed state that the
-  applied-state events were designed around.
+- **The owner's operations stay `internal`.** `Edit`, `Stage`,
+  `ApplyAsync`, `ClearAsync`, `RestoreAsync` and the notice dismissals are
+  the surface's components' to call. A host moves the setup only by
+  reporting its source; widening an operation public would hand hosts a
+  second way to change the selection or what is applied, uncoordinated
+  with the panel on screen. The snapshot's reading for the components (the
+  draft, the baseline, `CanApply`, the notices) is internal for the same
+  reason, and a host has no use for it: its gate is `IsInEffectFor`.
 - **`FilterPanel`'s narrowing is `.Internal` + `EditorBrowsable(Never)` —
   the strongest the toolchain allows, and the ban is absolute anyway.** The
   spike (Step 2, ruled): a true `internal` component draws CS0262 — the
@@ -1479,171 +1712,82 @@ producer-side, so neither widens what consumers can see.
   halheinrich/backgammon#190 leg (D) so is `NamedEntriesPanel`: the pick
   list was only ever narrowed because it was filter-shaped, and it no
   longer is.
-- **`FilterSurface` is told, never asks — keep it that way.** It has no
+- **The surface is told, never asks — keep it that way.** It has no
   parameter or interop path to pickers, paths, folder handles, or
-  capabilities: the host mints `FilterSourceToken`s and rules `CanPersist`;
-  the composite only compares tokens and ANDs the ruling with its store's
-  status. Adding any host-domain knowledge (a path parameter "just for the
-  notice", a capability enum) re-couples what the seam exists to decouple.
-  The same boundary governs copy: degrade-notice and refusal wording is
-  producer-owned here so every host degrades identically; only
-  host-specific *reasons* (FS-Access phrasing) arrive as parameters. A
-  host writing its own copy for these states is the facet-prose drift
-  hazard again.
-- **`FilterSurface`'s first parameters-set is initialization, not a source
-  change** (ruled pin). It sets the comparison token and loads the
-  saved-filters context — no holder clear, no forget-commit, no notice
-  choreography. A remount over an unchanged source (navigate-back) must
-  leave an already-applied holder untouched and the host's gate armed —
-  that survival is the holder's documented purpose, and an end-setup on
-  mount would silently revoke it. The end-setup choreography runs only on
-  an actual token change against the initialized value; pinned by
-  `Mount_OverSameSource_LeavesAppliedHolderUntouched_RaisesNothing`.
-  **The host-side half of that pin: publish `null` for `Source` only when
-  you mean *no source exists* — never as *not yet known*.** The composite
-  only compares tokens; it cannot tell a placeholder apart from an answer.
-  A `null` that is later corrected to the real token is therefore read as a
-  genuine source change and ends the setup — holder cleared, commitment
-  forgotten, Apply re-armed — which is exactly wrong when nothing about the
-  source actually changed. A host whose source is derived from facts it
-  restores asynchronously must withhold the composite until that derivation
-  is settled rather than mount it against a placeholder;
-  `ExtractFromXgToCsv`'s `_restoreComplete` gate
-  (halheinrich/backgammon#85) is the consumer-side statement of this rule.
-- **The first-mount reconcile resumes from the holder — NEVER from
-  `localStorage`, in either direction** (ruled, halheinrich/backgammon#82;
-  widened by halheinrich/backgammon#102). Apply is offered only when there
-  is something to do: a filter change or a source change. A remount over
-  an already-filtered source has neither, so the composite resumes the
-  fresh panel — its buffers and its committed config — from
-  `AppliedFilter` at its first render. The tempting shortcut — seed the
-  reference point from the restored `localStorage` selection, which the
-  panel already has in hand — is a **lock-out**. That blob survives a full
-  browser reload; the holder deliberately does not. After a reload,
-  storage-seeding would disable Apply while nothing is applied: the host's
-  start gate closed and the one control that could re-open it greyed out.
-  Pinned from the other side by
-  `Mount_EmptyHolder_WithRestorableStorage_LeavesApplyEnabled`, which is
-  exactly the test that fails if anyone ever makes that swap. The other
-  direction — resume the reference point from the holder but let the
-  buffers hydrate from storage, which is what the reconcile did until
-  halheinrich/backgammon#102 — is a **stale screen**: after an Apply whose
-  write the browser refused, storage holds the previous selection (or,
-  with reads refused, nothing), so the remount would show one selection
-  while the holder and the host's gate said another was applied. Pinned by
-  `FilterSurfaceStorageUnavailableTests`' two remount cases. Storage and
-  the holder agree only while remembering works, and the holder is the
-  owner of the applied selection.
-  Three more properties are load-bearing:
-  - **It runs from `OnAfterRenderAsync(firstRender: true)`, not the first
-    parameters-set.** `@ref` is null until after the first render, so
-    copying `EndSetup`'s `_filterPanel?.` idiom into the parameters-set
-    branch compiles, reads correctly, and silently does nothing.
-  - **It is silent** — no `OnAppliedStateChanged`. `ForgetCommitted`
-    reports because it creates news; a reconcile derives from the holder,
-    which already agrees, so there is none. A raise would also break the
-    mount pin above and its named test.
-  - **It asks the holder source-relatively — `ConfigFor(Source)` — the
-    only way the holder answers.** "Something is applied" and "it was
-    applied to *this* source" are one question under the keyed surface: a
-    config applied against another source reads as nothing applied, and
-    the resume correctly declines.
-  Ordering against the panel's own `localStorage` restore is settled by
-  the panel, not by timing: `ResumeApplied` suppresses a restore still in
-  flight (the `LoadConfig` guard, checked again after the await) and
-  overwrites one that already ran, so the mount ends on the holder's
-  selection whichever lands first.
-  **Reachability note** (re-checked after halheinrich/backgammon#85, and the reason the keyed
-  lookup's decline path is defence in depth rather than the load-bearing
-  part): neither host can present a fresh mount with a holder keyed to a
-  *different* source — but each for its own host-side reason, and in
-  neither case because `Source` is null. BgQuiz gates the composite behind
-  `HasFiles`, so every source change crosses an unmount, and
-  `EndCurrentSetupAsync` — which runs at the pick click, not after it —
-  clears the holder first. ExtractFromXgToCsv clears the mismatched holder
-  itself: since halheinrich/backgammon#85 its first-render restore calls `AppliedFilter.Clear()`
-  whenever the holder carries nothing keyed to the source it just restored,
-  and that restore completes *before* the page lets the composite mount
-  (`_restoreComplete`). So the holder the composite meets on its first
-  render is already either this source's or empty. Note what this does *not* rest on, since it is the
-  tempting re-derivation: Extract's `Source` is truthful at that first
-  render rather than a placeholder — non-null whenever a source was in
-  fact restored — so over an unchanged folder the reconcile genuinely
-  *fires* there, opening with Apply disabled and the "already applied"
-  notice. That is the reconcile resuming the fresh panel, not a non-null
-  guard declining. (A restored blank path is the other truthful answer:
-  `Source` is null, the reconcile declines, and the host's restore has
-  already cleared the holder on the same condition.)
-  Re-check this if either host's mount-time source derivation changes.
-- **A host that gates the composite behind source-existence never fires
-  the in-place source-change rule — and still owes one line of end-setup
-  choreography** (proven in BgQuiz's migration). When `FilterSurface`
-  renders inside an `@if` tied to "a source is held" (BgQuiz's `HasFiles`
-  gate), every source change crosses an unmount: the composite is disposed
-  before it can observe the new token, and the fresh mount's first
-  parameters-set deliberately only initializes the token and loads the
-  saved-filters context (the navigate-back pin above). Remount therefore
-  delivers Apply re-arm, context re-read and notice death for free — but it
-  cannot clear a host-registered `AppliedFilter` holder that outlives the
-  page, so such a host must keep an `AppliedFilter.Clear()` at its
-  setup-ending gesture (BgQuiz's `EndCurrentSetupAsync` is the precedent).
-  Since halheinrich/backgammon#82 that `Clear()` also carries the re-arm:
-  the fresh mount reconciles from the holder, so a holder left applied
-  would keep Apply disabled for the *new* source. Both hosts clear a
-  mismatched holder before any fresh mount can see it — at different
-  moments, by different mechanisms — which is why the reconcile cannot
-  adopt a stale config; see the reachability note in the reconcile entry
-  above, and the two gate shapes below.
-  Two gate shapes exist and only one of them is this bullet's subject.
-  BgQuiz's is *ongoing*: the `@if` tracks source existence for the page's
-  whole life, so every source change crosses an unmount. Extract's
-  `_restoreComplete` is *one-shot at page mount*: it withholds the
-  composite until the restore has settled `Source`, then mounts it and
-  leaves it mounted. `Source` going null afterwards — the user blanks the
-  folder path — unmounts nothing, so Extract remains an always-mounted host
-  for every rule in halheinrich/backgammon#78 and the in-place
-  source-change rule still owns its source changes. Do not read the
-  one-shot gate as buying remount-for-free. Nor does it excuse the
-  `Clear()`: a DI-scoped holder outlives the page in either host, and
-  nothing else drops a config keyed to a source this visit no longer has,
-  so Extract owes the same line and since halheinrich/backgammon#85 carries
-  it inside the restore. Read the pair as gated-ongoing plus `Clear()` at
-  the setup-ending gesture (BgQuiz), or always-mounted plus `Clear()` in
-  the mount-time restore (Extract) — neither host gets to skip it. Leave
-  the source-change rule wired in gated hosts regardless: it is harmless
-  defence in depth if render timing ever changes.
-- **The restored-selection notice cannot be derived at mount time — its
-  app-scoped instance IS the trigger.** The tempting condition — "a stored
-  selection was restored AND nothing is applied for the current source" —
-  is also true of a navigate-back with unapplied edits: same setup, the
-  panel remounts, restores, and finds the holder empty (the edit cleared
-  it). §1 rules that navigation changes nothing, including no new notice,
-  so that condition misfires exactly where the user is mid-work. The
-  distinguishing fact is app-boot identity, and it is carried by lifetime,
-  not by a recorded flag: a reload constructs a fresh
-  `FilterRestoreNotice`, a remount reuses the boot's already-dismissed
-  one. The properties below are each load-bearing:
-  - **Dismissal is one-way per app lifetime and rides on user gestures
-    only** — buffer edits, `LoadConfig` staging, and commits dismiss;
-    row and level-group toggles (navigation) and `ForgetCommitted`
-    (source-change choreography) do not. The `ForgetCommitted` half matters for host
-    symmetry: a gated host's source change crosses an unmount and runs no
-    panel code, so if the in-place rule dismissed, the notice's fate would
-    differ by host mechanics. Hence the panel's
-    `ReportAppliedState` (gesture: dismiss + raise) /
-    `RaiseAppliedState` (raw raise) split — route new callers
-    deliberately.
-  - **This is not a history fact.** §3 bans behaviour from depending on
-    what has ever happened; this records a *pending* present-tense state
-    (this boot's restored selection, not yet the user's own), moves only
-    toward death within a boot, resets solely by instance death, and
-    gates nothing but its own copy. No behaviour may branch on it.
-  - **The composite's forwarding is load-bearing.** `FilterPanel`'s
-    parameter defaults to a fresh panel-scoped instance so the panel is
-    coherent bare (tests); only the forwarded app-scoped instance makes
-    remounts quiet after an edit. Dropping the forwarding is silent at
-    compile time and pinned by
-    `Remount_WithinSetup_AfterAnEdit_DoesNotResurrectTheNotice`.
+  capabilities: the host mints `FilterSourceToken`s and reports them to the
+  owner, and rules `CanPersist`; the producer only compares tokens and ANDs
+  the ruling with its store's status. Adding any host-domain knowledge (a
+  path parameter "just for the notice", a capability enum) re-couples what
+  the seam exists to decouple. The same boundary governs copy:
+  degrade-notice and refusal wording is producer-owned here so every host
+  degrades identically; only host-specific *reasons* (FS-Access phrasing)
+  arrive as parameters. A host writing its own copy for these states is the
+  facet-prose drift hazard again.
+- **A host reports every source it latches, mounted or not — and `null`
+  only for "no source".** The owner cannot see the host's pick; it ends a
+  setup exactly when told of a different source. A host that unmounts the
+  surface while no source is held must still report the next source when
+  it latches it, or A → B → A would keep A's consent (§4). And a `null`
+  later corrected to the real token reads as a real change and ends the
+  setup — the baseline dropped, Apply re-armed — which is exactly wrong
+  when nothing changed. A host whose source is derived from facts it
+  restores asynchronously reports nothing until that derivation is
+  settled, rather than a placeholder.
+- **A mount is not a change.** The first snapshot reaches a component
+  inside `Attach`, and is the existing setup learned: a remount over an
+  unchanged source keeps the draft, the baseline and the notices, and the
+  owner publishes nothing for it. Don't add mount-time choreography — no
+  reconcile, no re-arm, no notice arming — to either component: what used
+  to need it now lives in the owner, which outlives the mount. The
+  composite's setup-change rule fires only on a new generation after
+  attach.
+- **The restoration notices' lifetime is the owner's — never derive it at
+  mount.** "A stored selection was restored and nothing is applied" is
+  also true of a navigate-back with unapplied edits, and navigation must
+  change nothing (§1), so no mount-time condition can tell a fresh boot
+  from a remount. The owner's lifetime is the distinguishing fact: a
+  reload is a fresh owner, a remount reuses the boot's. Within a boot,
+  each notice only moves toward its end. The restored notice ends at the
+  first gesture that makes the selection the user's own (an edit, a staged
+  saved filter, a commit) or at the user's close. A source change is not a
+  gesture and leaves it, because a host whose source change crosses an
+  unmount must see the same. The failure notice ends at the user's close or
+  a commit whose write lands. This is not a history fact (§3): it records
+  a pending present-tense state, and gates nothing but its own copy.
+- **Restoration runs only from an interactive render.** `RestoreAsync` makes
+  an interop call, and static rendering cannot; the panel starts it from
+  `OnAfterRenderAsync`, which prerendering never runs. Don't start it from a
+  constructor, `OnInitialized`, or a host's startup code. A failure that is
+  not a refusal propagates out of the panel's lifecycle and leaves
+  restoration `Pending`; it is a fault, never an outcome.
+- **The draft is the editor's state — never rebuild it from its config.**
+  `FilterDraft.From(draft.ToConfig())` loses any box whose text its field
+  cannot be (`1.5` in a move-number bound becomes no bound), which is the
+  defect the draft exists to end. Hold and retain the draft; derive the
+  config. Don't cache a derived value on the draft either: it is a record,
+  and `with` would copy the cache into a draft it was not computed for.
+- **What a box shows is per mount; validity is not.** The panel's
+  `_revealed` set is presentation (halheinrich/backgammon#272): it starts at
+  "every wrong value shown" on each mount, and keys on the panel's own
+  typing through `Edit`. Never gate anything on it — the gates read the
+  owner's verdict, continuously — and never move it into the owner, where a
+  second mount would inherit the first's half-typed state. A new
+  verdict-bearing box needs its `onblur` (`LeaveField`) as well as the
+  `FieldAttributes` splat, or its error never shows.
+- **Refusals go to the host's sink, never through a component.** A
+  refusal can complete after the component that started its call is gone,
+  so a component event would lose it. The sink is resolved by
+  `AddFilterSurface<TRefusalSink>` in the owner's scope, which is why it is
+  a registered type and not a delegate a page hands in. Rejecting a stale
+  state update must never take the refusal with it.
+- **A test waits on the operation, never on a render.** A held storage call
+  completes on release, and its continuation runs afterwards; a stale
+  completion that is rightly rejected renders nothing. Wait — bounded by
+  `DefaultWaitTimeout` — on the click's task, on `RestoreAsync()`, or on
+  the panel's `MountRestored`. A browser test waits on the restoration
+  marker (`FilterRestorationMarker.SettledSelector`). `MountRestored`
+  stays honest only while it completes after the mount's restores; it is
+  pinned (`MountRestored_CompletesOnlyOnceTheMountsRestoresHaveSettled`).
 - **Never type alert markup here, and never add a second holder for a
   dismissal.** A new box is a `<Notice>`; whether the user may close it is
   the umbrella's `SPEC-notices.md` section 1 (the gate-reason test), never
@@ -1655,9 +1799,10 @@ producer-side, so neither widens what consumers can see.
     of a bit that already has a holder, and a component's copy dies on
     unmount while the occurrence may not: that is the closed restore
     notice coming back on a navigate-back.
-  - **A second mover on `FilterRestoreNotice`** for "closed by hand". The
-    close gesture is `Dismiss()`; `Arm()` guards one bit and would not
-    know about another.
+  - **A second holder for the restore notices** — a "closed by hand" bit
+    beside the owner's, or a notice state anywhere but `FilterSetup`. The
+    close gesture and the owning gesture are one end, the owner's; a
+    second bit would be a second holder for the restoration to forget.
   - **Keying the write-failed notice on `Status`, on the file name, or on
     nothing.** `Status` reads `WriteFailed` after every failure alike.
     Unkeyed, it would behave today only by an accident of rendering — a
@@ -1762,10 +1907,3 @@ producer-side, so neither widens what consumers can see.
   block runs over 100 lines and would be more navigable as a separate
   `.cs` file mirroring `BgDiag_Razor`'s `BackgammonDiagram.razor.cs`
   pattern. Pure refactor; no behavior change.
-- **Migrate `localStorage` calls behind a `Persistence` abstraction.**
-  Once a non-WASM consumer (or a unit-test harness wanting real
-  state-rehydration coverage) appears, factor the panel's guarded seam
-  (`TryGetItemAsync` / `TrySetItemAsync`, the one place its
-  `localStorage` calls live since halheinrich/backgammon#102) into an
-  injected `IFilterStateStore` so the component is host-agnostic. Until a
-  second consumer exists, this is speculative and YAGNI applies.
