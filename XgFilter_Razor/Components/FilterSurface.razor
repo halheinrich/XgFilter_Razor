@@ -217,7 +217,7 @@
         if (next.Generation != previous.Generation)
         {
             _saveRefusalNotice = null;
-            _ = InvokeAsync(ReloadContextAndRenderAsync);
+            _ = ReloadAfterSetupEndedAsync();
             return;
         }
 
@@ -245,6 +245,28 @@
             _lastStorage = Storage;
             _store = new SavedFiltersStore(Storage);
             await ReloadContextAsync();
+        }
+    }
+
+    // The reload a setup's end starts (halheinrich/backgammon#374, the
+    // review's third correction). Nothing awaits it — the owner tells this
+    // component inside its own operation, which cannot wait on a component's
+    // I/O — so it is observed here. A document-storage failure never arrives:
+    // the store catches it and degrades to LoadFailed, whose notice says so.
+    // Anything else is a fault, an adapter's bug, and goes to the renderer's
+    // error path as this component's (DispatchExceptionAsync): to an enclosing
+    // ErrorBoundary, else to the host's unhandled-error handling. Discarded,
+    // it would die on a task nobody reads and leave the previous source's
+    // saved filters on screen.
+    private async Task ReloadAfterSetupEndedAsync()
+    {
+        try
+        {
+            await InvokeAsync(ReloadContextAndRenderAsync);
+        }
+        catch (Exception failure)
+        {
+            await DispatchExceptionAsync(failure);
         }
     }
 

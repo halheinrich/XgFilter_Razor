@@ -361,6 +361,16 @@ seam — or resets, when there is no source. A change to the draft or the
 baseline moots a stale save refusal, as any gesture on the panel always
 has.
 
+Nothing awaits that reload — the owner tells the composite inside its own
+operation — so the composite observes it (`ReloadAfterSetupEndedAsync`,
+`halheinrich/backgammon#374`). The storage's own failure
+(`DocumentStorageException`) never reaches it: the store degrades to
+`LoadFailed`, and the existing notice says so. Any other exception is an
+adapter's bug, and goes to the renderer's error path as the composite's,
+through `DispatchExceptionAsync`: to an enclosing `ErrorBoundary`, else to
+the host's unhandled-error handling. Discarded, it would die on a task
+nobody reads and leave the previous source's saved filters on screen.
+
 The composite owns its `SavedFiltersStore` over the bound adapter (rebuilt
 on an adapter reference change), so a remount re-reads the document — a
 setup-time, degrade-tolerant read. Notice copy is producer-owned so every
@@ -1654,7 +1664,11 @@ are producer-side, so neither widens what consumers can see.
   degrading to `LoadFailed` / `WriteFailed`. Wrap everything that means
   "the I/O failed"; let everything that means "the adapter has a bug"
   propagate. An absent document is `null` from `ReadAsync`, never an
-  exception.
+  exception. Where nothing awaits the call — the composite's reload at a
+  setup's end — propagating means the renderer's error path
+  (`DispatchExceptionAsync`), never a discarded task: a fire-and-forget
+  `_ = InvokeAsync(...)` over work that can fault loses the fault
+  (`ASourceChangeReload_ThatFailsAfterAnAwait_*`).
 - **Never restate a lib validity rule in the panel — ask it.** The error
   bounds' rule (non-negative, `min ≤ max`, `NaN` rejected) lives in
   `XgFilter_Lib` and is asked through `FilterConfig.GetInvalidFields()` on

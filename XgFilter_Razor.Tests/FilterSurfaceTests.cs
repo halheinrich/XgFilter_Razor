@@ -4,6 +4,7 @@ using Bunit;
 using BgUiPrimitives_Razor;
 using BgUiPrimitives_Razor.TestSupport;
 using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.DependencyInjection;
 using XgFilter_Lib.Enums;
 using XgFilter_Lib.Filtering;
@@ -389,6 +390,91 @@ public class FilterSurfaceTests : BunitContext
 
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("li.list-group-item")));
         Assert.Empty(cut.FindAll("#saveFilterName"));
+    }
+
+    // The reload a setup's end starts is awaited by nothing, so the composite
+    // observes it (halheinrich/backgammon#374, the review's third correction).
+    // An adapter whose read fails after an await with anything but the
+    // storage's own failure has a bug, and the fault goes to the renderer's
+    // error path as the composite's: here, an enclosing ErrorBoundary. The
+    // mount's own load succeeded; the failure belongs to the reload.
+    [Fact]
+    public async Task ASourceChangeReload_ThatFailsAfterAnAwait_ReachesTheErrorBoundary()
+    {
+        var storage = StorageWith(("Race", new FilterConfig()));
+        var cut = Render<ErrorBoundary>(parameters => parameters
+            .Add(p => p.ChildContent, builder =>
+            {
+                builder.OpenComponent<FilterSurface>(0);
+                builder.AddComponentParameter(1, nameof(FilterSurface.Storage), storage);
+                builder.CloseComponent();
+            })
+            .Add(p => p.ErrorContent, fault => builder =>
+            {
+                builder.OpenElement(0, "p");
+                builder.AddAttribute(1, "id", "surfaceFault");
+                builder.AddContent(2, fault.Message);
+                builder.CloseElement();
+            }));
+        Assert.NotNull(FindRowButton(cut.FindComponent<FilterSurface>(), "Race", "Load"));
+        var held = new TaskCompletionSource();
+        storage.ReadOverride = async _ =>
+        {
+            await held.Task;
+            throw new InvalidOperationException("The adapter has a bug.");
+        };
+
+        await cut.InvokeAsync(() => Setup.ReportSource(TokenB));
+        held.SetResult();
+
+        cut.WaitForAssertion(() =>
+            Assert.Equal("The adapter has a bug.", cut.Find("#surfaceFault").TextContent));
+        Assert.False(Renderer.UnhandledException.IsCompleted);
+    }
+
+    // With no ErrorBoundary around it, the same fault reaches the renderer
+    // itself — the host's unhandled-error handling — never a discarded task.
+    [Fact]
+    public async Task ASourceChangeReload_ThatFailsAfterAnAwait_WithNoErrorBoundary_ReachesTheRenderer()
+    {
+        var storage = StorageWith(("Race", new FilterConfig()));
+        var cut = RenderSurface(storage);
+        var held = new TaskCompletionSource();
+        storage.ReadOverride = async _ =>
+        {
+            await held.Task;
+            throw new InvalidOperationException("The adapter has a bug.");
+        };
+
+        await cut.InvokeAsync(() => Setup.ReportSource(TokenB));
+        held.SetResult();
+
+        var fault = await Renderer.UnhandledException.WaitAsync(DefaultWaitTimeout);
+        Assert.Equal("The adapter has a bug.", fault.Message);
+    }
+
+    // The storage's own failure is not a fault: the store degrades to
+    // LoadFailed, the composite's existing notice names the file, and nothing
+    // reaches the renderer's error path.
+    [Fact]
+    public async Task ASourceChangeReload_ThatTheStorageRefusesAfterAnAwait_ShowsTheLoadFailedNotice()
+    {
+        var storage = StorageWith(("Race", new FilterConfig()));
+        var cut = RenderSurface(storage);
+        var held = new TaskCompletionSource();
+        storage.ReadOverride = async _ =>
+        {
+            await held.Task;
+            throw new DocumentStorageException("read failed");
+        };
+
+        await cut.InvokeAsync(() => Setup.ReportSource(TokenB));
+        held.SetResult();
+
+        cut.WaitForAssertion(() =>
+            Assert.Contains(SavedFiltersDocument.FileName, cut.Find("#savedFiltersLoadFailed").TextContent));
+        Assert.Empty(cut.FindAll("li.list-group-item"));
+        Assert.False(Renderer.UnhandledException.IsCompleted);
     }
 
     // ── Saved-filters wiring ────────────────────────────────────────────────
