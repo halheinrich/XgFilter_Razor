@@ -5,7 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using XgFilter_Lib.Filtering;
 using XgFilter_Razor.Components;
 using XgFilter_Razor.Components.Internal;
-using XgFilter_Razor.Testing;
+using XgFilter_Razor.TestSupport;
 
 namespace XgFilter_Razor.Tests;
 

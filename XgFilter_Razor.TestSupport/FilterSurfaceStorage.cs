@@ -1,4 +1,4 @@
-namespace XgFilter_Razor.Testing;
+namespace XgFilter_Razor.TestSupport;
 
 using BgUiPrimitives_Razor;
 using BgUiPrimitives_Razor.TestSupport;

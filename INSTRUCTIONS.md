@@ -96,7 +96,7 @@ Three areas:
   metadata for the one value this project serializes itself, the panel's
   expanded facet rows.
 
-**`XgFilter_Razor.Testing/`** — producer-owned test support for host suites:
+**`XgFilter_Razor.TestSupport/`** — producer-owned test support for host suites:
 `FilterSurfaceStorage` states the surface's storage calls on a host test's
 `BrowserStoragePlan` in the surface's own terms, and
 `FilterRestorationMarker` gives a host's browser tests the selectors for the
@@ -801,7 +801,7 @@ included. Each mount settles its own marker, so a navigate-back reports
 `Pending` until its preferences are back — the restore a click on the
 container's toggle could otherwise race. It is the outcome alone and says
 nothing about the gates. A host's browser test waits on it through
-`XgFilter_Razor.Testing.FilterRestorationMarker`; host code reads
+`XgFilter_Razor.TestSupport.FilterRestorationMarker`; host code reads
 `FilterSetupSnapshot.Restoration` instead.
 
 **The restored-selection notice (§4's legibility law).** A reload ends the
@@ -1084,7 +1084,7 @@ and one restoration per test. **Storage is planned where it is the
 subject, and incidental elsewhere.** A suite whose subject is storage, the
 gates or the acceptance cases puts a `BrowserStoragePlan` on the test's
 runtime (`halheinrich/backgammon#377`), declares every call in the
-surface's own terms (`XgFilter_Razor.Testing`'s `FilterSurfaceStorage`, or
+surface's own terms (`XgFilter_Razor.TestSupport`'s `FilterSurfaceStorage`, or
 the keys directly where a key's spelling is the subject), and ends with
 `Verify`. The pending and ordering cases hold the calls they are about and
 wait, bounded by `DefaultWaitTimeout`, on the operation itself — the
@@ -1121,7 +1121,7 @@ the surfaces cannot be held to different rulings — `OpponentBoundRuling`
 (`halheinrich/backgammon#275`) is the shape, and it also asks the grammar
 that each of the ruling's examples still reads as the ruling says.
 
-### Test-support assembly (`XgFilter_Razor.Testing`)
+### Test-support assembly (`XgFilter_Razor.TestSupport`)
 
 Producer-owned helpers for **host** test suites, referenced by their test
 projects only — `IsPackable=false`, and no app-graph project may reference
@@ -1332,7 +1332,7 @@ it. Its internal members:
 - `MountRestored` — completes when this mount's restores (its two
   preferences and the boot's restoration) have settled.
 - `RestorationAttribute` (`data-filter-restoration`) — the marker's
-  attribute, read through `XgFilter_Razor.Testing.FilterRestorationMarker`.
+  attribute, read through `XgFilter_Razor.TestSupport.FilterRestorationMarker`.
 - `SerializeFold(bool)` / `SerializeOpenRows(IEnumerable<FilterFacet>)` —
   the two preferences' stored spellings, for the test support's toggle
   expectations.
@@ -1445,7 +1445,7 @@ naming them lives here, in the producer, so a consumer never sees or
 depends on the surface's key names. Test-only
 `InternalsVisibleTo("XgFilter_Razor.Tests")` lets the wiring test pin the
 rendered names to those constants, and
-`InternalsVisibleTo("XgFilter_Razor.Testing")` lets the test-support
+`InternalsVisibleTo("XgFilter_Razor.TestSupport")` lets the test-support
 assembly state the surface's calls on a host suite's behalf — both grants
 are producer-side, so neither widens what consumers can see.
 

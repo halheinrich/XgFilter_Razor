@@ -26,7 +26,7 @@
     <!-- The producer's own test-support assembly, exercised here the way a host
          suite exercises it — the seam ships to hosts, so it is pinned against a
          real panel render rather than trusted. -->
-    <ProjectReference Include="..\XgFilter_Razor.Testing\XgFilter_Razor.Testing.csproj" />
+    <ProjectReference Include="..\XgFilter_Razor.TestSupport\XgFilter_Razor.TestSupport.csproj" />
     <!-- Direct reference: these suites plan the real BrowserStorage's calls
          with BrowserStoragePlan (halheinrich/backgammon#377), so they compile
          against it rather than taking it transitively through the test-support

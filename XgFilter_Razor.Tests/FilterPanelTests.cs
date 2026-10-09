@@ -12,7 +12,7 @@ using XgFilter_Lib.Enums;
 using XgFilter_Lib.Filtering;
 using XgFilter_Lib.Patterns;
 using XgFilter_Razor.Components.Internal;
-using XgFilter_Razor.Testing;
+using XgFilter_Razor.TestSupport;
 
 namespace XgFilter_Razor.Tests;
 

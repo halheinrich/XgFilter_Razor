@@ -4,7 +4,7 @@
   <Project Path="../BgUiPrimitives_Razor/BgUiPrimitives_Razor/BgUiPrimitives_Razor.csproj" />
   <Project Path="../ConvertXgToJson_Lib/ConvertXgToJson_Lib/ConvertXgToJson_Lib.csproj" />
   <Project Path="../XgFilter_Lib/XgFilter_Lib/XgFilter_Lib.csproj" />
-  <Project Path="XgFilter_Razor.Testing/XgFilter_Razor.Testing.csproj" />
+  <Project Path="XgFilter_Razor.TestSupport/XgFilter_Razor.TestSupport.csproj" />
   <Project Path="XgFilter_Razor.Tests/XgFilter_Razor.Tests.csproj" />
   <Project Path="XgFilter_Razor/XgFilter_Razor.csproj" />
 </Solution>
