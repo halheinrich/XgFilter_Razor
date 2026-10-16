@@ -103,14 +103,16 @@ public sealed class FilterSetup
     public FilterSetupSnapshot Current => _current;
 
     /// <summary>
-    /// Raised when what is in effect changed (<see cref="FilterSetupSnapshot.ConfigInEffectFor"/>),
-    /// with the snapshot that results, after every <see cref="Attach"/>ed observer has
-    /// seen it: an Apply or a Clear, a restoration that settles the ready-empty selection
-    /// into effect, or a source report that ends a setup with a selection in effect. This is the host's one entry for
-    /// the work an in-effect selection triggers (a count, a preparation); the snapshot
-    /// stream is for rendering. An edit, which changes only the draft, raises nothing.
+    /// Raised when a selection is committed into effect, with the snapshot that results, after
+    /// every <see cref="Attach"/>ed observer has seen it: by Apply, by Clear, and by this boot's
+    /// restoration settling with the ready empty selection on screen, which is in effect without
+    /// Apply (§1). This is the host's one entry for the work a committed selection triggers (a
+    /// count, a preparation); the snapshot stream is for rendering. Never raised by an edit, which
+    /// commits nothing even where it changes what is in effect (a draft edited down to the empty
+    /// selection), nor by a source report, which ends a setup: the host reads those through
+    /// <see cref="FilterSetupSnapshot.IsInEffectFor"/> when it next prepares.
     /// </summary>
-    public event Action<FilterSetupSnapshot>? InEffectChanged;
+    public event Action<FilterSetupSnapshot>? Applied;
 
     /// <summary>
     /// Observe the setup: <paramref name="observer"/> receives
@@ -208,6 +210,7 @@ public sealed class FilterSetup
         _resolved = true;
         _restoredNoticeShowing = false;
         Publish();
+        Applied?.Invoke(_current);
         return RememberAsync(_draft);
     }
 
@@ -228,6 +231,7 @@ public sealed class FilterSetup
         _resolved = true;
         _restoredNoticeShowing = false;
         Publish();
+        Applied?.Invoke(_current);   // every accepted Clear commits, the empty selection already in effect or not
         return RememberAsync(FilterDraft.Empty);
     }
 
@@ -303,6 +307,9 @@ public sealed class FilterSetup
 
         _failureNoticeShowing = _restoration == FilterRestoration.Unreadable;
         Publish();
+        // Settling with the ready empty selection on screen puts it in effect with no gesture
+        // to follow (§1): the one commit that is not the user's, told to the host here.
+        if (_current.IsReadyEmpty) Applied?.Invoke(_current);
     }
 
     // Write the committed selection for the next visit. The commit was
@@ -343,15 +350,11 @@ public sealed class FilterSetup
         var next = Snapshot();
         if (next.HoldsTheSameStateAs(_current)) return;
 
-        var previous = _current;
         _current = next;
         foreach (var observer in _observers.ToArray())
         {
             observer(next);
         }
-
-        if (!next.HoldsTheSameInEffectAs(previous))
-            InEffectChanged?.Invoke(next);
     }
 
     private sealed class Attachment(FilterSetup owner, Action<FilterSetupSnapshot> observer) : IDisposable

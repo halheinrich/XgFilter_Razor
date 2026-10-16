@@ -1,4 +1,4 @@
-using System.Diagnostics.CodeAnalysis;
+﻿using System.Diagnostics.CodeAnalysis;
 using XgFilter_Lib.Enums;
 using XgFilter_Lib.Filtering;
 
@@ -200,11 +200,6 @@ public sealed class FilterSetupSnapshot
     /// </summary>
     /// <param name="other">The snapshot to compare with.</param>
     /// <returns>Whether the two describe the same moment.</returns>
-    /// <summary>Whether the same selection is in effect for the same source as in <paramref name="other"/>, or none is in effect in both.</summary>
-    internal bool HoldsTheSameInEffectAs(FilterSetupSnapshot other) =>
-        (_inEffect is null && other._inEffect is null)
-        || (Source == other.Source && Equals(_inEffect, other._inEffect));
-
     internal bool HoldsTheSameStateAs(FilterSetupSnapshot other) =>
         Source == other.Source
         && Generation == other.Generation

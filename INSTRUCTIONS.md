@@ -217,13 +217,15 @@ lifecycle and leaves restoration pending.
 
 **What consumers see.** `Attach(observer)` delivers the current snapshot
 before it returns, then each real change, in order, until the handle is
-disposed; `Current` answers on demand. `InEffectChanged` fires, after the
-observers, whenever what is in effect changed (`ConfigInEffectFor`): an
-Apply or Clear, a restoration that settles the ready-empty selection into
-effect, or a source report that ends a setup. It is the one explicit entry
-for the work an in-effect selection triggers in the host (a count, a
-preparation), so that work never hangs off the snapshot stream, which is
-for rendering; an edit raises nothing (halheinrich/backgammon#421). A component or page mounted later
+disposed; `Current` answers on demand. `Applied` fires, after the observers,
+when a selection is committed into effect: by Apply, by Clear, and by the
+restoration settling with the ready empty selection on screen, which is in
+effect without Apply. It is the one explicit entry for the work a committed
+selection triggers in the host (a count, a preparation), so that work never
+hangs off the snapshot stream, which is for rendering, and never off an
+edit — an edit that empties the draft puts the empty selection in effect
+(`IsInEffectFor`) and commits nothing; the host reads that when it next
+prepares (halheinrich/backgammon#421). A component or page mounted later
 therefore learns the existing state without any change being manufactured,
 and the owner publishes only when the state differs. A snapshot is
 immutable, and every config it hands out is new, so nothing a consumer
@@ -1185,7 +1187,7 @@ public sealed class FilterSetup                       // app-scoped; registered 
 {
     public FilterSetupSnapshot Current { get; }
     public IDisposable Attach(Action<FilterSetupSnapshot> observer);
-    public event Action<FilterSetupSnapshot>? InEffectChanged;   // what is in effect changed; the host's entry for the work it triggers
+    public event Action<FilterSetupSnapshot>? Applied;           // a selection committed into effect (Apply, Clear, a ready-empty restoration); the host's entry for the work it triggers
     public void ReportSource(FilterSourceToken? source);
 }
 
