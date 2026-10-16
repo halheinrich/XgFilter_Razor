@@ -217,7 +217,11 @@ lifecycle and leaves restoration pending.
 
 **What consumers see.** `Attach(observer)` delivers the current snapshot
 before it returns, then each real change, in order, until the handle is
-disposed; `Current` answers on demand. A component or page mounted later
+disposed; `Current` answers on demand. `Applied` fires once per Apply or
+Clear, after the observers, with the resulting snapshot: the one explicit
+entry for the work an applied selection triggers in the host (a count, a
+preparation), so that work never hangs off the snapshot stream, which is
+for rendering (halheinrich/backgammon#421). A component or page mounted later
 therefore learns the existing state without any change being manufactured,
 and the owner publishes only when the state differs. A snapshot is
 immutable, and every config it hands out is new, so nothing a consumer
@@ -1179,6 +1183,7 @@ public sealed class FilterSetup                       // app-scoped; registered 
 {
     public FilterSetupSnapshot Current { get; }
     public IDisposable Attach(Action<FilterSetupSnapshot> observer);
+    public event Action<FilterSetupSnapshot>? Applied;   // Apply or Clear happened; the host's entry for the work it triggers
     public void ReportSource(FilterSourceToken? source);
 }
 

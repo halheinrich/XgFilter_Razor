@@ -103,6 +103,15 @@ public sealed class FilterSetup
     public FilterSetupSnapshot Current => _current;
 
     /// <summary>
+    /// Raised when the user applies or clears the selection, with the snapshot that
+    /// results, after every <see cref="Attach"/>ed observer has seen it. This is the
+    /// host's one explicit entry for the work an applied selection triggers (a count, a
+    /// preparation); the snapshot stream is for rendering. Not raised by a source report,
+    /// an edit or a restoration, none of which applies anything.
+    /// </summary>
+    public event Action<FilterSetupSnapshot>? Applied;
+
+    /// <summary>
     /// Observe the setup: <paramref name="observer"/> receives
     /// <see cref="Current"/> before this returns, and then every real change,
     /// synchronously and in order, until the returned handle is disposed.
@@ -198,6 +207,7 @@ public sealed class FilterSetup
         _resolved = true;
         _restoredNoticeShowing = false;
         Publish();
+        Applied?.Invoke(_current);
         return RememberAsync(_draft);
     }
 
@@ -218,6 +228,7 @@ public sealed class FilterSetup
         _resolved = true;
         _restoredNoticeShowing = false;
         Publish();
+        Applied?.Invoke(_current);
         return RememberAsync(FilterDraft.Empty);
     }
 
