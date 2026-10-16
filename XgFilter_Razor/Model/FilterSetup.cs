@@ -103,13 +103,14 @@ public sealed class FilterSetup
     public FilterSetupSnapshot Current => _current;
 
     /// <summary>
-    /// Raised when the user applies or clears the selection, with the snapshot that
-    /// results, after every <see cref="Attach"/>ed observer has seen it. This is the
-    /// host's one explicit entry for the work an applied selection triggers (a count, a
-    /// preparation); the snapshot stream is for rendering. Not raised by a source report,
-    /// an edit or a restoration, none of which applies anything.
+    /// Raised when what is in effect changed (<see cref="FilterSetupSnapshot.ConfigInEffectFor"/>),
+    /// with the snapshot that results, after every <see cref="Attach"/>ed observer has
+    /// seen it: an Apply or a Clear, a restoration that settles the ready-empty selection
+    /// into effect, or a source report that ends a setup with a selection in effect. This is the host's one entry for
+    /// the work an in-effect selection triggers (a count, a preparation); the snapshot
+    /// stream is for rendering. An edit, which changes only the draft, raises nothing.
     /// </summary>
-    public event Action<FilterSetupSnapshot>? Applied;
+    public event Action<FilterSetupSnapshot>? InEffectChanged;
 
     /// <summary>
     /// Observe the setup: <paramref name="observer"/> receives
@@ -207,7 +208,6 @@ public sealed class FilterSetup
         _resolved = true;
         _restoredNoticeShowing = false;
         Publish();
-        Applied?.Invoke(_current);
         return RememberAsync(_draft);
     }
 
@@ -228,7 +228,6 @@ public sealed class FilterSetup
         _resolved = true;
         _restoredNoticeShowing = false;
         Publish();
-        Applied?.Invoke(_current);
         return RememberAsync(FilterDraft.Empty);
     }
 
@@ -344,11 +343,15 @@ public sealed class FilterSetup
         var next = Snapshot();
         if (next.HoldsTheSameStateAs(_current)) return;
 
+        var previous = _current;
         _current = next;
         foreach (var observer in _observers.ToArray())
         {
             observer(next);
         }
+
+        if (!next.HoldsTheSameInEffectAs(previous))
+            InEffectChanged?.Invoke(next);
     }
 
     private sealed class Attachment(FilterSetup owner, Action<FilterSetupSnapshot> observer) : IDisposable
