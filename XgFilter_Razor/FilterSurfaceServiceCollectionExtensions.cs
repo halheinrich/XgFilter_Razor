@@ -36,6 +36,11 @@ public static class FilterSurfaceServiceCollectionExtensions
     /// for the same reason, so a host cannot register the owner without its
     /// storage. A host that prerenders on a server registers there too.
     /// </para>
+    /// <para>
+    /// A host whose storage notice reads BgUiPrimitives_Razor's shared
+    /// <see cref="BrowserStorageCondition"/> calls <see cref="AddFilterSurface(IServiceCollection)"/>
+    /// instead; this overload is for a host with its own holder.
+    /// </para>
     /// </remarks>
     /// <typeparam name="TRefusalSink">
     /// The host's registered holder of the storage-refusal occurrence.
@@ -54,5 +59,35 @@ public static class FilterSurfaceServiceCollectionExtensions
             provider.GetRequiredService<TRefusalSink>()));
         services.TryAddScoped(static provider => new FilterSetup(provider.GetRequiredService<FilterStorage>()));
         return services;
+    }
+
+    /// <summary>
+    /// Registers the filter surface's services, scoped, with the app's shared
+    /// <see cref="BrowserStorageCondition"/> as the owner of the storage-refusal
+    /// occurrence, reached through <see cref="BrowserStorageConditionRefusalSink"/>.
+    /// Registering more than once registers once: the first call's sink stands.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The one call a host makes</b> when its storage notice reads the shared
+    /// condition: it calls
+    /// <see cref="BrowserStorageServiceCollectionExtensions.AddReportingBrowserStorage"/>
+    /// itself, so a host cannot register the surface without the condition its
+    /// refusals reach, and registers the adapter scoped — the app scope, like
+    /// the condition — before doing what
+    /// <see cref="AddFilterSurface{TRefusalSink}"/> does with it as the sink. The
+    /// adapter's logger comes from the host's logging.
+    /// </para>
+    /// </remarks>
+    /// <param name="services">The host's service collection.</param>
+    /// <returns><paramref name="services"/>, for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="services"/> is <see langword="null"/>.</exception>
+    public static IServiceCollection AddFilterSurface(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.AddReportingBrowserStorage();
+        services.TryAddScoped<BrowserStorageConditionRefusalSink>();
+        return services.AddFilterSurface<BrowserStorageConditionRefusalSink>();
     }
 }

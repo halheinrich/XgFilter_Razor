@@ -50,7 +50,11 @@ https://github.com/halheinrich/XgFilter_Razor — branch `main`.
   refusal caught. Project reference, not a package; the namespace is
   imported once, in `_Imports.razor`. The test projects also reference its
   `BgUiPrimitives_Razor.TestSupport`, for `BrowserStoragePlan`
-  (`halheinrich/backgammon#377`). **It passes an obligation through to
+  (`halheinrich/backgammon#377`), and `BgDataTypes_Lib.TestSupport`, for the
+  recording and throwing loggers. Its `BrowserStorageCondition` is the
+  shared owner of the storage-refusal occurrence that
+  `BrowserStorageConditionRefusalSink` (below) reports to
+  (`halheinrich/backgammon#424`). **It passes an obligation through to
   hosts:** the component's scoped CSS reaches a host inside the host's own
   `{HostAssembly}.styles.css` bundle, also when the host references that
   library only through this one, so a host's root document must link that
@@ -83,7 +87,8 @@ Three areas:
   `FilterSourceToken` (the opaque host-minted source identity); the
   surface's storage — `FilterStorage` (the one seam over `BrowserStorage`,
   internal) and `IFilterStorageRefusalSink` (the host's owner of the
-  refusal occurrence); the named-document machinery — `IDocumentStorage`
+  refusal occurrence) with `BrowserStorageConditionRefusalSink` (its
+  adapter over the shared `BrowserStorageCondition`); the named-document machinery — `IDocumentStorage`
   (the host storage seam) and `DocumentStorageException` (its one failure
   type), `NamedDocumentStore` (the document lifecycle over the seam) and
   `NamedDocumentStatus` (its condition), `NamedEntriesSurface` (a pick-list
@@ -91,7 +96,8 @@ Three areas:
   `SavedFiltersDocument` (the canonical and legacy file names and the
   migration rule) and `SavedFiltersStore` (identity only).
 - **Registration** — `FilterSurfaceServiceCollectionExtensions`:
-  `AddFilterSurface<TRefusalSink>()`, the one call a host makes.
+  `AddFilterSurface()` or `AddFilterSurface<TRefusalSink>()`, the one call a
+  host makes.
 - **Serialization** — `XgFilterRazorJsonContext`: the source-generated JSON
   metadata for the one value this project serializes itself, the panel's
   expanded facet rows.
@@ -247,10 +253,30 @@ snapshots to that observer and cancels nothing, so rejecting a stale state
 update can never discard a refusal: no subscription stands between a
 storage call and the sink.
 
-**Registration and lifetime.** `AddFilterSurface<TRefusalSink>()` registers
+**The shared condition's sink — `BrowserStorageConditionRefusalSink`.** A
+host whose storage notice reads BgUiPrimitives_Razor's
+`BrowserStorageCondition` needs no holder of its own: this public, sealed
+adapter is the `IFilterStorageRefusalSink` over it. It lives here because
+this library depends on BgUiPrimitives_Razor and not the reverse, so only
+here are both types visible. `ReportRefused` forwards to the condition first
+— every refusal, since deduplicating is the condition's — then logs one
+warning with the browser's exception, the surface's own words (the panel's
+filters work for this visit but may not be remembered). It logs because the
+surface logs nothing and the condition holds no logger. A failure of the log
+call is contained, so a throwing logging provider can keep neither the
+occurrence from being recorded nor the surface's operation from completing:
+the one place the adapter could throw, closed. App-scoped, like the
+condition.
+
+**Registration and lifetime.** `AddFilterSurface()` (the shared condition)
+and `AddFilterSurface<TRefusalSink>()` (a host's own holder) are the one call
+a host makes; either registers
 the owner and the storage seam scoped — one per app in WebAssembly, one per
 circuit on a server — and calls `AddBrowserStorage()`, so a host cannot
-register the owner without its storage. The owner's constructor is
+register the owner without its storage. The parameterless overload also
+calls `AddReportingBrowserStorage()`, so the surface cannot be registered
+without the condition its refusals reach, and registers the adapter scoped
+as the sink. `TryAdd` throughout: the first call's sink stands. The owner's constructor is
 internal: a host never makes one, so the instance a page injects and the
 one the surface injects are the same by construction. Not thread-safe:
 every member is called on the renderer's synchronization context, which
@@ -1207,8 +1233,16 @@ public interface IFilterStorageRefusalSink
     void ReportRefused(JSException refusal);
 }
 
+public sealed class BrowserStorageConditionRefusalSink : IFilterStorageRefusalSink   // the adapter over BgUiPrimitives_Razor's BrowserStorageCondition
+{
+    public BrowserStorageConditionRefusalSink(
+        BrowserStorageCondition condition, ILogger<BrowserStorageConditionRefusalSink> logger);
+    public void ReportRefused(JSException refusal);   // condition first, then one logged warning; a logging failure is contained
+}
+
 public static class FilterSurfaceServiceCollectionExtensions
 {
+    public static IServiceCollection AddFilterSurface(this IServiceCollection services);   // the shared condition, through the adapter
     public static IServiceCollection AddFilterSurface<TRefusalSink>(this IServiceCollection services)
         where TRefusalSink : class, IFilterStorageRefusalSink;
 }
@@ -1240,6 +1274,10 @@ Contracts:
   registers `TRefusalSink` itself, at app scope. A second call adds
   nothing, and the first call's sink stands. A missing sink registration
   fails when the owner is first created.
+- **`AddFilterSurface()`** does the same with `BrowserStorageConditionRefusalSink`
+  as the sink, and registers the shared condition itself
+  (`AddReportingBrowserStorage()`); the host registers nothing else. Its
+  logger comes from the host's logging.
 - **Everything else on these types is internal**: the operations the
   surface's components drive (`Edit`, `Stage`, `ApplyAsync`, `ClearAsync`,
   `RestoreAsync`, the notice dismissals) and the snapshot's reading for
@@ -1264,9 +1302,11 @@ sink; nothing comes back through a parameter.
 
 ### Host contract
 
-1. **Register** `services.AddScoped<YourRefusalHolder>()` (implementing
+1. **Register** `services.AddFilterSurface()` when your storage notice reads
+   the shared `BrowserStorageCondition`; otherwise
+   `services.AddScoped<YourRefusalHolder>()` (implementing
    `IFilterStorageRefusalSink`) and `services.AddFilterSurface<YourRefusalHolder>()`
-   in every project that renders the surface or injects the owner — the
+   — in every project that renders the surface or injects the owner — the
    WebAssembly client, and a server that prerenders it.
 2. **Report the source** with `FilterSetup.ReportSource(token)` at the
    moment you latch it — a pick, a typed path settled, a selection

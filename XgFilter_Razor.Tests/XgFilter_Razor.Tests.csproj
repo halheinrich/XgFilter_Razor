@@ -23,6 +23,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\XgFilter_Razor\XgFilter_Razor.csproj" />
+    <!-- The recording and throwing loggers the refusal adapter's suite asserts
+         its logging with. -->
+    <ProjectReference Include="..\..\BgDataTypes_Lib\BgDataTypes_Lib.TestSupport\BgDataTypes_Lib.TestSupport.csproj" />
     <!-- The producer's own test-support assembly, exercised here the way a host
          suite exercises it — the seam ships to hosts, so it is pinned against a
          real panel render rather than trusted. -->
