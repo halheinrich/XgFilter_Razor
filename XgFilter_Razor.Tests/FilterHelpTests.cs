@@ -111,7 +111,9 @@ public class FilterHelpTests : BunitContext
     {
         var prose = SectionProse(FilterHelp.PlayersAnchorId);
 
-        Assert.Contains("where a double was offered, one where the listed player took or passed", prose);
+        Assert.Matches(
+            @"A listed name admits[^.]*where a double was offered, one where the listed player took or passed",
+            prose);
     }
 
     [Fact]
@@ -183,7 +185,7 @@ public class FilterHelpTests : BunitContext
         var prose = SectionProse(FilterHelp.ErrorRangeAnchorId);
 
         Assert.Matches(
-            @"With both players of a match listed,[^.]*when either one's error is in range",
+            @"With both players of a match listed,[^.]*passes when either one's error is in range",
             prose);
     }
 
