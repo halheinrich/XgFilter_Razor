@@ -952,7 +952,16 @@ more checked = more matched; nothing checked = facet off), the
 inner-level distinction per mode, and the per-mode **Analysis level**
 disclosure: what its `any` / `N selected` badge says without opening it,
 and that levels under an unchecked mode are kept but inert. The
-error-range section states whose error is filtered (SPEC-scoring §2a): a
+players section says whose decision a listed name admits, and the
+error-range section whose error a range judges (SPEC-filtering §8, as
+XgFilter_Lib's `PlayerErrorFilter` states it): a listed name admits a cube
+decision the listed player made as the doubler or, where a double was
+offered, as the taker — a double left with no take or pass recorded still
+admitted by the responding player's name, never the opponent's no-double —
+and a range judges the listed player's error (either listed player's when
+both are; the player on roll's with none), which a double with no take
+error never supplies through the responding player. The error-range
+section also states which error (SPEC-scoring §2a): a
 checker play's error is measured under the ranking the application uses to
 pick the best play, and a move that ranking does not score has no error, so
 no error range admits it. The ranking is the host's — this component

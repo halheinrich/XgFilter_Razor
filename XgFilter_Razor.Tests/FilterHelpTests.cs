@@ -91,6 +91,99 @@ public class FilterHelpTests : BunitContext
         Assert.DoesNotContain("setting", prose);
     }
 
+    // The section's paragraphs, whitespace normalized, so a pin survives a
+    // reflow of the copy.
+    private string SectionProse(string anchorId) =>
+        Regex.Replace(
+            string.Join(" ", RenderHelp()
+                .FindAll($"#{anchorId} ~ p")
+                .Select(p => p.TextContent)),
+            @"\s+", " ");
+
+    // SPEC-filtering §8 (halheinrich/backgammon#440, #423): a cube decision
+    // holds the doubler's decision and, where a double was offered, the
+    // taker's. The players section says which a listed name admits, in the
+    // ruling's terms; each test pins one statement, so a reword that keeps the
+    // meaning stays green.
+    [Fact]
+    public void PlayersSection_StatesThatAListedNameAdmitsATakeOrAPass()
+    {
+        var prose = SectionProse(FilterHelp.PlayersAnchorId);
+
+        Assert.Contains("where a double was offered, one where the listed player took or passed", prose);
+    }
+
+    [Fact]
+    public void PlayersSection_StatesThatTheOpponentsNoDoubleIsNotAdmitted()
+    {
+        var prose = SectionProse(FilterHelp.PlayersAnchorId);
+
+        Assert.Contains("never admits the opponent's decision not to double", prose);
+    }
+
+    // The unanswered double (Hal, 2026-10-26, #440): the responding player's
+    // name admits it, and it is not presented as a take or a pass.
+    [Fact]
+    public void PlayersSection_StatesThatADoubleWithNoResponseRecordedIsStillAdmittedByTheRespondersName()
+    {
+        var prose = SectionProse(FilterHelp.PlayersAnchorId);
+
+        Assert.Contains(
+            "A double offered to the listed player with no take or pass recorded, such as one the opponent answered by resigning, is still admitted by the listed player's name",
+            prose);
+        Assert.DoesNotMatch(
+            @"resign\w*[^.]*\b(is|as|counts as|treated as|read as) an? (take|pass)\b",
+            prose);
+    }
+
+    [Fact]
+    public void PlayersSection_StatesThatScoresAndPatternsStayOnThePlayerOnRollsSide()
+    {
+        var prose = SectionProse(FilterHelp.PlayersAnchorId);
+
+        Assert.Contains(
+            "match scores and position patterns are still read from the player on roll's side",
+            prose);
+    }
+
+    [Fact]
+    public void ErrorRangeSection_StatesThatARangeJudgesTheListedPlayersError()
+    {
+        var prose = SectionProse(FilterHelp.ErrorRangeAnchorId);
+
+        Assert.Contains("judges the listed player's error on that decision", prose);
+    }
+
+    [Fact]
+    public void ErrorRangeSection_StatesThatWithNoPlayersListedItJudgesThePlayerOnRollsError()
+    {
+        var prose = SectionProse(FilterHelp.ErrorRangeAnchorId);
+
+        Assert.Contains("With no players listed, it judges the player on roll's error", prose);
+    }
+
+    [Fact]
+    public void ErrorRangeSection_StatesThatEitherListedPlayersErrorInRangeAdmitsTheDecision()
+    {
+        var prose = SectionProse(FilterHelp.ErrorRangeAnchorId);
+
+        Assert.Contains(
+            "With both players of a match listed, a decision passes when either one's error is in range",
+            prose);
+    }
+
+    [Fact]
+    public void ErrorRangeSection_StatesThatADoubleWithNoTakeErrorCannotSatisfyARangeThroughTheResponder()
+    {
+        var prose = SectionProse(FilterHelp.ErrorRangeAnchorId);
+
+        Assert.Contains("a decision passes only through an error it has", prose);
+        Assert.Contains(
+            "A double with no take error, neither recorded nor supplied by the analysis, never satisfies a range through the player who was offered it",
+            prose);
+        Assert.Contains("a listed doubler can still qualify through the doubling error", prose);
+    }
+
     // The shelved facets stay undocumented until their UI returns — help that
     // describes a control the panel doesn't offer is worse than none.
     [Fact]

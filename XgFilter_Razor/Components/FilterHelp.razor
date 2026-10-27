@@ -99,9 +99,13 @@
         </p>
     </section>
 
-    @* Whose error is filtered is XgFilter_Lib's rule (SPEC-scoring §2a, "One
-       ranking everywhere in the quiz"): the player's error under the ranking
-       the caller supplies, and a move that ranking does not score has none.
+    @* Whose error is filtered is XgFilter_Lib's rule (SPEC-filtering §8, as
+       XgFilter_Lib's PlayerErrorFilter states it): the listed player's error
+       on the decision, the player on roll's with no player listed, and either
+       listed player's when both are. Which error that is is SPEC-scoring §2a,
+       "One ranking everywhere in the quiz": the player's error under the
+       ranking the caller supplies, and a move that ranking does not score has
+       none.
        The ranking is the host application's — this component neither owns
        nor chooses it — so the copy names it as the application's and must
        stay true in a host with a ranking setting and in one without. *@
@@ -112,8 +116,20 @@
             inclusive. Leave a bound blank for no limit on that side. A checker
             play's error is measured under the ranking the application uses to
             pick the best play, and a move that ranking does not score has no
-            error. While an error range is set, decisions without an error are
-            excluded, whatever the bounds.
+            error.
+        </p>
+        <p>
+            The range judges the listed player's error on that decision. With
+            both players of a match listed, a decision passes when either
+            one's error is in range. With no players listed, it judges the
+            player on roll's error.
+        </p>
+        <p>
+            While an error range is set, a decision passes only through an
+            error it has, whatever the bounds. A double with no take error,
+            neither recorded nor supplied by the analysis, never satisfies a
+            range through the player who was offered it; a listed doubler can
+            still qualify through the doubling error.
         </p>
         <p>
             Each bound must be a finite number of zero or more, and the lower
@@ -128,6 +144,23 @@
             Admits decisions made by any of the listed players
             (comma-separated). Blank means all players. A match involving none
             of the listed players is skipped entirely.
+        </p>
+        <p>
+            A cube decision holds two players' decisions: the doubler's, to
+            double or not, and, where a double was offered, the other player's,
+            to take or pass. A listed name admits a cube decision where the
+            listed player doubled or declined to double, and, where a double
+            was offered, one where the listed player took or passed. A double
+            offered to the listed player with no take or pass recorded, such
+            as one the opponent answered by resigning, is still admitted by the
+            listed player's name. A name never admits the opponent's decision
+            not to double, because no double was offered.
+        </p>
+        <p>
+            For a cube decision admitted through the player who took or
+            passed, match scores and position patterns are still read from the
+            player on roll's side (the doubler's), as in the match scores and
+            position pattern sections.
         </p>
     </section>
 
