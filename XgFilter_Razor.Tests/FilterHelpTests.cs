@@ -100,7 +100,7 @@ public class FilterHelpTests : BunitContext
                 .Select(p => p.TextContent)),
             @"\s+", " ");
 
-    // SPEC-filtering §8 (halheinrich/backgammon#440, #423): a cube decision
+    // SPEC-filtering §8 (halheinrich/backgammon#440, halheinrich/backgammon#423): a cube decision
     // holds the doubler's decision and, where a double was offered, the
     // taker's. The players section says which a listed name admits, in the
     // ruling's terms; each test pins one statement, so a reword that keeps the
@@ -121,7 +121,7 @@ public class FilterHelpTests : BunitContext
         Assert.Contains("never admits the opponent's decision not to double", prose);
     }
 
-    // The unanswered double (Hal, 2026-10-26, #440): the responding player's
+    // The unanswered double (Hal, 2026-10-26, halheinrich/backgammon#440): the responding player's
     // name admits it, and it is not presented as a take or a pass.
     [Fact]
     public void PlayersSection_StatesThatADoubleWithNoResponseRecordedIsStillAdmittedByTheRespondersName()
