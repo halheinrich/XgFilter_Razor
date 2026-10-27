@@ -103,8 +103,9 @@ public class FilterHelpTests : BunitContext
     // SPEC-filtering §8 (halheinrich/backgammon#440, halheinrich/backgammon#423): a cube decision
     // holds the doubler's decision and, where a double was offered, the
     // taker's. The players section says which a listed name admits, in the
-    // ruling's terms; each test pins one statement, so a reword that keeps the
-    // meaning stays green.
+    // ruling's terms; each test pins one statement. The pins are literal
+    // clauses, each keeping who, condition and outcome together: they survive
+    // a reflow and some rephrasing, not every reword that keeps the meaning.
     [Fact]
     public void PlayersSection_StatesThatAListedNameAdmitsATakeOrAPass()
     {
@@ -128,12 +129,26 @@ public class FilterHelpTests : BunitContext
     {
         var prose = SectionProse(FilterHelp.PlayersAnchorId);
 
-        Assert.Contains(
-            "A double offered to the listed player with no take or pass recorded, such as one the opponent answered by resigning, is still admitted by the listed player's name",
+        Assert.Matches(
+            @"with no take or pass recorded[^.]*, is still admitted by the listed player's name",
             prose);
         Assert.DoesNotMatch(
             @"resign\w*[^.]*\b(is|as|counts as|treated as|read as) an? (take|pass)\b",
             prose);
+    }
+
+    // The player who answers a double by resigning is the one offered it, so
+    // the clause naming resignation names that player — not the doubler, who
+    // is the listed player's opponent.
+    [Fact]
+    public void PlayersSection_StatesThatThePlayerOfferedTheDoubleIsTheOneWhoResigned()
+    {
+        var prose = SectionProse(FilterHelp.PlayersAnchorId);
+
+        Assert.Matches(
+            @"(the listed player|the player offered the double) answered by resigning",
+            prose);
+        Assert.DoesNotMatch(@"opponent answered by resigning", prose);
     }
 
     [Fact]
@@ -159,7 +174,7 @@ public class FilterHelpTests : BunitContext
     {
         var prose = SectionProse(FilterHelp.ErrorRangeAnchorId);
 
-        Assert.Contains("With no players listed, it judges the player on roll's error", prose);
+        Assert.Matches(@"With no players listed,[^.]*judges the player on roll's error", prose);
     }
 
     [Fact]
@@ -167,8 +182,8 @@ public class FilterHelpTests : BunitContext
     {
         var prose = SectionProse(FilterHelp.ErrorRangeAnchorId);
 
-        Assert.Contains(
-            "With both players of a match listed, a decision passes when either one's error is in range",
+        Assert.Matches(
+            @"With both players of a match listed,[^.]*when either one's error is in range",
             prose);
     }
 
@@ -178,8 +193,8 @@ public class FilterHelpTests : BunitContext
         var prose = SectionProse(FilterHelp.ErrorRangeAnchorId);
 
         Assert.Contains("a decision passes only through an error it has", prose);
-        Assert.Contains(
-            "A double with no take error, neither recorded nor supplied by the analysis, never satisfies a range through the player who was offered it",
+        Assert.Matches(
+            @"no take error[^.;]*never satisfies a range through the player who was offered it",
             prose);
         Assert.Contains("a listed doubler can still qualify through the doubling error", prose);
     }
