@@ -72,8 +72,7 @@ public abstract class NamedDocumentStore<TValue, TSelf>
 
     // Staleness key: bumped by every LoadAsync and Reset, so an in-flight read
     // superseded by a newer transition discards its outcome instead of
-    // clobbering the newer context. The producer edition of BgQuiz's
-    // PickGeneration discipline — defensive insurance on a single-threaded
+    // clobbering the newer context. Defensive insurance on a single-threaded
     // sync context, not a live race.
     private int _loadVersion;
 

@@ -17,7 +17,7 @@ namespace XgFilter_Razor;
 /// <para>
 /// <b>What is declared, and why.</b> <see cref="string"/>[] only. The filter
 /// selection itself never passes through this context: its shape is
-/// XgFilter_Lib's, and the panel round-trips it through that library's own
+/// XgFilter_Lib's, and <see cref="FilterSetup"/> round-trips it through that library's own
 /// document trio (<c>FilterConfig.ToJson</c> / <c>TryFromJson</c>) without
 /// naming it to a serializer. The row set is the exception because its shape
 /// belongs to no other party — it is this project's view-state.

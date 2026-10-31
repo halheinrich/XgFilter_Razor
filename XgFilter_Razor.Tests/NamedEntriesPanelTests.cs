@@ -415,9 +415,11 @@ public class NamedEntriesPanelTests : BunitContext
     }
 
     // The region is a permanent fixture that fills and empties; only its
-    // content moves. A region created in the same render that fills it is
-    // announced unreliably, so its presence before any load is the contract —
-    // as is role="status", the polite (never assertive) live-region idiom.
+    // content moves. Its presence before any load is the contract, on the
+    // rationale in this repo's 997ad08 that a region created in the render
+    // that fills it is announced unreliably; no screen reader has been run
+    // against it (halheinrich/backgammon#249). So is role="status", the polite
+    // (never assertive) live-region idiom.
     [Fact]
     public async Task LoadConfirmation_LivesInAPersistentPoliteRegion()
     {
@@ -580,7 +582,8 @@ public class NamedEntriesPanelTests : BunitContext
 
     // The region announces; the box must not. A role or a live-region
     // attribute anywhere on the box or under it would nest a second live
-    // region inside the standing one — announced twice by some screen readers.
+    // region inside the standing one. That the nesting risks a double
+    // announcement is an assumption, untested with a screen reader.
     [Fact]
     public async Task LoadConfirmation_AnnouncesNothingOfItsOwn_TheStandingRegionDoes()
     {

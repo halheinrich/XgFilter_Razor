@@ -43,10 +43,9 @@ public readonly record struct FilterSourceToken
     private FilterSourceToken(string value) => _value = value;
 
     /// <summary>
-    /// Mint a token from a monotonic generation counter — the
-    /// <c>PickedProblemFolder.PickGeneration</c> idiom, where every pick (and
-    /// every clear) bumps the counter so ending a setup expires stale answers
-    /// by construction.
+    /// Mint a token from a monotonic generation counter, as BgQuiz counts its
+    /// folder setups, where every setup bumps the counter, so that ending one
+    /// expires stale answers by construction.
     /// </summary>
     /// <param name="generation">The host's current generation number.</param>
     /// <returns>A token equal to exactly the tokens minted from the same generation.</returns>

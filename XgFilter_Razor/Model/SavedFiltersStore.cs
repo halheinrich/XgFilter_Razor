@@ -18,7 +18,7 @@ using XgFilter_Lib.Filtering;
 /// <see cref="NamedDocumentStore{TValue, TSelf}.Reset"/>), degrade-never-block,
 /// preserve-on-corrupt, write-failure-keeps-memory, the load-version staleness
 /// guard, and the two-name migration rule. The sibling document the mix-saves
-/// arc queues is another eleven-line specialization beside this one, not a
+/// arc queues is another specialization this small beside this one, not a
 /// second copy of any of that.
 /// </para>
 /// </summary>

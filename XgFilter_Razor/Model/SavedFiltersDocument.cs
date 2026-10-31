@@ -21,8 +21,8 @@ namespace XgFilter_Razor;
 ///
 /// <para>
 /// <b>Why the constants are <c>public</c> — deliberately unlike the panel's
-/// storage keys.</b> <c>FilterPanel.ConfigKey</c> / <c>DisclosureKey</c> are
-/// <c>internal</c> because no consumer may know or depend on them. The shared
+/// storage keys.</b> <c>FilterStorage</c>'s keys are <c>internal</c> because
+/// no consumer may know or depend on them. The shared
 /// file name is the opposite kind of fact: it is user-facing copy — every
 /// host's help and the composite's degrade notices must name the file the
 /// user can find in their folder — so one public source is the SSOT move,

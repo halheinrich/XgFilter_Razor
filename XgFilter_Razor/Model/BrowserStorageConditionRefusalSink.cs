@@ -29,10 +29,9 @@ namespace XgFilter_Razor;
 /// <para>
 /// <b>The occurrence is recorded first, and a failing logger cannot stop it.</b>
 /// The sink contract lets an exception propagate out of the surface's
-/// operation, and this is the one place the adapter could throw. The
-/// condition is told before the log call, and a failure of that call is
-/// contained, so a throwing logging provider can keep neither the occurrence
-/// nor the surface's operation from completing.
+/// operation. The condition is told before the log call, and a failure of
+/// that call is contained, so a throwing logging provider can keep neither
+/// the occurrence nor the surface's operation from completing.
 /// </para>
 /// <para>
 /// <b>App-scoped, like the condition it feeds</b>, so a refusal that arrives

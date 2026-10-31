@@ -750,17 +750,20 @@
                        cause: TryParse reports none, and a list of causes would be a second
                        copy of the lib's rules. The borne-off names render from
                        CheckerLocation's own canonical spelling, never as literals (see
-                       Pitfalls); the example tokens are literal and pinned to parse. How the
+                       Pitfalls). The example tokens are literal. The placeholder is pinned
+                       to parse and to hold a range; the hint's "E.g." list is not parsed by
+                       any test, only the ruling's two examples below are. How the
                        opponent's at least n and at most n are written is Hal's ruling on
                        halheinrich/backgammon#275 (2026-09-25), stated here and in FilterHelp
                        alike with the ruling's own two examples.
 
                        Named by reference rather than from a label: the row's header
                        button already carries the facet's name, so aria-labelledby points
-                       at it and aria-describedby points at the hint. The wrapper below is
-                       a plain container now — its `for` is gone, because a label whose
-                       text is the hint would have made the hint the field's name, which
-                       is the lie this replaces. This was the panel's only named input
+                       at it and aria-describedby points at the hint. The wrapper below
+                       has no `for`, because a label whose text is the hint would have
+                       made the hint the field's name, which is the lie this replaces
+                       (halheinrich/backgammon#238 tracks the bare label left behind).
+                       This was the panel's only named input
                        until halheinrich/backgammon#196 made the pair of references the
                        rule for every box the user types into; it is the
                        precedent the others follow, not a special case. *@

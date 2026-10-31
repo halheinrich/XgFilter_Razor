@@ -155,15 +155,17 @@
            composite's outcome notices use, and an implicitly polite live
            region.
            The region itself is rendered unconditionally and only its content
-           swaps: a live region that first appears in the very render that
-           fills it is announced unreliably across screen readers, and this
-           one fills and empties repeatedly through a session.
+           swaps, and it fills and empties repeatedly through a session. That
+           follows the rationale in this repo's 997ad08, that a region created
+           in the render that fills it is announced unreliably; no screen
+           reader has been run against it (halheinrich/backgammon#249).
 
            So the region announces and the box inside it must not: it renders
            through the shared Notice as ByEnclosingRegion, which puts no role
-           and no live-region attribute on any element of the box. A
-           self-announcing notice here would be one live region nested in
-           another — announced twice by some screen readers.
+           and no live-region attribute on any element of the box, so no live
+           region is nested in another. That the nesting risks a double
+           announcement is an assumption: see BgUiPrimitives_Razor's
+           INSTRUCTIONS.md, "Who announces, and what the live region holds".
 
            An event notice, so dismissible (the umbrella's SPEC-notices.md).
            The occurrence is one accepted load, and this panel owns it outright:
